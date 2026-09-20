@@ -235,8 +235,10 @@ One-click installation script that downloads pre-built binaries from GitHub Rele
 #### Installation Steps
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/h614626370-del/sub2api-installer/main/install.sh | sudo bash
 ```
+
+The bootstrap installer securely prompts for a read-only GitHub token used to access the private repository and releases.
 
 The script will:
 1. Detect your system architecture
@@ -285,7 +287,7 @@ sudo journalctl -u sub2api -f
 sudo systemctl restart sub2api
 
 # Uninstall
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -fsSL https://raw.githubusercontent.com/h614626370-del/sub2api-installer/main/install.sh | sudo bash -s -- uninstall -y
 ```
 
 ---

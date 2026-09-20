@@ -45,6 +45,7 @@ func systemUpdateContext(ctx context.Context) (context.Context, context.CancelFu
 
 type systemUpdateService interface {
 	CheckUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
+	CheckCustomUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
 	PerformUpdate(ctx context.Context) error
 	Rollback() error
 	ListRollbackVersions(ctx context.Context) ([]service.RollbackVersion, error)
@@ -80,6 +81,18 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 	response.Success(c, info)
 }
 
+// CheckCustomUpdates checks the customized repository used for installation.
+// GET /api/v1/admin/system/check-custom-updates
+func (h *SystemHandler) CheckCustomUpdates(c *gin.Context) {
+	force := c.Query("force") == "true"
+	info, err := h.updateSvc.CheckCustomUpdate(c.Request.Context(), force)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, info)
+}
+
 // PerformUpdate downloads and applies the update
 // POST /api/v1/admin/system/update
 func (h *SystemHandler) PerformUpdate(c *gin.Context) {
@@ -101,7 +114,7 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 
 		if err := h.updateSvc.PerformUpdate(updateCtx); err != nil {
 			if errors.Is(err, service.ErrNoUpdateAvailable) {
-				info, checkErr := h.updateSvc.CheckUpdate(updateCtx, false)
+				info, checkErr := h.updateSvc.CheckCustomUpdate(updateCtx, false)
 				if checkErr != nil {
 					releaseReason = "SYSTEM_UPDATE_FAILED"
 					return nil, checkErr

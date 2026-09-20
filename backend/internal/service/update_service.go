@@ -30,7 +30,11 @@ var (
 const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
-	githubRepo     = "Wei-Shaw/sub2api"
+
+	officialGitHubRepo = "Wei-Shaw/sub2api"
+	customGitHubRepo   = "h614626370-del/sub2api"
+	officialCacheScope = "official"
+	customCacheScope   = "custom"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -47,8 +51,8 @@ const (
 
 // UpdateCache defines cache operations for update service
 type UpdateCache interface {
-	GetUpdateInfo(ctx context.Context) (string, error)
-	SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error
+	GetUpdateInfo(ctx context.Context, scope string) (string, error)
+	SetUpdateInfo(ctx context.Context, scope, data string, ttl time.Duration) error
 }
 
 // GitHubReleaseClient 获取 GitHub release 信息的接口
@@ -125,24 +129,34 @@ type RollbackVersion struct {
 
 type GitHubAsset struct {
 	Name               string `json:"name"`
+	APIURL             string `json:"url"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Size               int64  `json:"size"`
 }
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	return s.checkUpdate(ctx, force, officialGitHubRepo, officialCacheScope)
+}
+
+// CheckCustomUpdate checks the customized repository used for in-place updates.
+func (s *UpdateService) CheckCustomUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	return s.checkUpdate(ctx, force, customGitHubRepo, customCacheScope)
+}
+
+func (s *UpdateService) checkUpdate(ctx context.Context, force bool, repo, cacheScope string) (*UpdateInfo, error) {
 	// Try cache first
 	if !force {
-		if cached, err := s.getFromCache(ctx); err == nil && cached != nil {
+		if cached, err := s.getFromCache(ctx, cacheScope); err == nil && cached != nil {
 			return cached, nil
 		}
 	}
 
 	// Fetch from GitHub
-	info, err := s.fetchLatestRelease(ctx)
+	info, err := s.fetchLatestRelease(ctx, repo)
 	if err != nil {
 		// Return cached on error
-		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
+		if cached, cacheErr := s.getFromCache(ctx, cacheScope); cacheErr == nil && cached != nil {
 			cached.Warning = "Using cached data: " + err.Error()
 			return cached, nil
 		}
@@ -156,14 +170,14 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 	}
 
 	// Cache result
-	s.saveToCache(ctx, info)
+	s.saveToCache(ctx, cacheScope, info)
 	return info, nil
 }
 
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
-	info, err := s.CheckUpdate(ctx, true)
+	info, err := s.CheckCustomUpdate(ctx, true)
 	if err != nil {
 		return err
 	}
@@ -182,11 +196,13 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 	// Find matching archive and checksum for current platform
 	archiveName := s.getArchiveName()
 	var downloadURL string
+	var downloadFileName string
 	var checksumURL string
 
 	for _, asset := range releaseAssets {
 		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
 			downloadURL = asset.DownloadURL
+			downloadFileName = filepath.Base(asset.Name)
 		}
 		if asset.Name == "checksums.txt" {
 			checksumURL = asset.DownloadURL
@@ -195,6 +211,9 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 
 	if downloadURL == "" {
 		return fmt.Errorf("no compatible release found for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	if downloadFileName == "" || downloadFileName == "." {
+		return fmt.Errorf("release asset has an invalid file name")
 	}
 
 	// SECURITY: Validate download URL is from trusted domain
@@ -228,7 +247,7 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Download archive
-	archivePath := filepath.Join(tempDir, filepath.Base(downloadURL))
+	archivePath := filepath.Join(tempDir, downloadFileName)
 	if err := s.downloadFile(ctx, downloadURL, archivePath); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
@@ -352,7 +371,7 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 	for i, a := range match.Assets {
 		assets[i] = Asset{
 			Name:        a.Name,
-			DownloadURL: a.BrowserDownloadURL,
+			DownloadURL: releaseAssetDownloadURL(a),
 			Size:        a.Size,
 		}
 	}
@@ -363,7 +382,7 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 // fetchRollbackCandidates fetches recent releases and keeps the newest
 // maxRollbackVersions entries strictly older than the current version.
 func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubRelease, error) {
-	releases, err := s.githubClient.FetchRecentReleases(ctx, githubRepo, rollbackFetchPageSize)
+	releases, err := s.githubClient.FetchRecentReleases(ctx, customGitHubRepo, rollbackFetchPageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -399,8 +418,8 @@ func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubR
 	return candidates, nil
 }
 
-func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, error) {
-	release, err := s.githubClient.FetchLatestRelease(ctx, githubRepo)
+func (s *UpdateService) fetchLatestRelease(ctx context.Context, repo string) (*UpdateInfo, error) {
+	release, err := s.githubClient.FetchLatestRelease(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +430,7 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 	for i, a := range release.Assets {
 		assets[i] = Asset{
 			Name:        a.Name,
-			DownloadURL: a.BrowserDownloadURL,
+			DownloadURL: releaseAssetDownloadURL(a),
 			Size:        a.Size,
 		}
 	}
@@ -430,6 +449,13 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, er
 		Cached:    false,
 		BuildType: s.buildType,
 	}, nil
+}
+
+func releaseAssetDownloadURL(asset GitHubAsset) string {
+	if apiURL := strings.TrimSpace(asset.APIURL); apiURL != "" {
+		return apiURL
+	}
+	return strings.TrimSpace(asset.BrowserDownloadURL)
 }
 
 func (s *UpdateService) downloadFile(ctx context.Context, downloadURL, dest string) error {
@@ -593,8 +619,8 @@ func (s *UpdateService) extractBinary(archivePath, destPath string) error {
 	return out.Close()
 }
 
-func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
-	data, err := s.cache.GetUpdateInfo(ctx)
+func (s *UpdateService) getFromCache(ctx context.Context, scope string) (*UpdateInfo, error) {
+	data, err := s.cache.GetUpdateInfo(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -622,7 +648,7 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 	}, nil
 }
 
-func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
+func (s *UpdateService) saveToCache(ctx context.Context, scope string, info *UpdateInfo) {
 	cacheData := struct {
 		Latest      string       `json:"latest"`
 		ReleaseInfo *ReleaseInfo `json:"release_info"`
@@ -634,7 +660,7 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 	}
 
 	data, _ := json.Marshal(cacheData)
-	_ = s.cache.SetUpdateInfo(ctx, string(data), time.Duration(updateCacheTTL)*time.Second)
+	_ = s.cache.SetUpdateInfo(ctx, scope, string(data), time.Duration(updateCacheTTL)*time.Second)
 }
 
 // compareVersions compares two semantic versions

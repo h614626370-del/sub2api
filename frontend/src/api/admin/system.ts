@@ -40,6 +40,17 @@ export async function checkUpdates(force = false): Promise<VersionInfo> {
   return data
 }
 
+/**
+ * Check the customized repository used for in-place updates.
+ * @param force - Force refresh from GitHub API
+ */
+export async function checkCustomUpdates(force = false): Promise<VersionInfo> {
+  const { data } = await apiClient.get<VersionInfo>('/admin/system/check-custom-updates', {
+    params: force ? { force: 'true' } : undefined
+  })
+  return data
+}
+
 export interface UpdateResult {
   message: string
   need_restart: boolean
@@ -104,6 +115,7 @@ export async function restartService(): Promise<{ message: string }> {
 export const systemAPI = {
   getVersion,
   checkUpdates,
+  checkCustomUpdates,
   performUpdate,
   getRollbackVersions,
   rollback,

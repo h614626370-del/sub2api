@@ -260,7 +260,7 @@ docker compose down -v
 | `ADMIN_EMAIL` | No | `admin@sub2api.local` | Admin email |
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
-| `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for `api.github.com` release checks only; asset downloads remain anonymous. |
+| `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for GitHub Release checks and in-app asset downloads. Required when the update repository is private. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_CLIENT_SECRET` | No | *(builtin)* | Google OAuth client secret (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_SCOPES` | No | *(default)* | OAuth scopes (Gemini OAuth) |
@@ -398,8 +398,10 @@ For production servers using systemd.
 ### One-Line Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/h614626370-del/sub2api-installer/main/install.sh | sudo bash
 ```
+
+The public bootstrap securely prompts for a read-only GitHub token, downloads this private repository's installer, and persists the token for future in-app updates.
 
 ### Manual Installation
 

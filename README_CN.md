@@ -261,8 +261,10 @@ fast_mode = true
 #### 安装步骤
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/h614626370-del/sub2api-installer/main/install.sh | sudo bash
 ```
+
+安装器会隐藏提示输入只读 GitHub Token，用于访问私有主仓库和 Release。
 
 脚本会自动：
 1. 检测系统架构
@@ -311,7 +313,7 @@ sudo journalctl -u sub2api -f
 sudo systemctl restart sub2api
 
 # 卸载
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -fsSL https://raw.githubusercontent.com/h614626370-del/sub2api-installer/main/install.sh | sudo bash -s -- uninstall -y
 ```
 
 ---
