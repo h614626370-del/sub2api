@@ -113,6 +113,27 @@ func TestUpdateServiceUsesSeparateOfficialAndCustomSources(t *testing.T) {
 	require.NotEqual(t, cache.data[officialCacheScope], cache.data[customCacheScope])
 }
 
+func TestCompareVersionsSupportsCustomRevisionSegment(t *testing.T) {
+	tests := []struct {
+		name           string
+		current        string
+		latest         string
+		wantComparison int
+	}{
+		{name: "newer custom revision", current: "0.2.7.1", latest: "0.2.7.2", wantComparison: -1},
+		{name: "older custom revision", current: "v0.2.7.3", latest: "v0.2.7.2", wantComparison: 1},
+		{name: "official version wins", current: "0.2.7.99", latest: "0.2.8", wantComparison: -1},
+		{name: "missing custom revision equals zero", current: "0.2.7", latest: "0.2.7.0", wantComparison: 0},
+		{name: "multi digit custom revision", current: "0.2.7.9", latest: "0.2.7.10", wantComparison: -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.wantComparison, compareVersions(tt.current, tt.latest))
+		})
+	}
+}
+
 func TestReleaseAssetDownloadURLFallsBackToBrowserURL(t *testing.T) {
 	asset := GitHubAsset{BrowserDownloadURL: "https://github.com/test/repo/releases/download/v1/asset"}
 	require.Equal(t, asset.BrowserDownloadURL, releaseAssetDownloadURL(asset))
