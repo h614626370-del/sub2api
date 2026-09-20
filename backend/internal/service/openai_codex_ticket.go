@@ -495,7 +495,7 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 	probed := 0
 	for i := range accounts {
 		account := accounts[i]
-		if account.Status != StatusActive || !isOpenAICodexTicketAccount(&account) {
+		if !isOpenAICodexTicketHarvestAccount(&account) {
 			continue
 		}
 		for _, model := range cfg.Models {
@@ -661,6 +661,12 @@ func IsMaskedProxyURL(raw string) bool {
 // instead of imposing a gate for a key the harvester never populates.
 func isOpenAICodexTicketAccount(account *Account) bool {
 	return account != nil && account.IsOpenAIOAuthLike() && !account.IsShadow()
+}
+
+// Tickets are only useful for accounts that can currently receive traffic.
+// Group membership is checked separately because it is not part of IsSchedulable.
+func isOpenAICodexTicketHarvestAccount(account *Account) bool {
+	return isOpenAICodexTicketAccount(account) && account.IsSchedulable() && len(account.GroupIDs) > 0
 }
 
 // IsOpenAICodexTicketPrivateExtraKey also covers the retired account-level proxy

@@ -26,6 +26,9 @@ func ticketTestAccount(id int64) *Account {
 		ID:          id,
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		GroupIDs:    []int64{1},
 		Credentials: map[string]any{"access_token": "tok", "chatgpt_account_id": "acc-1"},
 	}
 }
@@ -323,6 +326,32 @@ func TestOpenAICodexTicketStatuses_ReportsRemainingTTL(t *testing.T) {
 func TestExtractOpenAICodexTicketModel(t *testing.T) {
 	require.Equal(t, "gpt-6-astra", extractOpenAICodexTicketModel([]byte(`{"model":"gpt-6-astra"}`)))
 	require.Empty(t, extractOpenAICodexTicketModel([]byte(`{}`)))
+}
+
+func TestOpenAICodexTicketHarvestAccountRequiresSchedulableGroupedAccount(t *testing.T) {
+	future := time.Now().Add(time.Hour)
+
+	tests := []struct {
+		name   string
+		mutate func(*Account)
+		want   bool
+	}{
+		{name: "eligible", want: true},
+		{name: "manually unschedulable", mutate: func(account *Account) { account.Schedulable = false }},
+		{name: "temporarily unschedulable", mutate: func(account *Account) { account.TempUnschedulableUntil = &future }},
+		{name: "rate limit cooldown", mutate: func(account *Account) { account.RateLimitResetAt = &future }},
+		{name: "without group", mutate: func(account *Account) { account.GroupIDs = nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := ticketTestAccount(41)
+			if tt.mutate != nil {
+				tt.mutate(account)
+			}
+			require.Equal(t, tt.want, isOpenAICodexTicketHarvestAccount(account))
+		})
+	}
 }
 
 // These stubs exercise the real continuous refresh path with both default models
