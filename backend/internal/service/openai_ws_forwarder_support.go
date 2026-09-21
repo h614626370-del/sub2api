@@ -456,6 +456,11 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 ) (*AccountSelectionResult, error) {
 	// 分组利润控制：公共入口装门，保证不经 selectAccountWithScheduler
 	// 的调用方也无法绕过利润准入（scheduler 内部路径已在唯一调度入口装门）。
+	var routeErr error
+	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, requestedModel, PlatformOpenAI)
+	if routeErr != nil {
+		return nil, routeErr
+	}
 	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	return s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, "", requireCompact)
 }
@@ -571,6 +576,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
+	if (openAIAstraAccountGroup(ctx) > 0 || len(account.GroupIDs) > 0 || len(account.AccountGroups) > 0) && !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
+		return 0, nil, "", nil
+	}
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
 		return 0, nil, "", nil
 	}
@@ -600,7 +608,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
-		if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
+		if !s.openAIAccountMatchesRequestGroup(ctx, latest, groupID) {
 			return 0, nil, "", nil
 		}
 		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {

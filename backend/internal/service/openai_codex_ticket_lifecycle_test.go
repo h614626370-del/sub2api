@@ -20,6 +20,14 @@ type codexTicketFuncUpstream struct {
 	do func(*http.Request) (*http.Response, error)
 }
 
+type codexTicketProxyProberStub struct {
+	ip string
+}
+
+func (p codexTicketProxyProberStub) ProbeProxy(context.Context, string) (*ProxyExitInfo, int64, error) {
+	return &ProxyExitInfo{IP: p.ip}, 1, nil
+}
+
 func (u *codexTicketFuncUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	return u.do(req)
 }
@@ -66,6 +74,22 @@ func TestCodexTicketProbeBypassesPluginDuringWiring(t *testing.T) {
 	}
 	wg.Wait()
 	require.Equal(t, int64(20), calls.Load())
+}
+
+func TestCodexTicketProbeResolvesEgressIPWhenUpstreamOmitsIt(t *testing.T) {
+	upstream := &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
+		return codexTicketResponse(), nil
+	}}
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{Enabled: true}, upstream)
+	svc.SetCodexTicketProxyProber(codexTicketProxyProberStub{ip: "203.0.113.44"})
+
+	result, err := svc.fireOpenAICodexTicketProbeDetailed(
+		context.Background(), ticketTestAccount(41), "test-token", "gpt-6-astra",
+		"http://proxy.example.com:8080", time.Second,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "203.0.113.44", result.EgressIP)
+	require.Equal(t, fakeCodexTicketState(292), result.ResponseHeaders[openAICodexTurnStateHeader])
 }
 
 type codexTicketLifecycleRepo struct {

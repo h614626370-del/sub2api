@@ -998,6 +998,7 @@ export default {
         typeNotEditable: 'Billing type cannot be changed after group creation.',
         standard: 'Standard (Balance)',
         subscription: 'Subscription (Quota)',
+        special: 'Special (Internal Account Pool)',
         dailyLimit: 'Daily Limit (USD)',
         weeklyLimit: 'Weekly Limit (USD)',
         monthlyLimit: 'Monthly Limit (USD)',

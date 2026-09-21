@@ -442,34 +442,36 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	accountRepo           AccountRepository
-	usageLogRepo          UsageLogRepository
-	usageBillingRepo      UsageBillingRepository
-	userRepo              UserRepository
-	userSubRepo           UserSubscriptionRepository
-	cache                 GatewayCache
-	cfg                   *config.Config
-	codexDetector         CodexClientRestrictionDetector
-	schedulerSnapshot     *SchedulerSnapshotService
-	concurrencyService    *ConcurrencyService
-	billingService        *BillingService
-	rateLimitService      *RateLimitService
-	billingCacheService   *BillingCacheService
-	userGroupRateResolver *userGroupRateResolver
-	httpUpstream          HTTPUpstream
-	pluginManager         *PluginManager
-	deferredService       *DeferredService
-	openAITokenProvider   *OpenAITokenProvider
-	grokTokenProvider     *GrokTokenProvider
-	toolCorrector         *CodexToolCorrector
-	openaiWSResolver      OpenAIWSProtocolResolver
-	resolver              *ModelPricingResolver
-	channelService        *ChannelService
-	balanceNotifyService  *BalanceNotifyService
-	settingService        *SettingService
-	userPlatformQuotaRepo UserPlatformQuotaRepository
-	liveAttestation       liveattestation.Provider
-	liveAttestationCipher SecretEncryptor
+	accountRepo            AccountRepository
+	usageLogRepo           UsageLogRepository
+	usageBillingRepo       UsageBillingRepository
+	userRepo               UserRepository
+	userSubRepo            UserSubscriptionRepository
+	cache                  GatewayCache
+	cfg                    *config.Config
+	codexDetector          CodexClientRestrictionDetector
+	schedulerSnapshot      *SchedulerSnapshotService
+	concurrencyService     *ConcurrencyService
+	billingService         *BillingService
+	rateLimitService       *RateLimitService
+	billingCacheService    *BillingCacheService
+	userGroupRateResolver  *userGroupRateResolver
+	httpUpstream           HTTPUpstream
+	pluginManager          *PluginManager
+	deferredService        *DeferredService
+	openAITokenProvider    *OpenAITokenProvider
+	grokTokenProvider      *GrokTokenProvider
+	toolCorrector          *CodexToolCorrector
+	openaiWSResolver       OpenAIWSProtocolResolver
+	resolver               *ModelPricingResolver
+	channelService         *ChannelService
+	balanceNotifyService   *BalanceNotifyService
+	settingService         *SettingService
+	userPlatformQuotaRepo  UserPlatformQuotaRepository
+	codexTicketAuditRepo   OpenAICodexTicketAuditRepository
+	codexTicketProxyProber ProxyExitInfoProber
+	liveAttestation        liveattestation.Provider
+	liveAttestationCipher  SecretEncryptor
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once
@@ -515,6 +517,23 @@ type OpenAIGatewayService struct {
 	openaiCodexTicketCancel      context.CancelFunc
 	openaiCodexTicketDone        chan struct{}
 	openaiCodexTicketStopped     bool
+}
+
+// SetCodexTicketAuditRepository attaches optional persistence for probe diagnostics.
+// Keeping this optional preserves lightweight unit-test construction and does not
+// make audit storage part of the ticket success path.
+func (s *OpenAIGatewayService) SetCodexTicketAuditRepository(repo OpenAICodexTicketAuditRepository) {
+	if s != nil {
+		s.codexTicketAuditRepo = repo
+	}
+}
+
+// SetCodexTicketProxyProber attaches the shared proxy exit-IP probe used by
+// the ticket audit path when the upstream response does not expose an IP.
+func (s *OpenAIGatewayService) SetCodexTicketProxyProber(prober ProxyExitInfoProber) {
+	if s != nil {
+		s.codexTicketProxyProber = prober
+	}
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

@@ -542,7 +542,7 @@ export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 
 
 export type VideoModelPrices = Record<string, Record<string, number>>
 
-export type SubscriptionType = 'standard' | 'subscription'
+export type SubscriptionType = 'standard' | 'subscription' | 'special'
 
 export interface OpenAIMessagesDispatchModelConfig {
   opus_mapped_model?: string
@@ -1171,6 +1171,7 @@ export interface Account {
   codex_turn_tickets?: Array<{
     model: string
     length?: number
+    attempts?: number
     ready: boolean
     remaining_seconds: number
     blocked: boolean

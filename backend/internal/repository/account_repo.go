@@ -2738,6 +2738,34 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	return nil
 }
 
+// RemoveExtraKeys deletes selected JSONB extra fields without replacing the
+// rest of the account metadata. It is used for server-managed ephemeral state
+// such as Codex ticket material.
+func (r *accountRepository) RemoveExtraKeys(ctx context.Context, id int64, keys []string) error {
+	if r == nil || r.sql == nil || len(keys) == 0 {
+		return nil
+	}
+	result, err := r.sql.ExecContext(ctx, `
+		UPDATE accounts
+		SET extra = COALESCE(extra, '{}'::jsonb) - $1::text[], updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL
+	`, pq.Array(keys), id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	// Ticket fields are scheduler-neutral, but the runtime account snapshot
+	// still needs to see the deletion immediately.
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return nil
+}
+
 // UpdateUpstreamBillingProbeSnapshot stores a probe result only while the
 // network identity used by that probe is still current.
 func (r *accountRepository) UpdateUpstreamBillingProbeSnapshot(

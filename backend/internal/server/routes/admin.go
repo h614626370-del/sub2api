@@ -130,6 +130,17 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+		registerCodexTicketRoutes(admin, h)
+	}
+}
+
+func registerCodexTicketRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	tickets := admin.Group("/codex-ticket")
+	{
+		tickets.GET("/audits", h.Admin.CodexTicket.ListAudits)
+		tickets.GET("/audits/:id", h.Admin.CodexTicket.GetAudit)
+		tickets.POST("/audits/clear", h.Admin.CodexTicket.ClearAudits)
+		tickets.POST("/discard", h.Admin.CodexTicket.DiscardTickets)
 	}
 }
 

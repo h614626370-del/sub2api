@@ -63,6 +63,7 @@ var probeURLs = []struct {
 	url    string
 	parser string
 }{
+	{"https://chatgpt.com/cdn-cgi/trace", "chatgpt-trace"},
 	{"http://ip-api.com/json/?lang=zh-CN", "ip-api"},
 	{"http://api64.ipify.org?format=json", "ipify"},
 }
@@ -87,6 +88,7 @@ func (s *proxyProbeService) ProbeProxy(ctx context.Context, proxyURL string) (*s
 		InsecureSkipVerify: s.insecureSkipVerify,
 		ValidateResolvedIP: s.validateResolvedIP,
 		AllowPrivateHosts:  s.allowPrivateHosts,
+		DisableKeepAlives:  true,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create proxy client: %w", err)

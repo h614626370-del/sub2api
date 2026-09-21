@@ -413,6 +413,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		subscriptionType = SubscriptionTypeStandard
 	}
 
+	if subscriptionType == SubscriptionTypeSpecial && platform != PlatformOpenAI {
+		return nil, infraerrors.BadRequest("INVALID_SPECIAL_GROUP", "特殊分组仅支持 OpenAI 平台")
+	}
+	if subscriptionType == SubscriptionTypeSpecial {
+		input.IsExclusive = true
+	}
+
 	// 限额字段：nil/负数 表示"无限制"，0 表示"不允许用量"，正数表示具体限额
 	dailyLimit := normalizeLimit(input.DailyLimitUSD)
 	weeklyLimit := normalizeLimit(input.WeeklyLimitUSD)
@@ -792,6 +799,15 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.ModelPricing = modelPricing
 	}
 
+	if input.SubscriptionType != "" && input.SubscriptionType != group.SubscriptionType && (group.IsSpecialType() || input.SubscriptionType == SubscriptionTypeSpecial) {
+		return nil, infraerrors.BadRequest("SPECIAL_GROUP_TYPE_IMMUTABLE", "特殊分组类型创建后不能转换，请新建分组")
+	}
+	if group.IsSpecialType() {
+		if group.Platform != PlatformOpenAI {
+			return nil, infraerrors.BadRequest("INVALID_SPECIAL_GROUP", "特殊分组仅支持 OpenAI 平台")
+		}
+		group.IsExclusive = true
+	}
 	// 订阅相关字段
 	if input.SubscriptionType != "" {
 		group.SubscriptionType = input.SubscriptionType
@@ -1346,6 +1362,9 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 		if group.Status != StatusActive {
 			return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
 		}
+		if group.IsSpecialType() {
+			return nil, infraerrors.BadRequest("SPECIAL_GROUP_INTERNAL_ONLY", "特殊分组不能绑定用户 API Key")
+		}
 		// 订阅类型分组：用户须持有该分组的有效订阅才可绑定
 		if group.IsSubscriptionType() {
 			if s.userSubRepo == nil {
@@ -1456,6 +1475,9 @@ func (s *adminServiceImpl) ReplaceUserGroup(ctx context.Context, userID, oldGrou
 	}
 	if newGroup.Status != StatusActive {
 		return nil, infraerrors.BadRequest("GROUP_NOT_ACTIVE", "target group is not active")
+	}
+	if newGroup.IsSpecialType() {
+		return nil, infraerrors.BadRequest("SPECIAL_GROUP_INTERNAL_ONLY", "特殊分组不能作为用户分组")
 	}
 	if !newGroup.IsExclusive {
 		return nil, infraerrors.BadRequest("GROUP_NOT_EXCLUSIVE", "target group is not exclusive")

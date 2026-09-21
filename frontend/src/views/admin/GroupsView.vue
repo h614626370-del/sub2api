@@ -178,7 +178,9 @@
                 ]"
               >
                 {{
-                  row.subscription_type === "subscription"
+                  row.subscription_type === "special"
+                    ? t("admin.groups.subscription.special")
+                    : row.subscription_type === "subscription"
                     ? t("admin.groups.subscription.subscription")
                     : t("admin.groups.subscription.standard")
                 }}
@@ -515,6 +517,7 @@
           }}</label>
           <Select
             v-model="createForm.platform"
+            :disabled="createForm.subscription_type === 'special'"
             :options="platformOptions"
             data-tour="group-form-platform"
             @change="createForm.copy_accounts_from_group_ids = []"
@@ -648,7 +651,7 @@
           v-model:mappings="createForm.reasoning_effort_mappings"
         />
         <div
-          v-if="createForm.subscription_type !== 'subscription'"
+          v-if="createForm.subscription_type === 'standard'"
           data-tour="group-form-exclusive"
         >
           <div class="mb-1.5 flex items-center gap-1">
@@ -2285,7 +2288,7 @@
           v-model:over-limit="editForm.max_reasoning_effort_over_limit"
           v-model:mappings="editForm.reasoning_effort_mappings"
         />
-        <div v-if="editForm.subscription_type !== 'subscription'">
+        <div v-if="editForm.subscription_type === 'standard'">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.form.exclusive") }}
@@ -4656,6 +4659,7 @@ const editStatusOptions = computed(() => [
 const subscriptionTypeOptions = computed(() => [
   { value: "standard", label: t("admin.groups.subscription.standard") },
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
+  { value: "special", label: t("admin.groups.subscription.special") },
 ]);
 
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
@@ -6628,6 +6632,10 @@ const confirmDelete = async () => {
 watch(
   () => createForm.subscription_type,
   (newVal) => {
+    if (newVal === "special") {
+      createForm.platform = "openai";
+      createForm.is_exclusive = true;
+    }
     if (newVal === "subscription") {
       createForm.is_exclusive = true;
       createForm.fallback_group_id_on_invalid_request = null;

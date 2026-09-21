@@ -37,7 +37,14 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	queryGroupID := groupID
 	includeGrouped := false
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+	route, _ := ctx.Value(openAIAstraRouteKey{}).(openAIAstraRoute)
+	if route.err != nil {
+		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
+	}
+	if route.groupID > 0 {
+		// Diagnose the pool that was actually selected, not the billing group.
+		queryGroupID = &route.groupID
+	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		queryGroupID = nil
 		includeGrouped = true
 	}

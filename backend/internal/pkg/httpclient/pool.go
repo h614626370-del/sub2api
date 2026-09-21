@@ -49,9 +49,10 @@ type Options struct {
 	AllowPrivateHosts     bool          // 允许私有地址解析（与 ValidateResolvedIP 一起使用）
 
 	// 可选的连接池参数（不设置则使用默认值）
-	MaxIdleConns        int // 最大空闲连接总数（默认 100）
-	MaxIdleConnsPerHost int // 每主机最大空闲连接（默认 10）
-	MaxConnsPerHost     int // 每主机最大连接数（默认 0 无限制）
+	MaxIdleConns        int  // 最大空闲连接总数（默认 100）
+	MaxIdleConnsPerHost int  // 每主机最大空闲连接（默认 10）
+	MaxConnsPerHost     int  // 每主机最大连接数（默认 0 无限制）
+	DisableKeepAlives   bool // 禁止连接复用，每次请求建立新连接
 }
 
 // sharedClients 存储按配置参数缓存的 http.Client 实例
@@ -121,6 +122,7 @@ func buildTransport(opts Options) (*http.Transport, error) {
 		MaxConnsPerHost:       opts.MaxConnsPerHost, // 0 表示无限制
 		IdleConnTimeout:       defaultIdleConnTimeout,
 		ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
+		DisableKeepAlives:     opts.DisableKeepAlives,
 	}
 
 	if opts.InsecureSkipVerify {
@@ -144,13 +146,14 @@ func buildTransport(opts Options) (*http.Transport, error) {
 }
 
 func buildClientKey(opts Options) string {
-	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%d|%d|%d",
+	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%t|%d|%d|%d",
 		strings.TrimSpace(opts.ProxyURL),
 		opts.Timeout.String(),
 		opts.ResponseHeaderTimeout.String(),
 		opts.InsecureSkipVerify,
 		opts.ValidateResolvedIP,
 		opts.AllowPrivateHosts,
+		opts.DisableKeepAlives,
 		opts.MaxIdleConns,
 		opts.MaxIdleConnsPerHost,
 		opts.MaxConnsPerHost,

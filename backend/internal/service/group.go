@@ -151,6 +151,10 @@ func (g *Group) IsActive() bool {
 	return g.Status == StatusActive
 }
 
+func (g *Group) IsSpecialType() bool {
+	return g != nil && g.SubscriptionType == SubscriptionTypeSpecial
+}
+
 func (g *Group) IsSubscriptionType() bool {
 	return g.SubscriptionType == SubscriptionTypeSubscription
 }

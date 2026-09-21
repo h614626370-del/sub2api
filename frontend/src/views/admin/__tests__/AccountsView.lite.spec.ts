@@ -128,6 +128,8 @@ function mountView(stubActionMenu = true) {
         UpstreamBillingRateCell: true,
         HelpTooltip: true,
         Icon: true,
+        CustomFeaturesPanel: { template: '<div data-test="custom-features-panel" />' },
+        CodexTicketDetailsPanel: { template: '<div data-test="codex-ticket-details-panel" />' },
         Teleport: stubActionMenu
       }
     }
@@ -157,6 +159,27 @@ const fullAccount = {
 }
 
 describe('admin AccountsView lite account list', () => {
+  it('switches between the account list, ticket details, and custom features tabs', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(3)
+    expect(wrapper.find('[data-test="custom-features-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="codex-ticket-details-panel"]').exists()).toBe(false)
+
+    await tabs[1].trigger('click')
+
+    expect(wrapper.find('[data-test="codex-ticket-details-panel"]').exists()).toBe(true)
+    expect(tabs[1].attributes('aria-selected')).toBe('true')
+
+    await tabs[2].trigger('click')
+
+    expect(wrapper.find('[data-test="custom-features-panel"]').exists()).toBe(true)
+    expect(tabs[2].attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     localStorage.clear()
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })

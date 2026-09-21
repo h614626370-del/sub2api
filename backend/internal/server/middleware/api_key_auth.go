@@ -428,6 +428,9 @@ func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
 		return true
 	}
 	group := apiKey.Group
+	if group.IsSpecialType() {
+		return false
+	}
 	if group.IsSubscriptionType() {
 		return true
 	}

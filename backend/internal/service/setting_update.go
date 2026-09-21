@@ -38,7 +38,7 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 // UpdateSettingsOmitting persists system settings, leaving the keys in omitted
 // at their stored value.
 func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) error {
-	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
+	updates, err := s.buildSystemSettingsUpdates(ctx, settings, omitted)
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 // auth-source defaults in a single write, leaving the keys in omitted at their
 // stored value.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, omitted OmittedSettingKeys) error {
-	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
+	updates, err := s.buildSystemSettingsUpdates(ctx, settings, omitted)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 	s.refreshCachedSettings(stored)
 }
 
-func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
+func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings, omittedSets ...OmittedSettingKeys) (map[string]string, error) {
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return nil, err
 	}
@@ -485,6 +485,16 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
+	omitAstra := false
+	if len(omittedSets) > 0 {
+		_, omitAstra = omittedSets[0][SettingKeyOpenAIAstraGroupID]
+	}
+	if !omitAstra {
+		if err := s.validateOpenAIAstraGroup(ctx, settings.OpenAIAstraGroupID); err != nil {
+			return nil, err
+		}
+	}
+	updates[SettingKeyOpenAIAstraGroupID] = strconv.FormatInt(settings.OpenAIAstraGroupID, 10)
 	updates[SettingKeyOpenAICodexTicketEnabled] = strconv.FormatBool(settings.OpenAICodexTicketEnabled)
 	if err := ValidateOpenAICodexTicketHarvestProxyURL(settings.OpenAICodexTicketHarvestProxyURL); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
@@ -744,6 +754,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// 版本号缓存只做失效，不在此重算：生效值还取决于自动同步写入的 synced 键，
 	// 这里没有它的最新值，重算会把同步结果覆盖成陈旧值。
 	s.InvalidateOpenAICodexClientVersionCache()
+	s.invalidateOpenAIAstraGroupCache()
 	s.InvalidateOpenAICodexTicketEnabledCache()
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)

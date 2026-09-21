@@ -1,6 +1,48 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <div class="space-y-6">
+      <div class="border-b border-gray-200 dark:border-dark-700">
+        <nav class="flex gap-6 overflow-x-auto" role="tablist" :aria-label="t('admin.accounts.tabsLabel')">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeAccountTab === 'accounts'"
+            class="border-b-2 px-1 pb-3 text-sm font-medium transition-colors"
+            :class="activeAccountTab === 'accounts'
+              ? 'border-primary-600 text-primary-600 dark:border-primary-400 dark:text-primary-400'
+              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
+            @click="activeAccountTab = 'accounts'"
+          >
+            {{ t('admin.accounts.tabs.accounts') }}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeAccountTab === 'tickets'"
+            class="border-b-2 px-1 pb-3 text-sm font-medium transition-colors"
+            :class="activeAccountTab === 'tickets'
+              ? 'border-primary-600 text-primary-600 dark:border-primary-400 dark:text-primary-400'
+              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
+            @click="activeAccountTab = 'tickets'"
+          >
+            {{ t('admin.accounts.tabs.ticketDetails') }}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeAccountTab === 'custom'"
+            class="border-b-2 px-1 pb-3 text-sm font-medium transition-colors"
+            :class="activeAccountTab === 'custom'
+              ? 'border-primary-600 text-primary-600 dark:border-primary-400 dark:text-primary-400'
+              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
+            @click="activeAccountTab = 'custom'"
+          >
+            {{ t('admin.accounts.tabs.customFeatures') }}
+          </button>
+        </nav>
+      </div>
+
+      <TablePageLayout v-if="activeAccountTab === 'accounts'">
       <template #filters>
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
@@ -449,7 +491,10 @@
         </div>
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
-    </TablePageLayout>
+      </TablePageLayout>
+      <CodexTicketDetailsPanel v-else-if="activeAccountTab === 'tickets'" />
+      <CustomFeaturesPanel v-else />
+    </div>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
@@ -524,6 +569,8 @@ import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
+import CustomFeaturesPanel from '@/components/admin/account/CustomFeaturesPanel.vue'
+import CodexTicketDetailsPanel from '@/components/admin/account/CodexTicketDetailsPanel.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
@@ -537,6 +584,7 @@ import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupSc
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const activeAccountTab = ref<'accounts' | 'tickets' | 'custom'>('accounts')
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])

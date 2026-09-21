@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,21 @@ import (
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
+
+const (
+	openAICodexTicketEgressProbeTimeout = 3 * time.Second
+)
+
+type openAICodexTicketProbeResult struct {
+	State           string
+	Status          int
+	RequestBody     string
+	ResponseHeaders map[string]string
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	Reason          string
+	EgressIP        string
+}
 
 const (
 	openAICodexTicketExtraKeyPrefix  = "codex_turn_ticket:"
@@ -42,6 +59,19 @@ type openAICodexTicket struct {
 	CapturedAt time.Time `json:"captured_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	Attempts   int       `json:"attempts"`
+}
+
+// OpenAICodexTicketDiscardResult summarizes an administrative ticket reset.
+type OpenAICodexTicketDiscardResult struct {
+	ClearedAccounts int `json:"cleared_accounts"`
+	ClearedTickets  int `json:"cleared_tickets"`
+}
+
+// openAICodexTicketExtraRemover is implemented by the production account
+// repository. It is kept optional so lightweight service test repositories do
+// not need to grow a persistence-only method.
+type openAICodexTicketExtraRemover interface {
+	RemoveExtraKeys(ctx context.Context, id int64, keys []string) error
 }
 
 func openAICodexTicketKey(accountID int64, model string) string {
@@ -103,6 +133,7 @@ func (s *OpenAIGatewayService) openAICodexTicketGatedModel(model string) bool {
 type OpenAICodexTicketStatus struct {
 	Model            string     `json:"model"`
 	Length           int        `json:"length,omitempty"`
+	Attempts         int        `json:"attempts,omitempty"`
 	Ready            bool       `json:"ready"`
 	RemainingSeconds int64      `json:"remaining_seconds"`
 	Blocked          bool       `json:"blocked"`
@@ -134,6 +165,7 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 		if ticket.valid(now, targetLen) {
 			status.Ready = true
 			status.Length = ticket.Length
+			status.Attempts = ticket.Attempts
 			remaining := int64(ticket.ExpiresAt.Sub(now) / time.Second)
 			if remaining < 0 {
 				remaining = 0
@@ -358,13 +390,25 @@ func (s *OpenAIGatewayService) openAICodexTicketBlocksAccount(account *Account, 
 }
 
 func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, account *Account, token, model, proxyURL string, attemptTimeout time.Duration) (state string, status int, err error) {
+	result, err := s.fireOpenAICodexTicketProbeDetailed(ctx, account, token, model, proxyURL, attemptTimeout)
+	if err != nil {
+		return "", result.Status, err
+	}
+	return result.State, result.Status, nil
+}
+
+func (s *OpenAIGatewayService) fireOpenAICodexTicketProbeDetailed(ctx context.Context, account *Account, token, model, proxyURL string, attemptTimeout time.Duration) (result openAICodexTicketProbeResult, err error) {
+	result.StartedAt = time.Now().UTC()
+	defer func() { result.FinishedAt = time.Now().UTC() }()
 	attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
 	defer cancel()
 
 	body := []byte(`{"model":` + jsonString(model) + `,"store":false,"stream":true,"instructions":"Reply with exactly: pong","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}]}`)
+	result.RequestBody = string(body)
 	req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, chatgptCodexURL, bytes.NewReader(body))
 	if err != nil {
-		return "", 0, err
+		result.Reason = "request_build"
+		return result, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAIHarvest))
 	req.Close = true
@@ -375,7 +419,8 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("session_id", uuid.NewString())
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(attemptCtx, s.accountRepo, req.Header, account); err != nil {
-		return "", 0, err
+		result.Reason = "headers"
+		return result, err
 	}
 	applyOpenAICodexTicketHarvestIdentity(req.Header, model)
 
@@ -384,18 +429,46 @@ func (s *OpenAIGatewayService) fireOpenAICodexTicketProbe(ctx context.Context, a
 	// while handlers are still wiring it during gateway construction.
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		return "", 0, err
+		result.Reason = "transport"
+		return result, err
 	}
 	if resp == nil {
-		return "", 0, errors.New("nil upstream response")
+		result.Reason = "nil_response"
+		return result, errors.New("nil upstream response")
 	}
-	// Only the response header is needed; no connection will be reused.
 	defer func() {
 		if resp.Body != nil {
 			_ = resp.Body.Close()
 		}
 	}()
-	return extractOpenAICodexTurnState(resp.Header), resp.StatusCode, nil
+	result.Status = resp.StatusCode
+	result.State = extractOpenAICodexTurnState(resp.Header)
+	result.ResponseHeaders = map[string]string{}
+	for _, key := range []string{"Content-Type", "Content-Length", "Retry-After", "x-request-id"} {
+		if value := strings.TrimSpace(resp.Header.Get(key)); value != "" {
+			result.ResponseHeaders[key] = value
+		}
+	}
+	if state := strings.TrimSpace(resp.Header.Get(openAICodexTurnStateHeader)); state != "" {
+		// The admin audit view intentionally keeps the complete turn-state
+		// header so operators can compare the exact value returned by upstream.
+		result.ResponseHeaders[openAICodexTurnStateHeader] = state
+	}
+	for _, key := range []string{"x-egress-ip", "x-proxy-egress-ip", "x-real-ip"} {
+		if value := strings.TrimSpace(resp.Header.Get(key)); value != "" {
+			result.EgressIP = value
+			break
+		}
+	}
+	if result.EgressIP == "" && s.codexTicketProxyProber != nil && strings.TrimSpace(proxyURL) != "" {
+		probeCtx, probeCancel := context.WithTimeout(attemptCtx, openAICodexTicketEgressProbeTimeout)
+		exitInfo, _, probeErr := s.codexTicketProxyProber.ProbeProxy(probeCtx, proxyURL)
+		probeCancel()
+		if probeErr == nil && exitInfo != nil {
+			result.EgressIP = strings.TrimSpace(exitInfo.IP)
+		}
+	}
+	return result, nil
 }
 
 func jsonString(v string) string {
@@ -460,6 +533,71 @@ func (s *OpenAIGatewayService) StopOpenAICodexTicketHarvester() {
 	if done != nil {
 		<-done
 	}
+}
+
+// DiscardOpenAICodexTickets removes the current ticket(s) for one account, or
+// for all active OpenAI accounts when accountID is nil. The harvester notices
+// the missing ticket on its next cycle and obtains a replacement automatically.
+func (s *OpenAIGatewayService) DiscardOpenAICodexTickets(ctx context.Context, accountID *int64) (OpenAICodexTicketDiscardResult, error) {
+	var result OpenAICodexTicketDiscardResult
+	if s == nil || s.accountRepo == nil {
+		return result, errors.New("codex ticket account repository is unavailable")
+	}
+	var accounts []Account
+	var err error
+	if accountID != nil {
+		var account *Account
+		account, err = s.accountRepo.GetByID(ctx, *accountID)
+		if err == nil && account != nil {
+			accounts = []Account{*account}
+		}
+	} else {
+		accounts, err = s.accountRepo.ListByPlatform(ctx, PlatformOpenAI)
+	}
+	if err != nil {
+		return result, err
+	}
+
+	remover, ok := s.accountRepo.(openAICodexTicketExtraRemover)
+	if !ok {
+		return result, errors.New("codex ticket account repository does not support clearing tickets")
+	}
+	for i := range accounts {
+		account := &accounts[i]
+		if !isOpenAICodexTicketAccount(account) {
+			continue
+		}
+		keys := make([]string, 0)
+		seen := make(map[string]struct{})
+		if account.Extra != nil {
+			for key := range account.Extra {
+				if IsOpenAICodexTicketExtraKey(key) {
+					keys = append(keys, key)
+					seen[key] = struct{}{}
+				}
+			}
+		}
+		for _, model := range s.openAICodexTicketConfig().Models {
+			key := openAICodexTicketExtraKey(model)
+			_, inMemory := s.openaiCodexTickets.Load(openAICodexTicketKey(account.ID, model))
+			if _, exists := seen[key]; !exists && inMemory {
+				keys = append(keys, key)
+			}
+		}
+		if len(keys) == 0 {
+			continue
+		}
+		if err := remover.RemoveExtraKeys(ctx, account.ID, keys); err != nil {
+			return result, err
+		}
+		for _, key := range keys {
+			model := strings.TrimPrefix(key, openAICodexTicketExtraKeyPrefix)
+			s.openaiCodexTickets.Delete(openAICodexTicketKey(account.ID, model))
+		}
+		result.ClearedAccounts++
+		result.ClearedTickets += len(keys)
+	}
+	return result, nil
 }
 
 func (s *OpenAIGatewayService) openAICodexTicketHarvestLoop(ctx context.Context) {
@@ -539,27 +677,59 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 	}
 	key := openAICodexTicketKey(account.ID, model)
 	_, _, _ = s.openaiCodexTicketFlight.Do(key, func() (any, error) {
+		startedAt := time.Now().UTC()
+		writeAudit := func(item *OpenAICodexTicketAudit) {
+			if s.codexTicketAuditRepo == nil || item == nil {
+				return
+			}
+			if item.StartedAt.IsZero() {
+				item.StartedAt = startedAt
+			}
+			if item.FinishedAt.IsZero() {
+				item.FinishedAt = time.Now().UTC()
+			}
+			item.DurationMS = int(item.FinishedAt.Sub(item.StartedAt) / time.Millisecond)
+			go func(a *OpenAICodexTicketAudit) {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if err := s.codexTicketAuditRepo.Insert(ctx, a); err != nil {
+					logger.L().Warn("openai_codex_ticket audit persist failed", zap.Error(err))
+				}
+			}(item)
+		}
 		token, _, err := s.GetAccessToken(ctx, account)
 		if err != nil || strings.TrimSpace(token) == "" {
+			writeAudit(&OpenAICodexTicketAudit{AccountID: account.ID, Model: model, StartedAt: startedAt, FinishedAt: time.Now().UTC(), Outcome: "token_error", Reason: "token"})
 			logger.L().Info("openai_codex_ticket probe miss",
 				zap.Int64("account_id", account.ID), zap.String("model", model),
 				zap.String("reason", "token"), zap.Error(err))
 			return nil, nil
 		}
-		state, status, perr := s.fireOpenAICodexTicketProbe(ctx, account, token, model, proxyURL, time.Duration(cfg.HarvestAttemptTimeoutSeconds)*time.Second)
+		probe, perr := s.fireOpenAICodexTicketProbeDetailed(ctx, account, token, model, proxyURL, time.Duration(cfg.HarvestAttemptTimeoutSeconds)*time.Second)
 		if perr != nil {
+			writeAudit(&OpenAICodexTicketAudit{AccountID: account.ID, Model: model, StartedAt: probe.StartedAt, FinishedAt: probe.FinishedAt, Outcome: "transport_error", Reason: probe.Reason, HTTPStatus: nullableHTTPStatus(probe.Status), RequestBody: probe.RequestBody, ResponseHeaders: probe.ResponseHeaders, EgressIP: probe.EgressIP})
 			logger.L().Info("openai_codex_ticket probe miss",
 				zap.Int64("account_id", account.ID), zap.String("model", model),
 				zap.String("reason", "error"), zap.Error(perr))
 			return nil, nil
 		}
+		state, status := probe.State, probe.Status
 		if status != http.StatusOK || state == "" || len(state) != cfg.TargetLength || !strings.HasPrefix(state, openAICodexTicketStatePrefix) {
+			reason := "invalid_ticket"
+			if status != http.StatusOK {
+				reason = "http_error"
+			}
+			writeAudit(&OpenAICodexTicketAudit{AccountID: account.ID, Model: model, StartedAt: probe.StartedAt, FinishedAt: probe.FinishedAt, Outcome: reason, Reason: fmt.Sprintf("status=%d length=%d", status, len(state)), HTTPStatus: nullableHTTPStatus(status), TicketLength: len(state), RequestBody: probe.RequestBody, ResponseHeaders: probe.ResponseHeaders, EgressIP: probe.EgressIP})
 			logger.L().Info("openai_codex_ticket probe miss",
 				zap.Int64("account_id", account.ID), zap.String("model", model),
 				zap.Int("http", status), zap.Int("len", len(state)))
 			return nil, nil
 		}
 		now := time.Now()
+		attempts := 1
+		if previous := s.lookupOpenAICodexTicket(account, model); previous != nil {
+			attempts = previous.Attempts + 1
+		}
 		ticket := &openAICodexTicket{
 			AccountID:  account.ID,
 			Model:      model,
@@ -567,14 +737,23 @@ func (s *OpenAIGatewayService) probeOnceOpenAICodexTicket(ctx context.Context, a
 			Length:     len(state),
 			CapturedAt: now,
 			ExpiresAt:  now.Add(time.Duration(cfg.TTLSeconds) * time.Second),
-			Attempts:   1,
+			Attempts:   attempts,
 		}
 		s.storeOpenAICodexTicket(ctx, account, ticket)
+		hash := sha256.Sum256([]byte(state))
+		writeAudit(&OpenAICodexTicketAudit{AccountID: account.ID, Model: model, StartedAt: probe.StartedAt, FinishedAt: probe.FinishedAt, Outcome: "success", Reason: "ticket_captured", HTTPStatus: nullableHTTPStatus(status), TicketLength: ticket.Length, Attempts: attempts, TicketExpiresAt: &ticket.ExpiresAt, RequestBody: probe.RequestBody, ResponseHeaders: probe.ResponseHeaders, TicketHash: hex.EncodeToString(hash[:]), EgressIP: probe.EgressIP})
 		logger.L().Info("openai_codex_ticket harvested",
 			zap.Int64("account_id", account.ID), zap.String("model", model),
 			zap.Int("length", ticket.Length), zap.String("mode", "continuous"))
 		return nil, nil
 	})
+}
+
+func nullableHTTPStatus(status int) *int {
+	if status <= 0 {
+		return nil
+	}
+	return &status
 }
 
 // IsOpenAICodexTicketExtraKey identifies server-managed ticket material.
