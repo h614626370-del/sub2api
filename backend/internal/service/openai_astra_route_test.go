@@ -208,7 +208,8 @@ func TestAstraRouteTargetUnavailableAndTicketGate(t *testing.T) {
 		t.Run(strconv.FormatBool(advanced), func(t *testing.T) {
 			svc, _, _ := astraRouteFixture(t, advanced)
 			sourceID := int64(10)
-			repo := svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo)
+			repo, ok := svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo)
+			require.True(t, ok)
 			target := &repo.accounts[1]
 			target.Schedulable = false
 			_, _, err := svc.SelectAccountWithScheduler(context.Background(), &sourceID, "", "", "gpt-6-astra", nil, OpenAIUpstreamTransportAny, false)

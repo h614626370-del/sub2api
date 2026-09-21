@@ -85,7 +85,7 @@ func (r *openAICodexTicketAuditRepository) List(ctx context.Context, filter *ser
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]*service.OpenAICodexTicketAudit, 0, pageSize)
 	for rows.Next() {
 		item, err := scanCodexTicketAudit(rows.Scan)
