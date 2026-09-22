@@ -26,7 +26,7 @@ export interface DiscardCodexTicketsResult {
   cleared_tickets: number
 }
 
-export async function listAudits(params: { page?: number; page_size?: number; account_id?: number; model?: string; outcome?: string } = {}): Promise<PaginatedResponse<CodexTicketAudit>> {
+export async function listAudits(params: { page?: number; page_size?: number; account_id?: number; model?: string; outcome?: string; to?: string } = {}): Promise<PaginatedResponse<CodexTicketAudit>> {
   const { data } = await apiClient.get('/admin/codex-ticket/audits', { params })
   return data
 }
@@ -46,5 +46,24 @@ export async function discard(accountId?: number): Promise<DiscardCodexTicketsRe
   return data
 }
 
-export const codexTicketAPI = { listAudits, getAudit, clearAudits, discard }
+export interface CodexTicketStatistics {
+  account_id: number
+  model: string
+  total_attempts: number
+  successes: number
+  total_duration_ms: number
+  pending_attempts: number
+  pending_since?: string
+  last_success_at?: string
+  last_success_duration_ms: number
+  last_success_ip: string
+  last_success_ip_source: string
+}
+
+export async function statistics(): Promise<CodexTicketStatistics[]> {
+  const { data } = await apiClient.get('/admin/codex-ticket/statistics')
+  return data
+}
+
+export const codexTicketAPI = { listAudits, getAudit, clearAudits, discard, statistics }
 export default codexTicketAPI

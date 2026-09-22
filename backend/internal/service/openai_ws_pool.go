@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -84,6 +85,7 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
+	routingCookies      [32]byte
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -2364,6 +2366,9 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
 		betaFeatures: normalizeOpenAIWSBetaFeatures(headers),
+	}
+	if cookie := headers.Get("Cookie"); cookie != "" {
+		key.routingCookies = sha256.Sum256([]byte(cookie))
 	}
 	mode := activeCodexFingerprintMode(account)
 	if mode == codexFingerprintOff {

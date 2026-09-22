@@ -327,12 +327,22 @@ gateway:
     target_length: 292
     ttl_seconds: 3600
     refresh_before_seconds: 600
-    # 后台「系统设置 → 网关 → Codex 设置」可覆盖此值，无需重启。
+    # 后台「账号管理 → 定制功能」可覆盖打票参数，无需重启。
     # 后台值的读取缓存为 5 秒，下个探测周期使用新代理；代理服务商自行负责轮换 IP。
     harvest_proxy_url: ""
     harvest_probe_interval_seconds: 6
     harvest_attempt_timeout_seconds: 25
     fail_closed: true
+    # 仅捕获 __cflb / __oailb，按账号和模型保存；不在日志和管理页面展示值。
+    cookie_enabled: false
+    # 要求两个 Cookie 都有效，即使 fail_closed=false 仍拦截缺 Cookie 请求。
+    cookie_required: false
+    # 上游过期时间与本地上限取较早者；无上游过期时间时使用本地上限。
+    cookie_ttl_seconds: 240
+    # Experimental: retain a proven connection; no automatic reconnect.
+    reuse_connection: false
+    # Configurable in admin UI; range 30-3600 seconds.
+    connection_max_age_seconds: 300
     models:
       - gpt-6-astra
       - gpt-5.6-sol

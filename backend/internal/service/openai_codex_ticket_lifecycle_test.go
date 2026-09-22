@@ -76,7 +76,7 @@ func TestCodexTicketProbeBypassesPluginDuringWiring(t *testing.T) {
 	require.Equal(t, int64(20), calls.Load())
 }
 
-func TestCodexTicketProbeResolvesEgressIPWhenUpstreamOmitsIt(t *testing.T) {
+func TestCodexTicketProbeDoesNotGuessEgressIPWhenUpstreamOmitsIt(t *testing.T) {
 	upstream := &codexTicketFuncUpstream{do: func(*http.Request) (*http.Response, error) {
 		return codexTicketResponse(), nil
 	}}
@@ -88,7 +88,8 @@ func TestCodexTicketProbeResolvesEgressIPWhenUpstreamOmitsIt(t *testing.T) {
 		"http://proxy.example.com:8080", time.Second,
 	)
 	require.NoError(t, err)
-	require.Equal(t, "203.0.113.44", result.EgressIP)
+	require.Empty(t, result.EgressIP)
+	require.Empty(t, result.ResponseHeaders["x-sub2api-egress-ip-source"])
 	require.Equal(t, fakeCodexTicketState(292), result.ResponseHeaders[openAICodexTurnStateHeader])
 }
 

@@ -24,6 +24,20 @@ type discardCodexTicketRequest struct {
 	AccountID *int64 `json:"account_id"`
 }
 
+func (h *CodexTicketHandler) Statistics(c *gin.Context) {
+	repo, ok := h.repo.(service.OpenAICodexTicketStatisticsRepository)
+	if !ok {
+		response.ErrorWithDetails(c, http.StatusServiceUnavailable, "Ticket statistics unavailable", "CODEX_TICKET_UNAVAILABLE", nil)
+		return
+	}
+	items, err := repo.Statistics(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, items)
+}
+
 func (h *CodexTicketHandler) DiscardTickets(c *gin.Context) {
 	if h == nil || h.service == nil {
 		response.ErrorWithDetails(c, http.StatusServiceUnavailable, "Codex ticket service is unavailable", "CODEX_TICKET_UNAVAILABLE", nil)

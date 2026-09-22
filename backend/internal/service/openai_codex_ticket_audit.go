@@ -49,3 +49,22 @@ type OpenAICodexTicketAuditRepository interface {
 	GetByID(context.Context, int64) (*OpenAICodexTicketAudit, error)
 	Clear(context.Context) (int64, error)
 }
+
+// Statistics are computed from retained audit records, including failed probes.
+type OpenAICodexTicketStatistics struct {
+	AccountID             int64      `json:"account_id"`
+	Model                 string     `json:"model"`
+	TotalAttempts         int64      `json:"total_attempts"`
+	Successes             int64      `json:"successes"`
+	TotalDurationMS       int64      `json:"total_duration_ms"`
+	PendingAttempts       int64      `json:"pending_attempts"`
+	PendingSince          *time.Time `json:"pending_since,omitempty"`
+	LastSuccessAt         *time.Time `json:"last_success_at,omitempty"`
+	LastSuccessDurationMS int        `json:"last_success_duration_ms"`
+	LastSuccessIP         string     `json:"last_success_ip"`
+	LastSuccessIPSource   string     `json:"last_success_ip_source"`
+}
+
+type OpenAICodexTicketStatisticsRepository interface {
+	Statistics(context.Context) ([]OpenAICodexTicketStatistics, error)
+}

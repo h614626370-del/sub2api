@@ -495,6 +495,16 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		}
 	}
 	updates[SettingKeyOpenAIAstraGroupID] = strconv.FormatInt(settings.OpenAIAstraGroupID, 10)
+	if settings.OpenAICodexTicketPolicy != nil {
+		if err := settings.OpenAICodexTicketPolicy.Validate(); err != nil {
+			return nil, err
+		}
+		raw, err := json.Marshal(settings.OpenAICodexTicketPolicy)
+		if err != nil {
+			return nil, err
+		}
+		updates[SettingKeyOpenAICodexTicketPolicy] = string(raw)
+	}
 	updates[SettingKeyOpenAICodexTicketEnabled] = strconv.FormatBool(settings.OpenAICodexTicketEnabled)
 	if err := ValidateOpenAICodexTicketHarvestProxyURL(settings.OpenAICodexTicketHarvestProxyURL); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
@@ -755,6 +765,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// 这里没有它的最新值，重算会把同步结果覆盖成陈旧值。
 	s.InvalidateOpenAICodexClientVersionCache()
 	s.invalidateOpenAIAstraGroupCache()
+	s.invalidateCodexTicketPolicy()
 	s.InvalidateOpenAICodexTicketEnabledCache()
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)

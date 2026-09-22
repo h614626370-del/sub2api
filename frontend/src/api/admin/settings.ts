@@ -1,3 +1,18 @@
+export interface CodexTicketPolicy {
+  reuse_connection?: boolean;
+  connection_max_age_seconds?: number;
+  ttl_seconds: number;
+  refresh_before_seconds: number;
+  probe_interval_seconds: number;
+  attempt_timeout_seconds: number;
+  target_length: number;
+  models: string[];
+  fail_closed: boolean;
+  cookie_enabled: boolean;
+  cookie_required: boolean;
+  cookie_ttl_seconds: number;
+}
+
 /**
  * Admin Settings API endpoints
  * Handles system settings management for administrators
@@ -639,6 +654,7 @@ export interface SystemSettings {
   openai_codex_client_version: string;
   openai_codex_client_version_synced: string;
   openai_codex_version_auto_sync_enabled: boolean;
+  openai_codex_ticket_policy: CodexTicketPolicy;
   openai_astra_group_id: number;
   openai_codex_ticket_enabled: boolean;
   openai_codex_ticket_harvest_proxy_url: string;
@@ -962,6 +978,7 @@ export interface UpdateSettingsRequest {
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;
   openai_codex_version_auto_sync_enabled?: boolean;
+  openai_codex_ticket_policy?: CodexTicketPolicy;
   openai_astra_group_id?: number;
   openai_codex_ticket_enabled?: boolean;
   openai_codex_ticket_harvest_proxy_url?: string;

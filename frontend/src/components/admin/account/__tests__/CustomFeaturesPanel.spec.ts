@@ -55,6 +55,7 @@ function mountPanel(locale = 'zh') {
         },
       })],
       stubs: {
+        AccountTimezonePanel: true,
         Toggle: ToggleStub,
         Icon: true,
       },
@@ -83,6 +84,67 @@ describe('CustomFeaturesPanel', () => {
     const errors = compilationErrors.mock.calls.slice()
     compilationErrors.mockRestore()
     expect(errors).toEqual([])
+  })
+
+  it('saves timing and cookie policy and disables strict mode with cookie capture', async () => {
+    getSettings.mockResolvedValue({})
+    updateSettings.mockImplementation(async payload => payload)
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('#ticket-ttl_seconds').setValue(240)
+    await wrapper.get('#ticket-refresh_before_seconds').setValue(30)
+    await wrapper.get('#ticket-cookie-enabled').setValue(true)
+    await wrapper.get('#ticket-cookie-required').setValue(true)
+    await wrapper.get('#ticket-cookie-ttl').setValue(180)
+    await wrapper.get('#ticket-models').setValue('gpt-6-astra')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_codex_ticket_policy: {
+        ttl_seconds: 240, refresh_before_seconds: 30, probe_interval_seconds: 6,
+        attempt_timeout_seconds: 25, target_length: 292, models: ['gpt-6-astra'],
+        fail_closed: true, cookie_enabled: true, cookie_required: true, cookie_ttl_seconds: 180,
+        reuse_connection: false,
+        connection_max_age_seconds: 300,
+      },
+    }))
+    await wrapper.get('#ticket-cookie-enabled').setValue(false)
+    expect(wrapper.find('#ticket-cookie-required').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_codex_ticket_policy: expect.objectContaining({ cookie_enabled: false, cookie_required: false }),
+    }))
+  })
+
+  it('requires cookie capture for connection reuse and saves the experimental switch', async () => {
+    getSettings.mockResolvedValue({})
+    updateSettings.mockImplementation(async payload => payload)
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.get('#ticket-reuse-connection').attributes('disabled')).toBeDefined()
+    await wrapper.get('#ticket-cookie-enabled').setValue(true)
+    await wrapper.get('#ticket-reuse-connection').setValue(true)
+    await wrapper.get('#ticket-connection-max-age').setValue(600)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      openai_codex_ticket_policy: expect.objectContaining({ reuse_connection: true, cookie_enabled: true, connection_max_age_seconds: 600 }),
+    }))
+    await wrapper.get('#ticket-cookie-enabled').setValue(false)
+    expect((wrapper.get('#ticket-reuse-connection').element as HTMLInputElement).checked).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('rejects invalid refresh times without sending settings', async () => {
+    getSettings.mockResolvedValue({})
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('#ticket-ttl_seconds').setValue(240)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateSettings).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledTimes(1)
   })
 
   it('saves a special OpenAI pool and can disable routing', async () => {

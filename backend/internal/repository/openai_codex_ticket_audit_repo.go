@@ -12,6 +12,35 @@ import (
 
 type openAICodexTicketAuditRepository struct{ db *sql.DB }
 
+func (r *openAICodexTicketAuditRepository) Statistics(ctx context.Context) ([]service.OpenAICodexTicketStatistics, error) {
+	rows, err := r.db.QueryContext(ctx, `WITH last_success AS (
+	 SELECT DISTINCT ON (account_id, model) account_id, model, started_at, finished_at, duration_ms, egress_ip, response_headers
+	 FROM openai_codex_ticket_audits WHERE outcome IN ('success','validated')
+	 ORDER BY account_id, model, started_at DESC, id DESC
+	)
+	SELECT a.account_id, a.model, count(*), count(*) FILTER (WHERE a.outcome IN ('success','validated')), coalesce(sum(a.duration_ms),0),
+	 count(*) FILTER (WHERE s.started_at IS NULL OR a.started_at > s.started_at),
+	 min(a.started_at) FILTER (WHERE s.started_at IS NULL OR a.started_at > s.started_at),
+	 s.finished_at, coalesce(s.duration_ms,0), coalesce(s.egress_ip,''),
+	 coalesce(s.response_headers->>'x-sub2api-egress-ip-source','unknown')
+	FROM openai_codex_ticket_audits a LEFT JOIN last_success s USING(account_id,model)
+	GROUP BY a.account_id,a.model,s.started_at,s.finished_at,s.duration_ms,s.egress_ip,s.response_headers
+	ORDER BY a.account_id,a.model`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]service.OpenAICodexTicketStatistics, 0)
+	for rows.Next() {
+		var item service.OpenAICodexTicketStatistics
+		if err := rows.Scan(&item.AccountID, &item.Model, &item.TotalAttempts, &item.Successes, &item.TotalDurationMS, &item.PendingAttempts, &item.PendingSince, &item.LastSuccessAt, &item.LastSuccessDurationMS, &item.LastSuccessIP, &item.LastSuccessIPSource); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func NewOpenAICodexTicketAuditRepository(db *sql.DB) service.OpenAICodexTicketAuditRepository {
 	return &openAICodexTicketAuditRepository{db: db}
 }

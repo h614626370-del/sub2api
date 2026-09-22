@@ -1225,6 +1225,11 @@ func (c *UserMessageQueueConfig) GetEffectiveMode() string {
 // 打票走 harvest_proxy_url（SOCKS），业务出站仍用账号住宅 proxy_id，只替换该请求头。
 // 门票默认有效 3600 秒，临近过期前 refresh_before_seconds 重新打票。
 type OpenAICodexTicketConfig struct {
+	ConnectionMaxAgeSeconds      int      `mapstructure:"connection_max_age_seconds"`
+	ReuseConnection              bool     `mapstructure:"reuse_connection"`
+	CookieEnabled                bool     `mapstructure:"cookie_enabled"`
+	CookieRequired               bool     `mapstructure:"cookie_required"`
+	CookieTTLSeconds             int      `mapstructure:"cookie_ttl_seconds"`
 	Enabled                      bool     `mapstructure:"enabled"`
 	TargetLength                 int      `mapstructure:"target_length"`
 	TTLSeconds                   int      `mapstructure:"ttl_seconds"`
@@ -2400,6 +2405,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.5")
 	viper.SetDefault("gateway.openai_codex_ticket.enabled", false)
+	viper.SetDefault("gateway.openai_codex_ticket.reuse_connection", false)
+	viper.SetDefault("gateway.openai_codex_ticket.connection_max_age_seconds", 300)
 	viper.SetDefault("gateway.openai_codex_ticket.target_length", 292)
 	viper.SetDefault("gateway.openai_codex_ticket.ttl_seconds", 3600)
 	viper.SetDefault("gateway.openai_codex_ticket.refresh_before_seconds", 600)
@@ -2407,6 +2414,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_probe_interval_seconds", 6)
 	viper.SetDefault("gateway.openai_codex_ticket.harvest_attempt_timeout_seconds", 25)
 	viper.SetDefault("gateway.openai_codex_ticket.fail_closed", true)
+	viper.SetDefault("gateway.openai_codex_ticket.cookie_enabled", false)
+	viper.SetDefault("gateway.openai_codex_ticket.cookie_required", false)
+	viper.SetDefault("gateway.openai_codex_ticket.cookie_ttl_seconds", 240)
 	viper.SetDefault("gateway.openai_codex_ticket.models", []string{"gpt-6-astra", "gpt-5.6-sol"})
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）

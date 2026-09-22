@@ -1169,6 +1169,13 @@ export interface Account {
   credentials_status?: Record<string, boolean>
   ollama_cloud_usage?: OllamaCloudUsageState
   codex_turn_tickets?: Array<{
+    last_success_at?: string
+    last_success_ip?: string
+    last_success_ip_source?: string
+    last_success_duration_ms?: number
+    cookie_enabled?: boolean
+    cookie_count?: number
+    cookie_remaining_seconds?: number
     model: string
     length?: number
     attempts?: number

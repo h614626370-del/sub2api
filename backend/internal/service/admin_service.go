@@ -611,6 +611,7 @@ type ProxyQualityCheckItem struct {
 
 // ProxyExitInfo represents proxy exit information from ip-api.com
 type ProxyExitInfo struct {
+	Timezone    string
 	IP          string
 	City        string
 	Region      string
@@ -753,7 +754,7 @@ func NewAdminService(
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
 ) AdminService {
-	return &adminServiceImpl{
+	svc := &adminServiceImpl{
 		cfg:                  cfg,
 		userRepo:             userRepo,
 		groupRepo:            groupRepo,
@@ -783,4 +784,8 @@ func NewAdminService(
 
 		channelCacheInvalidator: channelCacheInvalidator,
 	}
+	if gateway, ok := runtimeBlocker.(interface{ SetAccountTimezoneManager(AccountTimezoneManager) }); ok {
+		gateway.SetAccountTimezoneManager(svc)
+	}
+	return svc
 }

@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import CodexTicketDetailsPanel from '../CodexTicketDetailsPanel.vue'
+import Pagination from '@/components/common/Pagination.vue'
 
-const { getSettings, listAccounts, listAudits, getAudit, showError } = vi.hoisted(() => ({
+const { getSettings, listAccounts, listAudits, getAudit, statistics, showError } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   listAccounts: vi.fn(),
   listAudits: vi.fn(),
   getAudit: vi.fn(),
+  statistics: vi.fn(),
   showError: vi.fn(),
 }))
 
@@ -15,7 +17,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     settings: { getSettings },
     accounts: { list: listAccounts },
-    codexTicket: { listAudits, getAudit },
+    codexTicket: { listAudits, getAudit, statistics },
   },
 }))
 
@@ -41,7 +43,38 @@ describe('CodexTicketDetailsPanel', () => {
     listAccounts.mockReset()
     listAudits.mockReset()
     getAudit.mockReset()
+    statistics.mockReset().mockResolvedValue([])
     showError.mockReset()
+  })
+
+  it('shows real connection metadata and hides failure and separately-probed IPs', async () => {
+    getSettings.mockResolvedValue({ openai_codex_ticket_enabled: true })
+    listAccounts.mockResolvedValue({ items: [], total: 0 })
+    listAudits.mockResolvedValue({ items: [
+      { id: 1, account_id: 1, model: 'gpt-6-astra', outcome: 'validated', egress_ip: '203.0.113.22',
+        response_headers: {
+          'x-sub2api-connection-session': 'abcdef12-session',
+          'x-sub2api-connection-reused': 'true',
+          'x-sub2api-connection-retained': 'true',
+          'x-sub2api-connection-age-seconds': '42',
+          'x-sub2api-connection-successes': '3',
+          'x-sub2api-egress-ip-source': 'same_connection_trace',
+        } },
+      { id: 2, account_id: 1, model: 'gpt-6-astra', outcome: 'invalid_ticket', egress_ip: '203.0.113.23' },
+      { id: 3, account_id: 1, model: 'gpt-6-astra', outcome: 'success', egress_ip: '203.0.113.24',
+        response_headers: { 'x-sub2api-egress-ip-source': 'separate_probe' } },
+    ], total: 3 })
+    const wrapper = mount(CodexTicketDetailsPanel, { global: { stubs: { Icon: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('abcdef12')
+    expect(wrapper.text()).toContain('42s')
+    expect(wrapper.text()).toContain('ticketDetails.connectionReused')
+    expect(wrapper.text()).toContain('ticketDetails.validatedTicket')
+    expect(wrapper.text()).toContain('203.0.113.22')
+    expect(wrapper.text()).not.toContain('203.0.113.23')
+    expect(wrapper.text()).not.toContain('203.0.113.24')
+    expect(wrapper.text()).toContain('ticketDetails.ipSources.probe')
+    wrapper.unmount()
   })
 
   it('loads and filters per-account, per-model ticket details', async () => {
@@ -146,4 +179,25 @@ describe('CodexTicketDetailsPanel', () => {
     expect(wrapper.text()).toContain('Content-Type: text/event-stream')
     expect(wrapper.text()).toContain('x-codex-turn-state: gAAAAA-original-ticket-value')
   })
+  it('paginates audits on the server and closes expanded details on page changes', async () => {
+    getSettings.mockResolvedValue({ openai_codex_ticket_enabled: true })
+    listAccounts.mockResolvedValue({ items: [], total: 0 })
+    listAudits.mockResolvedValue({ items: [{ id: 1, account_id: 1, model: 'gpt-6-astra' }], total: 25 })
+    getAudit.mockResolvedValue({ id: 1, request_body: 'page-one-detail' })
+    const wrapper = mount(CodexTicketDetailsPanel, { global: { stubs: { Icon: true } } })
+    await flushPromises()
+    expect(listAudits).toHaveBeenLastCalledWith({ page: 1, page_size: 10, to: expect.any(String) })
+    const snapshot = listAudits.mock.lastCall?.[0].to
+    await wrapper.findAll('button').find(b => b.text().includes('ticketDetails.expand'))?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('page-one-detail')
+    wrapper.findComponent(Pagination).vm.$emit('update:page', 2)
+    await flushPromises()
+    expect(listAudits).toHaveBeenLastCalledWith({ page: 2, page_size: 10, to: snapshot })
+    expect(wrapper.text()).not.toContain('page-one-detail')
+    wrapper.findComponent(Pagination).vm.$emit('update:pageSize', 20)
+    await flushPromises()
+    expect(listAudits).toHaveBeenLastCalledWith({ page: 1, page_size: 20, to: snapshot })
+  })
+
 })

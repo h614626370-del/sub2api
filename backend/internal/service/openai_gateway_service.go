@@ -442,36 +442,39 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	accountRepo            AccountRepository
-	usageLogRepo           UsageLogRepository
-	usageBillingRepo       UsageBillingRepository
-	userRepo               UserRepository
-	userSubRepo            UserSubscriptionRepository
-	cache                  GatewayCache
-	cfg                    *config.Config
-	codexDetector          CodexClientRestrictionDetector
-	schedulerSnapshot      *SchedulerSnapshotService
-	concurrencyService     *ConcurrencyService
-	billingService         *BillingService
-	rateLimitService       *RateLimitService
-	billingCacheService    *BillingCacheService
-	userGroupRateResolver  *userGroupRateResolver
-	httpUpstream           HTTPUpstream
-	pluginManager          *PluginManager
-	deferredService        *DeferredService
-	openAITokenProvider    *OpenAITokenProvider
-	grokTokenProvider      *GrokTokenProvider
-	toolCorrector          *CodexToolCorrector
-	openaiWSResolver       OpenAIWSProtocolResolver
-	resolver               *ModelPricingResolver
-	channelService         *ChannelService
-	balanceNotifyService   *BalanceNotifyService
-	settingService         *SettingService
-	userPlatformQuotaRepo  UserPlatformQuotaRepository
-	codexTicketAuditRepo   OpenAICodexTicketAuditRepository
-	codexTicketProxyProber ProxyExitInfoProber
-	liveAttestation        liveattestation.Provider
-	liveAttestationCipher  SecretEncryptor
+	accountTimezoneManager  AccountTimezoneManager
+	accountTimezoneFlight   singleflight.Group
+	accountTimezoneFailures sync.Map
+	accountRepo             AccountRepository
+	usageLogRepo            UsageLogRepository
+	usageBillingRepo        UsageBillingRepository
+	userRepo                UserRepository
+	userSubRepo             UserSubscriptionRepository
+	cache                   GatewayCache
+	cfg                     *config.Config
+	codexDetector           CodexClientRestrictionDetector
+	schedulerSnapshot       *SchedulerSnapshotService
+	concurrencyService      *ConcurrencyService
+	billingService          *BillingService
+	rateLimitService        *RateLimitService
+	billingCacheService     *BillingCacheService
+	userGroupRateResolver   *userGroupRateResolver
+	httpUpstream            HTTPUpstream
+	pluginManager           *PluginManager
+	deferredService         *DeferredService
+	openAITokenProvider     *OpenAITokenProvider
+	grokTokenProvider       *GrokTokenProvider
+	toolCorrector           *CodexToolCorrector
+	openaiWSResolver        OpenAIWSProtocolResolver
+	resolver                *ModelPricingResolver
+	channelService          *ChannelService
+	balanceNotifyService    *BalanceNotifyService
+	settingService          *SettingService
+	userPlatformQuotaRepo   UserPlatformQuotaRepository
+	codexTicketAuditRepo    OpenAICodexTicketAuditRepository
+	codexTicketProxyProber  ProxyExitInfoProber
+	liveAttestation         liveattestation.Provider
+	liveAttestationCipher   SecretEncryptor
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once
@@ -512,6 +515,8 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
 	openaiCodexTickets           sync.Map
+	openaiCodexTicketAccounts    sync.Map
+	openaiCodexTicketSessions    sync.Map
 	openaiCodexTicketFlight      singleflight.Group
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
@@ -533,6 +538,14 @@ func (s *OpenAIGatewayService) SetCodexTicketAuditRepository(repo OpenAICodexTic
 func (s *OpenAIGatewayService) SetCodexTicketProxyProber(prober ProxyExitInfoProber) {
 	if s != nil {
 		s.codexTicketProxyProber = prober
+	}
+}
+
+// SetAccountTimezoneManager attaches the account-level proxy timezone resolver
+// after both gateway and admin services have been wired.
+func (s *OpenAIGatewayService) SetAccountTimezoneManager(manager AccountTimezoneManager) {
+	if s != nil {
+		s.accountTimezoneManager = manager
 	}
 }
 

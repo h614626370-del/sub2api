@@ -97,6 +97,7 @@
               <th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.columns.status') }}</th>
               <th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.columns.length') }}</th>
               <th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.columns.attempts') }}</th>
+              <th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.lastSuccess') }}</th>
               <th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.columns.remaining') }}</th>
               <th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.columns.expiresAt') }}</th>
               <th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.columns.scheduling') }}</th>
@@ -114,13 +115,28 @@
                 <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(row.ticket)">
                   {{ statusLabel(row.ticket) }}
                 </span>
+                <p v-if="row.ticket.cookie_enabled" class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                  {{ t('admin.accounts.ticketDetails.cookieStatus', { count: row.ticket.cookie_count || 0, seconds: row.ticket.cookie_remaining_seconds || 0 }) }}
+                </p>
               </td>
               <td class="whitespace-nowrap px-5 py-4 text-gray-700 dark:text-gray-300">
                 <span v-if="row.ticket.length">{{ row.ticket.length }}</span>
                 <span v-else class="text-gray-400">-</span>
-                <span class="ml-1 text-xs text-gray-400">/ 292</span>
+                <span class="ml-1 text-xs text-gray-400">/ {{ targetLength }}</span>
               </td>
-              <td class="whitespace-nowrap px-5 py-4 text-gray-700 dark:text-gray-300">{{ row.ticket.attempts || 0 }}</td>
+              <td class="whitespace-nowrap px-5 py-4 text-gray-700 dark:text-gray-300"><template v-if="row.stats">
+                  <div>{{ t('admin.accounts.ticketDetails.attemptSummary', { total: row.stats.total_attempts, success: row.stats.successes }) }}</div>
+                  <div class="mt-1 text-xs text-gray-500">{{ t('admin.accounts.ticketDetails.pendingSummary', { count: row.stats.pending_attempts, time: elapsed(row.stats.pending_since) }) }}</div>
+                  <div class="mt-1 text-xs text-gray-500">{{ t('admin.accounts.ticketDetails.totalProbeTime', { seconds: (row.stats.total_duration_ms / 1000).toFixed(1) }) }}</div>
+                </template><span v-else>-</span></td>
+              <td class="whitespace-nowrap px-5 py-4 text-xs text-gray-700 dark:text-gray-300">
+                <template v-if="row.lastSuccess.last_success_at">
+                  <div>{{ formatDateTime(row.lastSuccess.last_success_at) }}</div>
+                  <div class="mt-1">{{ t('admin.accounts.ticketDetails.successDuration', { seconds: ((row.lastSuccess.last_success_duration_ms ?? 0) / 1000).toFixed(1) }) }}</div>
+                  <div class="mt-1 font-mono">{{ isConnectionIP(row.lastSuccess.last_success_ip_source) ? row.lastSuccess.last_success_ip || t('admin.accounts.ticketDetails.ipUnknown') : t('admin.accounts.ticketDetails.ipUnknown') }}</div>
+                  <div class="mt-1 text-gray-500">{{ ipSourceLabel(row.lastSuccess.last_success_ip_source) }}</div>
+                </template><span v-else>-</span>
+              </td>
               <td class="whitespace-nowrap px-5 py-4 text-gray-700 dark:text-gray-300">
                 <span v-if="row.ticket.ready">{{ formatRemaining(row.ticket.remaining_seconds) }}</span>
                 <span v-else class="text-gray-400">-</span>
@@ -157,11 +173,12 @@
     </div>
 
     <p class="text-xs text-gray-400 dark:text-gray-500">
-      {{ t('admin.accounts.ticketDetails.limitations') }}
+      {{ t('admin.accounts.ticketDetails.statisticsHint') }}
+      <span v-if="statisticsError" class="text-red-600">{{ t('admin.accounts.ticketDetails.loadFailed') }}</span>
     </p>
 
     <div class="card overflow-hidden">
-      <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700">
+      <div class="border-b border-gray-100 px-4 py-2.5 dark:border-dark-700">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.accounts.ticketDetails.auditTitle') }}</h2>
@@ -174,28 +191,45 @@
         </div>
       </div>
       <div v-if="auditLoading" class="px-5 py-10 text-center text-sm text-gray-500">{{ t('common.loading') }}</div>
+      <div v-else-if="auditError" class="px-5 py-10 text-center text-sm text-red-600">{{ t('admin.accounts.ticketDetails.loadFailed') }}</div>
       <div v-else-if="audits.length === 0" class="px-5 py-10 text-center text-sm text-gray-500">{{ t('admin.accounts.ticketDetails.auditEmpty') }}</div>
       <div v-else class="overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-100 text-sm dark:divide-dark-700">
           <thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-dark-800/70 dark:text-gray-400">
-            <tr><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.time') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.account') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.result') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.reason') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.attempts') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.ip') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.detail') }}</th></tr>
+            <tr><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.time') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.account') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.result') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.reason') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.columns.length') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.ip') }}</th><th class="px-5 py-3">{{ t('admin.accounts.ticketDetails.auditColumns.detail') }}</th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
             <template v-for="audit in audits" :key="audit.id">
               <tr class="align-top">
-                <td class="whitespace-nowrap px-5 py-4 text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(audit.created_at) }}<div class="mt-1 text-gray-400">{{ audit.duration_ms }}ms</div></td>
-                <td class="px-5 py-4 text-xs"><div class="font-medium">#{{ audit.account_id }}</div><div class="font-mono text-gray-500">{{ audit.model }}</div></td>
-                <td class="px-5 py-4"><span class="rounded-full px-2 py-1 text-xs" :class="audit.outcome === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'">{{ audit.outcome }}</span><div v-if="audit.http_status" class="mt-1 text-xs text-gray-500">HTTP {{ audit.http_status }}</div></td>
-                <td class="max-w-xs px-5 py-4 text-xs text-gray-600 dark:text-gray-300">{{ audit.reason || '-' }}</td>
-                <td class="px-5 py-4 text-xs text-gray-600 dark:text-gray-300">{{ audit.attempts || 0 }}</td>
-                <td class="px-5 py-4 font-mono text-xs text-gray-600 dark:text-gray-300">{{ audit.egress_ip || '-' }}</td>
-                <td class="px-5 py-4"><button type="button" class="btn btn-secondary btn-sm" @click="expandedAudit = expandedAudit === audit.id ? null : audit.id">{{ expandedAudit === audit.id ? t('admin.accounts.ticketDetails.collapse') : t('admin.accounts.ticketDetails.expand') }}</button></td>
+                <td class="whitespace-nowrap px-4 py-2.5 text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(audit.created_at) }}<div class="mt-1 text-gray-400">{{ audit.duration_ms }}ms</div></td>
+                <td class="px-4 py-2.5 text-xs"><div class="font-medium">#{{ audit.account_id }}</div><div class="font-mono text-gray-500">{{ audit.model }}</div></td>
+                <td class="px-4 py-2.5">
+                  <span class="rounded-full px-2 py-1 text-xs" :class="['success', 'validated'].includes(audit.outcome) ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'">{{ auditOutcome(audit.outcome) }}</span>
+                  <div v-if="audit.http_status" class="mt-1 text-xs text-gray-500">HTTP {{ audit.http_status }}</div>
+                  <div v-if="audit.response_headers?.['x-sub2api-connection-session']" class="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300" data-testid="ticket-connection">
+                    <div class="font-mono" :title="audit.response_headers['x-sub2api-connection-session']">{{ t('admin.accounts.ticketDetails.connection') }} {{ audit.response_headers['x-sub2api-connection-session'].slice(0, 8) }}</div>
+                    <div>{{ connectionReuseLabel(audit) }} · {{ audit.response_headers['x-sub2api-connection-age-seconds'] ?? '-' }}s</div>
+                    <div>{{ t('admin.accounts.ticketDetails.connectionSuccesses') }}: {{ audit.response_headers['x-sub2api-connection-successes'] ?? '-' }}</div>
+                    <div>{{ audit.response_headers['x-sub2api-connection-retained'] === 'true' ? t('admin.accounts.ticketDetails.connectionRetained') : audit.response_headers['x-sub2api-connection-retained'] === 'false' ? t('admin.accounts.ticketDetails.connectionReleased') : t('admin.accounts.ticketDetails.connectionUnknown') }}</div>
+                  </div>
+                </td>
+                <td class="max-w-xs px-4 py-2.5 text-xs text-gray-600 dark:text-gray-300">{{ audit.reason || '-' }}</td>
+                <td class="px-4 py-2.5 text-xs text-gray-600 dark:text-gray-300">{{ audit.ticket_length || 0 }}</td>
+                <td class="px-4 py-2.5 font-mono text-xs text-gray-600 dark:text-gray-300">
+                  <template v-if="['success', 'validated'].includes(audit.outcome)">
+                    {{ isConnectionIP(audit.response_headers?.['x-sub2api-egress-ip-source']) ? audit.egress_ip || t('admin.accounts.ticketDetails.ipUnknown') : t('admin.accounts.ticketDetails.ipUnknown') }}
+                    <div v-if="isConnectionIP(audit.response_headers?.['x-sub2api-egress-ip-source'])" class="mt-1 font-sans">{{ ipSourceLabel(audit.response_headers?.['x-sub2api-egress-ip-source']) }}</div>
+                    <div v-if="audit.response_headers?.['x-sub2api-egress-ip-source'] === 'separate_probe'" class="mt-1 font-sans">{{ t('admin.accounts.ticketDetails.ipSources.probe') }}</div>
+                  </template><template v-else>-</template>
+                </td>
+                <td class="px-4 py-2.5"><button type="button" class="btn btn-secondary btn-sm" @click="expandedAudit = expandedAudit === audit.id ? null : audit.id">{{ expandedAudit === audit.id ? t('admin.accounts.ticketDetails.collapse') : t('admin.accounts.ticketDetails.expand') }}</button></td>
               </tr>
-              <tr v-if="expandedAudit === audit.id"><td colspan="7" class="bg-gray-50 px-5 py-4 dark:bg-dark-800/50"><div v-if="auditDetailLoading" class="text-sm text-gray-500">{{ t('common.loading') }}</div><div v-else-if="auditDetailError" class="text-sm text-red-600 dark:text-red-400">{{ t('admin.accounts.ticketDetails.detailLoadFailed') }}</div><div v-else class="grid gap-4 lg:grid-cols-2"><div><div class="mb-1 text-xs font-semibold text-gray-500">{{ t('admin.accounts.ticketDetails.requestBody') }}</div><pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-900 p-3 text-xs leading-5 text-gray-100">{{ auditDetail?.id === audit.id ? formatPayload(auditDetail.request_body) : '-' }}</pre></div><div><div class="mb-1 text-xs font-semibold text-gray-500">{{ t('admin.accounts.ticketDetails.responseHeaders') }}</div><pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-900 p-3 text-xs leading-5 text-gray-100">{{ auditDetail?.id === audit.id ? formatHeaders(auditDetail.response_headers) : '-' }}</pre></div></div></td></tr>
+              <tr v-if="expandedAudit === audit.id"><td colspan="7" class="bg-gray-50 px-4 py-2.5 dark:bg-dark-800/50"><div v-if="auditDetailLoading" class="text-sm text-gray-500">{{ t('common.loading') }}</div><div v-else-if="auditDetailError" class="text-sm text-red-600 dark:text-red-400">{{ t('admin.accounts.ticketDetails.detailLoadFailed') }}</div><div v-else class="grid gap-4 lg:grid-cols-2"><div><div class="mb-1 text-xs font-semibold text-gray-500">{{ t('admin.accounts.ticketDetails.requestBody') }}</div><pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-900 p-3 text-xs leading-5 text-gray-100">{{ auditDetail?.id === audit.id ? formatPayload(auditDetail.request_body) : '-' }}</pre></div><div><div class="mb-1 text-xs font-semibold text-gray-500">{{ t('admin.accounts.ticketDetails.responseHeaders') }}</div><pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-900 p-3 text-xs leading-5 text-gray-100">{{ auditDetail?.id === audit.id ? formatHeaders(auditDetail.response_headers) : '-' }}</pre></div></div></td></tr>
             </template>
           </tbody>
         </table>
       </div>
+      <Pagination v-if="auditTotal > 0" :total="auditTotal" :page="auditPage" :page-size="auditPageSize" @update:page="changeAuditPage" @update:page-size="changeAuditPageSize" />
     </div>
   </section>
 </template>
@@ -205,18 +239,39 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
+import Pagination from '@/components/common/Pagination.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import type { AccountListItem } from '@/types'
-import type { CodexTicketAudit } from '@/api/admin/codexTicket'
+import type { CodexTicketAudit, CodexTicketStatistics } from '@/api/admin/codexTicket'
 
 type Ticket = NonNullable<AccountListItem['codex_turn_tickets']>[number]
 type TicketState = 'all' | 'ready' | 'missing' | 'blocked'
 
+function isConnectionIP(source?: string): boolean {
+  return source === 'upstream_header' || source === 'same_connection_trace'
+}
+
+function ipSourceLabel(source?: string): string {
+  return t(`admin.accounts.ticketDetails.ipSources.${source === 'upstream_header' ? 'upstream' : source === 'same_connection_trace' ? 'connection' : source === 'separate_probe' ? 'probe' : 'unknown'}`)
+}
+
+function auditOutcome(outcome: string): string {
+  const labels: Record<string, string> = { success: 'newTicket', validated: 'validatedTicket', transport_error: 'connectionError', model_mismatch: 'modelMismatch' }
+  return labels[outcome] ? t(`admin.accounts.ticketDetails.${labels[outcome]}`) : outcome
+}
+
+function connectionReuseLabel(audit: CodexTicketAudit): string {
+  const reused = audit.response_headers?.['x-sub2api-connection-reused']
+  return t(`admin.accounts.ticketDetails.${reused === 'true' ? 'connectionReused' : reused === 'false' ? 'connectionNew' : 'connectionUnknown'}`)
+}
+
 interface TicketRow {
   account: AccountListItem
   ticket: Ticket
+  lastSuccess: Ticket | CodexTicketStatistics
+  stats?: CodexTicketStatistics
 }
 
 const { t } = useI18n()
@@ -227,6 +282,14 @@ const search = ref('')
 const stateFilter = ref<TicketState>('all')
 const lastLoadedAt = ref<string | null>(null)
 const audits = ref<CodexTicketAudit[]>([])
+const statistics = ref<CodexTicketStatistics[]>([])
+const statisticsError = ref(false)
+const auditSnapshot = ref(new Date().toISOString())
+const auditPage = ref(1)
+const auditPageSize = ref(10)
+const auditTotal = ref(0)
+const auditError = ref(false)
+const statsByKey = computed(() => new Map(statistics.value.map(item => [`${item.account_id}-${item.model}`, item])))
 const auditDetail = ref<CodexTicketAudit | null>(null)
 const auditDetailLoading = ref(false)
 const auditDetailError = ref(false)
@@ -236,6 +299,7 @@ const discardingAll = ref(false)
 const discardingKey = ref<string | null>(null)
 const clearingAudits = ref(false)
 const accounts = ref<AccountListItem[]>([])
+const targetLength = ref(292)
 const settings = reactive({
   enabled: false,
   proxyConfigured: false,
@@ -244,7 +308,10 @@ const settings = reactive({
 const eligibleAccounts = computed(() => accounts.value.filter(isCurrentlyHarvestable))
 
 const ticketRows = computed<TicketRow[]>(() => accounts.value.flatMap((account) => (
-  (account.codex_turn_tickets ?? []).map((ticket) => ({ account, ticket }))
+  (account.codex_turn_tickets ?? []).map((ticket) => {
+    const stats = statsByKey.value.get(`${account.id}-${ticket.model}`)
+    return { account, ticket, stats, lastSuccess: stats?.last_success_at ? stats : ticket }
+  })
 )))
 
 const modelNames = computed(() => [...new Set(ticketRows.value.map((row) => row.ticket.model))])
@@ -326,13 +393,48 @@ function isCurrentlyHarvestable(account: AccountListItem): boolean {
   return ![account.overload_until, account.rate_limit_reset_at, account.temp_unschedulable_until].some(isFuture)
 }
 
+function elapsed(since?: string): string {
+  return since ? formatRemaining(Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 1000))) : '-'
+}
+
+async function loadAudits() {
+  if (auditLoading.value) return
+  auditLoading.value = true
+  auditError.value = false
+  expandedAudit.value = null
+  try {
+    const result = await adminAPI.codexTicket.listAudits({ page: auditPage.value, page_size: auditPageSize.value, to: auditSnapshot.value })
+    audits.value = result.items
+    auditTotal.value = result.total
+  } catch { audits.value = []; auditError.value = true }
+  finally { auditLoading.value = false }
+}
+
+function changeAuditPage(page: number) {
+  if (auditLoading.value) return
+  auditPage.value = page
+  void loadAudits()
+}
+
+function changeAuditPageSize(size: number) {
+  if (auditLoading.value) return
+  auditPageSize.value = size
+  auditPage.value = 1
+  void loadAudits()
+}
+
 async function load() {
   loading.value = true
   errorMessage.value = ''
   try {
     const currentSettings = await adminAPI.settings.getSettings()
-    auditLoading.value = true
-    adminAPI.codexTicket.listAudits({ page: 1, page_size: 50 }).then((response) => { audits.value = response.items }).catch(() => { audits.value = [] }).finally(() => { auditLoading.value = false })
+    auditPage.value = 1
+    auditSnapshot.value = new Date().toISOString()
+    await loadAudits()
+    statisticsError.value = false
+    try { statistics.value = await adminAPI.codexTicket.statistics() }
+    catch { statistics.value = []; statisticsError.value = true }
+    targetLength.value = currentSettings.openai_codex_ticket_policy?.target_length ?? 292
     settings.enabled = Boolean(currentSettings.openai_codex_ticket_enabled)
     settings.proxyConfigured = Boolean(currentSettings.openai_codex_ticket_harvest_proxy_configured)
 
@@ -397,6 +499,7 @@ async function clearAuditRecords() {
   clearingAudits.value = true
   try {
     await adminAPI.codexTicket.clearAudits()
+    auditPage.value = 1
     audits.value = []
     expandedAudit.value = null
     auditDetail.value = null

@@ -138,6 +138,7 @@ func registerCodexTicketRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	tickets := admin.Group("/codex-ticket")
 	{
 		tickets.GET("/audits", h.Admin.CodexTicket.ListAudits)
+		tickets.GET("/statistics", h.Admin.CodexTicket.Statistics)
 		tickets.GET("/audits/:id", h.Admin.CodexTicket.GetAudit)
 		tickets.POST("/audits/clear", h.Admin.CodexTicket.ClearAudits)
 		tickets.POST("/discard", h.Admin.CodexTicket.DiscardTickets)
@@ -376,6 +377,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/ollama-cloud-usage/settings", h.Admin.Account.GetOllamaCloudUsageSettings)
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
+		accounts.GET("/:id/timezone", h.Admin.Account.GetTimezone)
+		accounts.PUT("/:id/timezone", h.Admin.Account.SetTimezone)
+		accounts.POST("/:id/timezone/detect", h.Admin.Account.DetectTimezone)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)

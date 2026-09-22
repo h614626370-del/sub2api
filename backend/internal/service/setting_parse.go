@@ -898,6 +898,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else if s != nil && s.cfg != nil {
 		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
 	}
+	policy := s.parseCodexTicketPolicy(settings[SettingKeyOpenAICodexTicketPolicy])
+	result.OpenAICodexTicketPolicy = &policy
 	result.OpenAIAstraGroupID, _ = strconv.ParseInt(settings[SettingKeyOpenAIAstraGroupID], 10, 64)
 	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
 	// codex_cli_only 加固

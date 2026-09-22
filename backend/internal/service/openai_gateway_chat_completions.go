@@ -372,6 +372,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		upstreamCtx, cancelUpstream = context.WithCancel(upstreamCtx)
 	}
 	defer cancelUpstream()
+	responsesBody = s.applyAccountTimezone(ctx, account, responsesBody)
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {
