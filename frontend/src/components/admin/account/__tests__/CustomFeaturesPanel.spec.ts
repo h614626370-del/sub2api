@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import zhAccounts from '@/i18n/locales/zh/admin/accounts'
+import enAccounts from '@/i18n/locales/en/admin/accounts'
 
 import CustomFeaturesPanel from '../CustomFeaturesPanel.vue'
 
@@ -32,10 +35,6 @@ vi.mock('@/utils/apiError', () => ({
   extractApiErrorMessage: () => 'error',
 }))
 
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
-}))
-
 const ToggleStub = defineComponent({
   props: {
     modelValue: { type: Boolean, default: false },
@@ -44,9 +43,17 @@ const ToggleStub = defineComponent({
   template: '<input id="custom-toggle-stub" type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
 })
 
-function mountPanel() {
+function mountPanel(locale = 'zh') {
   return mount(CustomFeaturesPanel, {
     global: {
+      plugins: [createI18n({
+        legacy: false,
+        locale,
+        messages: {
+          zh: { admin: zhAccounts, common: { loading: '加载中', save: '保存', saving: '保存中', refresh: '刷新' } },
+          en: { admin: enAccounts, common: { loading: 'Loading', save: 'Save', saving: 'Saving', refresh: 'Refresh' } },
+        },
+      })],
       stubs: {
         Toggle: ToggleStub,
         Icon: true,
@@ -62,6 +69,20 @@ describe('CustomFeaturesPanel', () => {
     updateSettings.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
+  })
+
+  it.each(['zh', 'en'])('renders the proxy placeholder with real %s translations', async (locale) => {
+    const compilationErrors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getSettings.mockResolvedValue({})
+    const wrapper = mountPanel(locale)
+    await flushPromises()
+    expect(wrapper.get('#custom-codex-ticket-proxy').attributes('placeholder'))
+      .toBe('http://user:pass@proxy.example.com:1080')
+    expect(wrapper.find('#custom-astra-group').exists()).toBe(true)
+    wrapper.unmount()
+    const errors = compilationErrors.mock.calls.slice()
+    compilationErrors.mockRestore()
+    expect(errors).toEqual([])
   })
 
   it('saves a special OpenAI pool and can disable routing', async () => {

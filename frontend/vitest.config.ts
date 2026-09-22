@@ -4,6 +4,8 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
+  // Match production so real locale messages are parsed in component tests.
+  define: { __INTLIFY_JIT_COMPILATION__: true },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

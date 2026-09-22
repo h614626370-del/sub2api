@@ -91,7 +91,7 @@ export default {
         codexTicketDescription: '后台为符合条件的 OpenAI OAuth 账号获取 292 长度的 x-codex-turn-state，并在业务请求中注入。',
         codexTicketProxy: '292 打票代理',
         codexTicketProxyDescription: '仅用于后台打票探测，正式业务请求仍使用账号自己的住宅代理。填写完整的 HTTP、HTTPS 或 SOCKS5(h) 代理 URL。',
-        codexTicketProxyPlaceholder: 'http://user:pass@proxy.example.com:1080',
+        codexTicketProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
         codexTicketProxyConfigured: '已配置（密码已隐藏）。要更换请粘贴新的完整代理 URL。',
         codexTicketBehavior: '启用后，后台会持续刷新门票；在缺少有效门票时，默认的 fail-closed 策略会暂停对应模型的账号调度。',
         futureTitle: '后续定制项',

@@ -91,7 +91,7 @@ export default {
         codexTicketDescription: 'Harvest a 292-character x-codex-turn-state for eligible OpenAI OAuth accounts and inject it into production requests.',
         codexTicketProxy: '292 harvest proxy',
         codexTicketProxyDescription: 'Used only for background ticket probes. Production traffic still uses each account\'s residential proxy. Enter a complete HTTP, HTTPS, or SOCKS5(h) proxy URL.',
-        codexTicketProxyPlaceholder: 'http://user:pass@proxy.example.com:1080',
+        codexTicketProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
         codexTicketProxyConfigured: 'Configured (password hidden). Paste a complete new proxy URL to replace it.',
         codexTicketBehavior: 'When enabled, the harvester refreshes tickets continuously. With the default fail-closed policy, accounts without a valid ticket are paused for the affected model.',
         futureTitle: 'More custom features',
