@@ -56,6 +56,7 @@ func TestAccountTimezoneDetectionDefaultAndProxyChange(t *testing.T) {
 	require.Equal(t, 1, probe.calls)
 	state, err = s.SetAccountTimezone(ctx, 1, "Asia/Tokyo")
 	require.Error(t, err)
+	require.Nil(t, state)
 	state, err = s.DetectAccountTimezone(ctx, 1, true)
 	require.NoError(t, err)
 	require.Equal(t, "America/Los_Angeles", state.Timezone)
