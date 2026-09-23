@@ -135,6 +135,7 @@ func alignTimezoneEnvironment(text, date, zone string) string {
 		value      string
 	}
 	var edits []replacement
+	//nolint:gosec // Token-only parsing; directives and processing instructions are rejected below, with no custom entities or object decoding.
 	decoder := xml.NewDecoder(strings.NewReader(text))
 	depth, start := 0, 0
 	name := ""

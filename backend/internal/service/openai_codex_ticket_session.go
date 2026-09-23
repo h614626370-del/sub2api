@@ -69,7 +69,7 @@ func (session *codexTicketSession) lookupEgressIP(ctx context.Context) (string, 
 	if err != nil || resp == nil {
 		return "", false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	const limit = 16 << 10
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil || len(body) > limit {
@@ -101,7 +101,7 @@ func codexTicketConnectionMaxAge(cfg config.OpenAICodexTicketConfig) time.Durati
 func (s *OpenAIGatewayService) codexTicketSessionForProbe(accountID int64, model, proxyURL string, cfg config.OpenAICodexTicketConfig) (*codexTicketSession, error) {
 	key := openAICodexTicketKey(accountID, model)
 	if raw, ok := s.openaiCodexTicketSessions.Load(key); ok {
-		session := raw.(*codexTicketSession)
+		session := raw.(*codexTicketSession) //nolint:errcheck // This private map only stores *codexTicketSession in this method.
 		if cfg.ReuseConnection && cfg.CookieEnabled && session.proxyURL == proxyURL &&
 			time.Since(session.createdAt) < codexTicketConnectionMaxAge(cfg) && session.ticket.usable(time.Now(), cfg) &&
 			len(session.ticket.liveCookies(time.Now(), cfg)) == 2 {
@@ -138,9 +138,9 @@ func (s *OpenAIGatewayService) releaseCodexTicketSession(key string, session *co
 
 func (s *OpenAIGatewayService) closeCodexTicketSessions(accountID *int64) {
 	s.openaiCodexTicketSessions.Range(func(key, value any) bool {
-		session := value.(*codexTicketSession)
+		session := value.(*codexTicketSession) //nolint:errcheck // Values are only stored by codexTicketSessionForProbe.
 		if accountID == nil || session.accountID == *accountID {
-			s.releaseCodexTicketSession(key.(string), session)
+			s.releaseCodexTicketSession(key.(string), session) //nolint:errcheck // Keys are only stored as strings by codexTicketSessionForProbe.
 		}
 		return true
 	})
@@ -163,10 +163,10 @@ func (s *OpenAIGatewayService) pruneCodexTicketSessions(ctx context.Context, acc
 	}
 	proxyURL := s.openAICodexTicketHarvestProxyURLContext(ctx)
 	s.openaiCodexTicketSessions.Range(func(key, value any) bool {
-		session := value.(*codexTicketSession)
+		session := value.(*codexTicketSession) //nolint:errcheck // Values are only stored by codexTicketSessionForProbe.
 		if !cfg.ReuseConnection || !cfg.CookieEnabled || !eligible[session.accountID] ||
 			!models[session.model] || proxyURL != session.proxyURL || time.Since(session.createdAt) >= codexTicketConnectionMaxAge(cfg) {
-			s.releaseCodexTicketSession(key.(string), session)
+			s.releaseCodexTicketSession(key.(string), session) //nolint:errcheck // Keys are only stored as strings by codexTicketSessionForProbe.
 		}
 		return true
 	})
@@ -174,7 +174,7 @@ func (s *OpenAIGatewayService) pruneCodexTicketSessions(ctx context.Context, acc
 
 func (s *OpenAIGatewayService) codexTicketSessionDue(accountID int64, model string, now time.Time) bool {
 	if raw, ok := s.openaiCodexTicketSessions.Load(openAICodexTicketKey(accountID, model)); ok {
-		return now.UnixNano() >= raw.(*codexTicketSession).nextProbe.Load()
+		return now.UnixNano() >= raw.(*codexTicketSession).nextProbe.Load() //nolint:errcheck // Values are only stored by codexTicketSessionForProbe.
 	}
 	return false
 }

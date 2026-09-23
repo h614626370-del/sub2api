@@ -62,7 +62,7 @@ func captureCodexTicketCookies(resp *http.Response, endpoint *url.URL, now time.
 			continue
 		}
 		path := c.Path
-		if path != "" && path != endpoint.Path && !(strings.HasPrefix(endpoint.Path, path) && (strings.HasSuffix(path, "/") || strings.HasPrefix(strings.TrimPrefix(endpoint.Path, path), "/"))) {
+		if path != "" && path != endpoint.Path && (!strings.HasPrefix(endpoint.Path, path) || (!strings.HasSuffix(path, "/") && !strings.HasPrefix(strings.TrimPrefix(endpoint.Path, path), "/"))) {
 			continue
 		}
 		if c.Secure && endpoint.Scheme != "https" {

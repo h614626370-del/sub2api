@@ -8,7 +8,7 @@ import (
 )
 
 // DiagnoseModelAvailabilityForPlatform reports whether the requested model
-	// is configured to be served by any persistently eligible OpenAI-compatible
+// is configured to be served by any persistently eligible OpenAI-compatible
 // account in the group for the given platform (e.g. PlatformOpenAI,
 // PlatformGrok). The platform scopes the candidate pool so distinct
 // OpenAI-compatible platforms do not cross-contaminate diagnosis results.

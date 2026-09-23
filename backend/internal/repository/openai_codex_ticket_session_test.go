@@ -70,12 +70,17 @@ func TestCodexTicketSessionRetainsOneHTTPSProxyTunnel(t *testing.T) {
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			return
 		}
-		defer remote.Close()
-		client, _, err := w.(http.Hijacker).Hijack()
+		defer func() { _ = remote.Close() }()
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking unavailable", http.StatusInternalServerError)
+			return
+		}
+		client, _, err := hijacker.Hijack()
 		if err != nil {
 			return
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 		tunnels.Add(1)
 		_, _ = io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
 		done := make(chan struct{})
@@ -95,7 +100,9 @@ func TestCodexTicketSessionRetainsOneHTTPSProxyTunnel(t *testing.T) {
 	require.NoError(t, err)
 	roots := x509.NewCertPool()
 	roots.AddCert(upstream.Certificate())
-	transport.TLSClientConfig = upstream.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	upstreamTransport, ok := upstream.Client().Transport.(*http.Transport)
+	require.True(t, ok)
+	transport.TLSClientConfig = upstreamTransport.TLSClientConfig.Clone()
 	transport.TLSClientConfig.RootCAs = roots
 	transport.TLSClientConfig.InsecureSkipVerify = false
 	guardCodexTicketSessionDial(transport)

@@ -93,3 +93,13 @@ func TestAlignTimezoneEnvironmentRejectsMalformedOrUnmarkedXML(t *testing.T) {
 		require.Equal(t, text, alignTimezoneEnvironment(text, "2026-01-01", "Asia/Tokyo"))
 	}
 }
+
+func TestAlignTimezoneEnvironmentRejectsUnsafeXML(t *testing.T) {
+	for _, text := range []string{
+		"<environment_context><!DOCTYPE timezone><timezone>UTC</timezone></environment_context>",
+		"<environment_context><?timezone UTC?><timezone>UTC</timezone></environment_context>",
+		"<environment_context><timezone>&custom;</timezone></environment_context>",
+	} {
+		require.Equal(t, text, alignTimezoneEnvironment(text, "2026-01-01", "Asia/Tokyo"))
+	}
+}

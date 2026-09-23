@@ -48,7 +48,7 @@ type codexTicketAccountState struct {
 
 func (s *OpenAIGatewayService) codexTicketAccountState(id int64) *codexTicketAccountState {
 	state, _ := s.openaiCodexTicketAccounts.LoadOrStore(id, &codexTicketAccountState{})
-	return state.(*codexTicketAccountState)
+	return state.(*codexTicketAccountState) //nolint:errcheck // This private map only stores *codexTicketAccountState via LoadOrStore above.
 }
 
 const (
@@ -170,12 +170,9 @@ func OpenAICodexTicketStatuses(account *Account, cfg config.OpenAICodexTicketCon
 	if !cfg.Enabled || !isOpenAICodexTicketAccount(account) {
 		return nil
 	}
-	models, targetLen := cfg.Models, cfg.TargetLength
+	models := cfg.Models
 	if len(models) == 0 {
 		models = []string{openAICodexTicketDefaultModel, openAICodexTicketDefaultSolModel}
-	}
-	if targetLen <= 0 {
-		targetLen = 292
 	}
 	cfg = codexTicketPolicyFromConfig(cfg).Apply(cfg)
 	out := make([]OpenAICodexTicketStatus, 0, len(models))
@@ -276,13 +273,6 @@ func (t *openAICodexTicket) valid(now time.Time, targetLen int) bool {
 		return false
 	}
 	return true
-}
-
-func (t *openAICodexTicket) needsRefresh(now time.Time, refreshBefore time.Duration) bool {
-	if t == nil || t.ExpiresAt.IsZero() {
-		return true
-	}
-	return !t.ExpiresAt.After(now.Add(refreshBefore))
 }
 
 func (s *OpenAIGatewayService) lookupOpenAICodexTicket(account *Account, model string) *openAICodexTicket {

@@ -97,17 +97,9 @@ func TestSolAndAstraRoutesRemainModelScoped(t *testing.T) {
 	groups.group.Status = StatusActive
 	repo.values[SettingKeyOpenAISolGroupID] = "30"
 	svc.settingService.invalidateOpenAISolGroupCache()
-	for i := range svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo).schedulerTestOpenAIAccountRepo.accounts {
-		// Keep the fixture's Sol account in the valid dedicated target group.
-		if svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo).schedulerTestOpenAIAccountRepo.accounts[i].ID == 3 {
-			svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo).schedulerTestOpenAIAccountRepo.accounts[i].GroupIDs = []int64{30}
-		}
-	}
-	// The fixture group reader resolves a single target at a time; use group 30
-	// for Sol, then restore Astra's configured target and prove independent pools.
+	// Resolve both dedicated targets to prove the model pools stay independent.
 	repo.values[SettingKeyOpenAIAstraGroupID] = "20"
 	svc.settingService.invalidateOpenAIAstraGroupCache()
-	astraReader := groups
 	svc.settingService.defaultSubGroupReader = solAndAstraGroupReader{groups: map[int64]*Group{
 		20: {ID: 20, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeSpecial},
 		30: {ID: 30, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeSpecial},
@@ -132,14 +124,15 @@ func TestSolAndAstraRoutesRemainModelScoped(t *testing.T) {
 		svc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI),
 		account, &sourceID, "gpt-6-sol", PlatformOpenAI,
 	), "switching from Astra to Sol must leave the Astra pool")
-	_ = astraReader
 }
 
 type solAndAstraGroupReader struct{ groups map[int64]*Group }
 
 func (r solAndAstraGroupReader) GetByID(_ context.Context, id int64) (*Group, error) {
 	group := r.groups[id]
-	if group == nil { return nil, errors.New("missing group") }
+	if group == nil {
+		return nil, errors.New("missing group")
+	}
 	return group, nil
 }
 

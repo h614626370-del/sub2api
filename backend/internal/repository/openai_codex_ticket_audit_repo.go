@@ -29,7 +29,7 @@ func (r *openAICodexTicketAuditRepository) Statistics(ctx context.Context) ([]se
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := make([]service.OpenAICodexTicketStatistics, 0)
 	for rows.Next() {
 		var item service.OpenAICodexTicketStatistics
