@@ -1489,7 +1489,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
 	platform = NormalizeOpenAICompatiblePlatform(platform)
-	if id := openAIAstraAccountGroup(ctx); id > 0 {
+	if id := openAIModelRouteGroup(ctx); id > 0 {
 		// Explicit repository group query also prevents simple-mode snapshots from widening this pool.
 		accounts, err := s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, id, platform)
 		if err != nil {
@@ -1614,7 +1614,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return nil
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
-	if openAIAstraAccountGroup(ctx) > 0 && !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
+	if openAIModelRouteGroup(ctx) > 0 && !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
 		return nil
 	}
 	if s.schedulerSnapshot == nil || s.accountRepo == nil {

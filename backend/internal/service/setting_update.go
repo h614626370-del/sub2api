@@ -495,6 +495,16 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		}
 	}
 	updates[SettingKeyOpenAIAstraGroupID] = strconv.FormatInt(settings.OpenAIAstraGroupID, 10)
+	omitSol := false
+	if len(omittedSets) > 0 {
+		_, omitSol = omittedSets[0][SettingKeyOpenAISolGroupID]
+	}
+	if !omitSol {
+		if err := s.validateOpenAISolGroup(ctx, settings.OpenAISolGroupID); err != nil {
+			return nil, err
+		}
+	}
+	updates[SettingKeyOpenAISolGroupID] = strconv.FormatInt(settings.OpenAISolGroupID, 10)
 	if settings.OpenAICodexTicketPolicy != nil {
 		if err := settings.OpenAICodexTicketPolicy.Validate(); err != nil {
 			return nil, err
@@ -765,6 +775,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// 这里没有它的最新值，重算会把同步结果覆盖成陈旧值。
 	s.InvalidateOpenAICodexClientVersionCache()
 	s.invalidateOpenAIAstraGroupCache()
+	s.invalidateOpenAISolGroupCache()
 	s.invalidateCodexTicketPolicy()
 	s.InvalidateOpenAICodexTicketEnabledCache()
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()

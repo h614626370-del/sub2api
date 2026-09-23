@@ -9540,6 +9540,7 @@ type SettingsForm = Omit<
   SystemSettings,
   | "openai_codex_ticket_policy"
   | "openai_astra_group_id"
+  | "openai_sol_group_id"
   | "openai_codex_ticket_enabled"
   | "openai_codex_ticket_harvest_proxy_url"
   | "openai_codex_ticket_harvest_proxy_configured"

@@ -52,13 +52,14 @@ func astraRouteFixture(t *testing.T, advanced bool) (*OpenAIGatewayService, *cod
 	t.Helper()
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
-	repo := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAIAstraGroupID: "20", openAIAdvancedSchedulerSettingKey: strconv.FormatBool(advanced)}}}
+	repo := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAIAstraGroupID: "20", SettingKeyOpenAISolGroupID: "20", openAIAdvancedSchedulerSettingKey: strconv.FormatBool(advanced)}}}
 	settings := NewSettingService(repo, &config.Config{})
 	groups := &astraRouteGroupReader{group: &Group{ID: 20, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeSpecial, RateMultiplier: 100}}
 	settings.SetDefaultSubscriptionGroupReader(groups)
 	accounts := []Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 2, GroupIDs: []int64{10}},
 		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 2, GroupIDs: []int64{20}},
+		{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 2, GroupIDs: []int64{30}},
 	}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: settings, rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(strconv.FormatBool(advanced)), accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}, concurrencyService: NewConcurrencyService(stubConcurrencyCache{}), cache: &stubGatewayCache{}}
 	return svc, repo, groups
@@ -73,7 +74,7 @@ func TestAstraRouteSelectsOnlyTargetPool(t *testing.T) {
 			for _, tc := range []struct {
 				model string
 				id    int64
-			}{{"gpt-6-astra", 2}, {"gpt-5.6-sol", 1}} {
+			}{{"gpt-6-astra", 2}, {"gpt-6-sol", 2}, {"gpt-5.6-sol", 1}} {
 				selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &sourceID, "", "session", tc.model, nil, OpenAIUpstreamTransportAny, false)
 				require.NoError(t, err)
 				require.NotNil(t, selection)
@@ -86,6 +87,60 @@ func TestAstraRouteSelectsOnlyTargetPool(t *testing.T) {
 			require.ErrorIs(t, err, ErrNoAvailableAccounts, "must not fail over into source pool")
 		})
 	}
+}
+
+func TestSolAndAstraRoutesRemainModelScoped(t *testing.T) {
+	svc, repo, groups := astraRouteFixture(t, false)
+	sourceID := int64(10)
+	groups.group.ID = 30
+	groups.group.SubscriptionType = SubscriptionTypeSpecial
+	groups.group.Status = StatusActive
+	repo.values[SettingKeyOpenAISolGroupID] = "30"
+	svc.settingService.invalidateOpenAISolGroupCache()
+	for i := range svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo).schedulerTestOpenAIAccountRepo.accounts {
+		// Keep the fixture's Sol account in the valid dedicated target group.
+		if svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo).schedulerTestOpenAIAccountRepo.accounts[i].ID == 3 {
+			svc.accountRepo.(schedulerGroupAwareOpenAIAccountRepo).schedulerTestOpenAIAccountRepo.accounts[i].GroupIDs = []int64{30}
+		}
+	}
+	// The fixture group reader resolves a single target at a time; use group 30
+	// for Sol, then restore Astra's configured target and prove independent pools.
+	repo.values[SettingKeyOpenAIAstraGroupID] = "20"
+	svc.settingService.invalidateOpenAIAstraGroupCache()
+	astraReader := groups
+	svc.settingService.defaultSubGroupReader = solAndAstraGroupReader{groups: map[int64]*Group{
+		20: {ID: 20, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeSpecial},
+		30: {ID: 30, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeSpecial},
+	}}
+	for _, tc := range []struct {
+		model string
+		want  int64
+	}{
+		{"gpt-6-astra", 2},
+		{"gpt-6-sol", 3},
+		{"gpt-5.6-sol", 1},
+	} {
+		ctx := svc.WithOpenAIModelRoute(context.Background(), tc.model, PlatformOpenAI)
+		selection, _, err := svc.SelectAccountWithScheduler(ctx, &sourceID, "", "same-session", tc.model, nil, OpenAIUpstreamTransportAny, false)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, selection.Account.ID, tc.model)
+		selection.ReleaseFunc()
+	}
+	account, err := svc.accountRepo.GetByID(context.Background(), 2)
+	require.NoError(t, err)
+	require.False(t, svc.OpenAIModelRouteAllowsAccount(
+		svc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI),
+		account, &sourceID, "gpt-6-sol", PlatformOpenAI,
+	), "switching from Astra to Sol must leave the Astra pool")
+	_ = astraReader
+}
+
+type solAndAstraGroupReader struct{ groups map[int64]*Group }
+
+func (r solAndAstraGroupReader) GetByID(_ context.Context, id int64) (*Group, error) {
+	group := r.groups[id]
+	if group == nil { return nil, errors.New("missing group") }
+	return group, nil
 }
 
 func TestAstraRouteClientModelAndSettingsFailures(t *testing.T) {

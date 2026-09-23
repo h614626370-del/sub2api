@@ -576,7 +576,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
-	if (openAIAstraAccountGroup(ctx) > 0 || len(account.GroupIDs) > 0 || len(account.AccountGroups) > 0) && !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
+	if (openAIModelRouteGroup(ctx) > 0 || len(account.GroupIDs) > 0 || len(account.AccountGroups) > 0) && !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
 		return 0, nil, "", nil
 	}
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {

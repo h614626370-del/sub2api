@@ -489,6 +489,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAIAstraGroupID != after.OpenAIAstraGroupID {
 		changed = append(changed, "openai_astra_group_id")
 	}
+	if before.OpenAISolGroupID != after.OpenAISolGroupID {
+		changed = append(changed, "openai_sol_group_id")
+	}
 	if before.OpenAICodexTicketEnabled != after.OpenAICodexTicketEnabled {
 		changed = append(changed, "openai_codex_ticket_enabled")
 	}

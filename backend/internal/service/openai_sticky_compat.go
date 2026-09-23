@@ -133,7 +133,7 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 	if err == nil && accountID > 0 {
 		return accountID, nil
 	}
-	if openAIAstraAccountGroup(ctx) > 0 || !s.openAISessionHashReadOldFallbackEnabled() {
+	if openAIModelRouteGroup(ctx) > 0 || !s.openAISessionHashReadOldFallbackEnabled() {
 		return accountID, err
 	}
 
@@ -164,7 +164,7 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 		return err
 	}
 
-	if openAIAstraAccountGroup(ctx) > 0 || !s.openAISessionHashDualWriteOldEnabled() {
+	if openAIModelRouteGroup(ctx) > 0 || !s.openAISessionHashDualWriteOldEnabled() {
 		return nil
 	}
 	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
@@ -188,7 +188,7 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 	}
 
 	err := s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), primaryKey, ttl)
-	if openAIAstraAccountGroup(ctx) > 0 || (!s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled()) {
+	if openAIModelRouteGroup(ctx) > 0 || (!s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled()) {
 		return err
 	}
 
@@ -209,7 +209,7 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context,
 	}
 
 	err := s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), primaryKey)
-	if openAIAstraAccountGroup(ctx) > 0 || (!s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled()) {
+	if openAIModelRouteGroup(ctx) > 0 || (!s.openAISessionHashReadOldFallbackEnabled() && !s.openAISessionHashDualWriteOldEnabled()) {
 		return err
 	}
 

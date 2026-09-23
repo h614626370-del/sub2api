@@ -219,6 +219,7 @@ type SystemSettings struct {
 	OpenAICodexVersionAutoSyncEnabled       bool                             `json:"openai_codex_version_auto_sync_enabled"`
 	OpenAICodexTicketPolicy                 *service.OpenAICodexTicketPolicy `json:"openai_codex_ticket_policy"`
 	OpenAIAstraGroupID                      int64                            `json:"openai_astra_group_id"`
+	OpenAISolGroupID                        int64                            `json:"openai_sol_group_id"`
 	OpenAICodexTicketEnabled                bool                             `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL        string                           `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketHarvestProxyConfigured bool                             `json:"openai_codex_ticket_harvest_proxy_configured"`

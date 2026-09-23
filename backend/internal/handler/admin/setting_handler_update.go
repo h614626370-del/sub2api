@@ -259,6 +259,7 @@ type UpdateSettingsRequest struct {
 	OpenAICodexVersionAutoSyncEnabled      *bool                            `json:"openai_codex_version_auto_sync_enabled"`
 	OpenAICodexTicketPolicy                *service.OpenAICodexTicketPolicy `json:"openai_codex_ticket_policy"`
 	OpenAIAstraGroupID                     *int64                           `json:"openai_astra_group_id"`
+	OpenAISolGroupID                       *int64                           `json:"openai_sol_group_id"`
 	OpenAICodexTicketEnabled               *bool                            `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL       *string                          `json:"openai_codex_ticket_harvest_proxy_url"`
 
@@ -502,6 +503,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	omitted := omittedSettingKeys(sentFields)
 	if req.OpenAIAstraGroupID == nil {
 		omitted[service.SettingKeyOpenAIAstraGroupID] = struct{}{}
+	}
+	if req.OpenAISolGroupID == nil {
+		omitted[service.SettingKeyOpenAISolGroupID] = struct{}{}
+	}
+	if req.OpenAISolGroupID == nil {
+		omitted[service.SettingKeyOpenAISolGroupID] = struct{}{}
 	}
 
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
@@ -1782,6 +1789,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAIAstraGroupID
 		}(),
+		OpenAISolGroupID: func() int64 {
+			if req.OpenAISolGroupID != nil {
+				return *req.OpenAISolGroupID
+			}
+			return previousSettings.OpenAISolGroupID
+		}(),
 		OpenAICodexTicketEnabled: func() bool {
 			if req.OpenAICodexTicketEnabled != nil {
 				return *req.OpenAICodexTicketEnabled
@@ -2342,6 +2355,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexVersionAutoSyncEnabled:                      updatedSettings.OpenAICodexVersionAutoSyncEnabled,
 		OpenAICodexTicketPolicy:                                updatedSettings.OpenAICodexTicketPolicy,
 		OpenAIAstraGroupID:                                     updatedSettings.OpenAIAstraGroupID,
+		OpenAISolGroupID:                                       updatedSettings.OpenAISolGroupID,
 		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
 		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",

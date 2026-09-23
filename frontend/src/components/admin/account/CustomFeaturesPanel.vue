@@ -31,6 +31,15 @@
           <option v-for="group in specialGroups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option>
         </select>
       </div>
+      <div class="card p-6">
+        <label for="custom-sol-group" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.accounts.customFeatures.solGroup') }}</label>
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.accounts.customFeatures.solDescription') }}</p>
+        <select id="custom-sol-group" v-model.number="form.openai_sol_group_id" class="input mt-3 w-full">
+          <option :value="0">{{ t('admin.accounts.customFeatures.solDisabled') }}</option>
+          <option v-if="form.openai_sol_group_id && !specialGroups.some(group => group.id === form.openai_sol_group_id)" :value="form.openai_sol_group_id" disabled>{{ t('admin.accounts.customFeatures.astraUnavailable') }} (#{{ form.openai_sol_group_id }})</option>
+          <option v-for="group in specialGroups" :key="group.id" :value="group.id">{{ group.name }} (#{{ group.id }})</option>
+        </select>
+      </div>
       <div class="card overflow-hidden">
         <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
           <div class="flex items-start justify-between gap-4">
@@ -188,6 +197,7 @@ const loadFailed = ref(false)
 
 const form = reactive({
   openai_astra_group_id: 0,
+  openai_sol_group_id: 0,
   openai_codex_ticket_enabled: false,
   openai_codex_ticket_harvest_proxy_url: '',
   openai_codex_ticket_harvest_proxy_configured: false,
@@ -200,6 +210,7 @@ async function load() {
     const [settings, groups] = await Promise.all([adminAPI.settings.getSettings(), adminAPI.groups.getAll('openai')])
     loadPolicy(settings.openai_codex_ticket_policy)
     form.openai_astra_group_id = Number(settings.openai_astra_group_id || 0)
+    form.openai_sol_group_id = Number(settings.openai_sol_group_id || 0)
     form.openai_codex_ticket_enabled = Boolean(settings.openai_codex_ticket_enabled)
     specialGroups.value = groups.filter(group => group.subscription_type === 'special' && group.platform === 'openai')
     form.openai_codex_ticket_harvest_proxy_url = settings.openai_codex_ticket_harvest_proxy_url || ''
@@ -219,6 +230,7 @@ async function save() {
   try {
     const payload: Parameters<typeof adminAPI.settings.updateSettings>[0] = {
       openai_astra_group_id: form.openai_astra_group_id,
+      openai_sol_group_id: form.openai_sol_group_id,
       openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
     }
     if (policyDirty.value) {
@@ -240,6 +252,7 @@ async function save() {
     const settings = await adminAPI.settings.updateSettings(payload)
     loadPolicy(settings.openai_codex_ticket_policy)
     form.openai_astra_group_id = Number(settings.openai_astra_group_id || 0)
+    form.openai_sol_group_id = Number(settings.openai_sol_group_id || 0)
     form.openai_codex_ticket_enabled = Boolean(settings.openai_codex_ticket_enabled)
     form.openai_codex_ticket_harvest_proxy_url = settings.openai_codex_ticket_harvest_proxy_url || form.openai_codex_ticket_harvest_proxy_url
     form.openai_codex_ticket_harvest_proxy_configured = Boolean(settings.openai_codex_ticket_harvest_proxy_configured)

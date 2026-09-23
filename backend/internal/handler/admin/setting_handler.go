@@ -305,6 +305,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpenAICodexVersionAutoSyncEnabled:                      settings.OpenAICodexVersionAutoSyncEnabled,
 		OpenAICodexTicketPolicy:                                settings.OpenAICodexTicketPolicy,
 		OpenAIAstraGroupID:                                     settings.OpenAIAstraGroupID,
+		OpenAISolGroupID:                                       settings.OpenAISolGroupID,
 		OpenAICodexTicketEnabled:                               settings.OpenAICodexTicketEnabled,
 		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(settings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL) != "",

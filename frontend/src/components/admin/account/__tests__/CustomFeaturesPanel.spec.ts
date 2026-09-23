@@ -148,7 +148,7 @@ describe('CustomFeaturesPanel', () => {
   })
 
   it('saves a special OpenAI pool and can disable routing', async () => {
-    getSettings.mockResolvedValue({ openai_astra_group_id: 20 })
+    getSettings.mockResolvedValue({ openai_astra_group_id: 20, openai_sol_group_id: 20 })
     getGroups.mockResolvedValue([
       { id: 20, name: 'Astra pool', platform: 'openai', subscription_type: 'special' },
       { id: 10, name: 'Ordinary', platform: 'openai', subscription_type: 'standard' },
@@ -158,21 +158,23 @@ describe('CustomFeaturesPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
     const select = wrapper.get('#custom-astra-group')
+    const solSelect = wrapper.get('#custom-sol-group')
     expect(select.element.value).toBe('20')
     expect(select.text()).toContain('Astra pool')
     expect(select.text()).not.toContain('Ordinary')
     expect(select.text()).not.toContain('Other platform')
+    expect(solSelect.element.value).toBe('20')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 20, openai_codex_ticket_enabled: false })
+    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 20, openai_sol_group_id: 20, openai_codex_ticket_enabled: false })
     await select.setValue('0')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 0, openai_codex_ticket_enabled: false })
+    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 0, openai_sol_group_id: 20, openai_codex_ticket_enabled: false })
   })
 
   it('keeps an unavailable configured pool visible instead of silently resetting it', async () => {
-    getSettings.mockResolvedValue({ openai_astra_group_id: 20 })
+    getSettings.mockResolvedValue({ openai_astra_group_id: 20, openai_sol_group_id: 20 })
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.get('#custom-astra-group').element.value).toBe('20')
@@ -180,7 +182,7 @@ describe('CustomFeaturesPanel', () => {
   })
 
   it('prevents a partial load failure from saving default settings', async () => {
-    getSettings.mockResolvedValue({ openai_astra_group_id: 20 })
+    getSettings.mockResolvedValue({ openai_astra_group_id: 20, openai_sol_group_id: 20 })
     getGroups.mockRejectedValue(new Error('groups unavailable'))
     const wrapper = mountPanel()
     await flushPromises()
@@ -227,6 +229,7 @@ describe('CustomFeaturesPanel', () => {
 
     expect(updateSettings).toHaveBeenCalledWith({
       openai_astra_group_id: 0,
+      openai_sol_group_id: 0,
       openai_codex_ticket_enabled: true,
       openai_codex_ticket_harvest_proxy_url: 'socks5h://user:new-secret@proxy.example.com:1080',
     })
@@ -250,6 +253,6 @@ describe('CustomFeaturesPanel', () => {
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(updateSettings).toHaveBeenCalledWith({ openai_astra_group_id: 0, openai_codex_ticket_enabled: true })
+    expect(updateSettings).toHaveBeenCalledWith({ openai_astra_group_id: 0, openai_sol_group_id: 0, openai_codex_ticket_enabled: true })
   })
 })

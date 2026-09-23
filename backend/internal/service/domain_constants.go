@@ -713,6 +713,7 @@ const (
 	// 开启：后台打票并在业务请求中覆盖该头。
 	SettingKeyOpenAICodexTicketEnabled = "openai_codex_ticket_enabled"
 	SettingKeyOpenAIAstraGroupID       = "openai_astra_group_id"
+	SettingKeyOpenAISolGroupID         = "openai_sol_group_id"
 	// SettingKeyOpenAICodexTicketHarvestProxyURL Codex 292 打票出口（socks5h/http），后台可改、热更新。
 	SettingKeyOpenAICodexTicketHarvestProxyURL = "openai_codex_ticket_harvest_proxy_url"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
