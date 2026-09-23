@@ -22,7 +22,8 @@ func TestAccountTimezoneWebSocketWire(t *testing.T) {
 	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: capture, handshake: http.Header{}})
 	defer pool.Close()
 	s := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool, openaiWSStateStore: NewOpenAIWSStateStore(nil)}
-	a := &Account{ID: 455, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true, accountTimezoneOverrideKey: "Asia/Tokyo"}}
+	s.settingService = NewSettingService(&timezoneSettingsRepo{&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAIOAuthDefaultTimezone: "Asia/Tokyo"}}}, cfg)
+	a := &Account{ID: 455, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "test"}, Extra: map[string]any{"openai_oauth_responses_websockets_v2_enabled": true, accountTimezoneOverrideKey: "Europe/London"}}
 	done := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)

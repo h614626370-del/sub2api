@@ -29,25 +29,34 @@ func hasAccountTimezoneFields(body []byte) bool {
 }
 
 func (s *OpenAIGatewayService) applyAccountTimezone(ctx context.Context, account *Account, body []byte) []byte {
-	if account == nil || !account.IsOpenAI() || !hasAccountTimezoneFields(body) {
+	if !isAccountTimezoneEligible(account) || !hasAccountTimezoneFields(body) {
 		return body
+	}
+	defaultZone := ""
+	if s != nil {
+		defaultZone = s.settingService.GetOpenAIOAuthDefaultTimezone(ctx)
+	}
+	fingerprint := timezoneProxyFingerprint(account.Proxy)
+	align := func(state *AccountTimezoneState) []byte {
+		zone, _ := resolveAccountTimezone(state, fingerprint, defaultZone)
+		return alignAccountTimezone(body, zone, time.Now())
 	}
 	state := accountTimezoneState(account, account.Proxy)
 	if s != nil && s.accountTimezoneManager != nil {
 		fresh, err := s.accountTimezoneManager.GetAccountTimezone(ctx, account.ID)
-		if err != nil {
-			return body
+		if err != nil || fresh == nil {
+			return align(nil)
 		}
 		state = fresh
 		// A long-lived WS connection may still use the previous proxy.
-		if state.Source != "manual" && state.ProxyFingerprint != timezoneProxyFingerprint(account.Proxy) {
-			return body
+		if state.ProxyFingerprint != fingerprint {
+			return align(nil)
 		}
-		if state.Timezone == "" && state.HasProxy {
-			key := strconv.FormatInt(account.ID, 10) + ":" + timezoneProxyFingerprint(account.Proxy)
+		if state.Source != "proxy" && state.HasProxy {
+			key := strconv.FormatInt(account.ID, 10) + ":" + fingerprint
 			if failed, ok := s.accountTimezoneFailures.Load(key); ok {
 				if until, valid := failed.(time.Time); valid && time.Now().Before(until) {
-					return body
+					return align(state)
 				}
 				s.accountTimezoneFailures.Delete(key)
 			}
@@ -56,20 +65,20 @@ func (s *OpenAIGatewayService) applyAccountTimezone(ctx context.Context, account
 			})
 			if err != nil {
 				s.accountTimezoneFailures.Store(key, time.Now().Add(5*time.Minute))
-				return body
+				return align(state)
 			}
 			s.accountTimezoneFailures.Delete(key)
 			detected, ok := result.(*AccountTimezoneState)
 			if !ok || detected == nil {
-				return body
+				return align(state)
 			}
 			state = detected
-			if state.Source != "manual" && state.ProxyFingerprint != timezoneProxyFingerprint(account.Proxy) {
-				return body
+			if state.ProxyFingerprint != fingerprint {
+				return align(nil)
 			}
 		}
 	}
-	return alignAccountTimezone(body, state.Timezone, time.Now())
+	return align(state)
 }
 
 func alignAccountTimezone(body []byte, zone string, now time.Time) []byte {

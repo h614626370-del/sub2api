@@ -86,6 +86,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // it omitted, so in that case the caches are rebuilt from storage rather than
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
+	s.invalidateOpenAIAstraGroupCache()
+	s.invalidateOpenAISolGroupCache()
+	s.invalidateOpenAIOAuthTimezoneCache()
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -505,6 +508,40 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		}
 	}
 	updates[SettingKeyOpenAISolGroupID] = strconv.FormatInt(settings.OpenAISolGroupID, 10)
+	for _, source := range []struct {
+		key string
+		ids *[]int64
+	}{
+		{SettingKeyOpenAIAstraSourceGroupIDs, &settings.OpenAIAstraSourceGroupIDs},
+		{SettingKeyOpenAISolSourceGroupIDs, &settings.OpenAISolSourceGroupIDs},
+	} {
+		if len(omittedSets) > 0 {
+			if _, omitted := omittedSets[0][source.key]; omitted {
+				continue
+			}
+		}
+		normalized, err := s.normalizeOpenAIRouteSources(ctx, *source.ids)
+		if err != nil {
+			return nil, err
+		}
+		*source.ids = normalized
+		encoded, err := json.Marshal(normalized)
+		if err != nil {
+			return nil, err
+		}
+		updates[source.key] = string(encoded)
+	}
+	omitTimezone := false
+	if len(omittedSets) > 0 {
+		_, omitTimezone = omittedSets[0][SettingKeyOpenAIOAuthDefaultTimezone]
+	}
+	if !omitTimezone {
+		zone := strings.TrimSpace(settings.OpenAIOAuthDefaultTimezone)
+		if zone != "" && !validAccountTimezone(zone) {
+			return nil, infraerrors.BadRequest("INVALID_ACCOUNT_TIMEZONE", "Use a valid IANA timezone, for example America/Los_Angeles")
+		}
+		updates[SettingKeyOpenAIOAuthDefaultTimezone] = zone
+	}
 	if settings.OpenAICodexTicketPolicy != nil {
 		if err := settings.OpenAICodexTicketPolicy.Validate(); err != nil {
 			return nil, err
@@ -776,6 +813,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	s.InvalidateOpenAICodexClientVersionCache()
 	s.invalidateOpenAIAstraGroupCache()
 	s.invalidateOpenAISolGroupCache()
+	s.invalidateOpenAIOAuthTimezoneCache()
 	s.invalidateCodexTicketPolicy()
 	s.InvalidateOpenAICodexTicketEnabledCache()
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()

@@ -29,7 +29,22 @@ func (r *astraDiagnosisRepo) ListModelAvailabilityCandidates(_ context.Context, 
 	return []Account{{Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6-astra": "gpt-6-astra"}}}}, nil
 }
 
-type astraRouteSettingsWriter struct{ *codexTicketSettingRepo }
+type astraRouteSettingRepo struct{ *codexTicketSettingRepo }
+
+func (r *astraRouteSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			values[key] = value
+		}
+	}
+	return values, nil
+}
+
+type astraRouteSettingsWriter struct{ *astraRouteSettingRepo }
 
 func (r *astraRouteSettingsWriter) SetMultiple(_ context.Context, values map[string]string) error {
 	for key, value := range values {
@@ -48,11 +63,15 @@ func (r *astraRouteGroupReader) GetByID(_ context.Context, id int64) (*Group, er
 	return r.group, nil
 }
 
-func astraRouteFixture(t *testing.T, advanced bool) (*OpenAIGatewayService, *codexTicketSettingRepo, *astraRouteGroupReader) {
+func astraRouteFixture(t *testing.T, advanced bool) (*OpenAIGatewayService, *astraRouteSettingRepo, *astraRouteGroupReader) {
 	t.Helper()
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
-	repo := &codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAIAstraGroupID: "20", SettingKeyOpenAISolGroupID: "20", openAIAdvancedSchedulerSettingKey: strconv.FormatBool(advanced)}}}
+	repo := &astraRouteSettingRepo{&codexTicketSettingRepo{codexPolicyMigrationRepoStub: &codexPolicyMigrationRepoStub{values: map[string]string{
+		SettingKeyOpenAIAstraGroupID: "20", SettingKeyOpenAISolGroupID: "20",
+		SettingKeyOpenAIAstraSourceGroupIDs: "[10]", SettingKeyOpenAISolSourceGroupIDs: "[10]",
+		openAIAdvancedSchedulerSettingKey: strconv.FormatBool(advanced),
+	}}}}
 	settings := NewSettingService(repo, &config.Config{})
 	groups := &astraRouteGroupReader{group: &Group{ID: 20, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeSpecial, RateMultiplier: 100}}
 	settings.SetDefaultSubscriptionGroupReader(groups)
@@ -112,7 +131,7 @@ func TestSolAndAstraRoutesRemainModelScoped(t *testing.T) {
 		{"gpt-6-sol", 3},
 		{"gpt-5.6-sol", 1},
 	} {
-		ctx := svc.WithOpenAIModelRoute(context.Background(), tc.model, PlatformOpenAI)
+		ctx := svc.WithOpenAIModelRoute(context.Background(), &sourceID, tc.model, PlatformOpenAI)
 		selection, _, err := svc.SelectAccountWithScheduler(ctx, &sourceID, "", "same-session", tc.model, nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)
 		require.Equal(t, tc.want, selection.Account.ID, tc.model)
@@ -121,7 +140,7 @@ func TestSolAndAstraRoutesRemainModelScoped(t *testing.T) {
 	account, err := svc.accountRepo.GetByID(context.Background(), 2)
 	require.NoError(t, err)
 	require.False(t, svc.OpenAIModelRouteAllowsAccount(
-		svc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI),
+		svc.WithOpenAIModelRoute(context.Background(), &sourceID, "gpt-6-astra", PlatformOpenAI),
 		account, &sourceID, "gpt-6-sol", PlatformOpenAI,
 	), "switching from Astra to Sol must leave the Astra pool")
 }
@@ -143,7 +162,7 @@ func TestAstraRouteClientModelAndSettingsFailures(t *testing.T) {
 		client, upstream string
 		id               int64
 	}{{"gpt-6-astra", "custom-upstream", 2}, {"ordinary-alias", "gpt-6-astra", 1}} {
-		ctx := svc.WithOpenAIModelRoute(context.Background(), tc.client, PlatformOpenAI)
+		ctx := svc.WithOpenAIModelRoute(context.Background(), &sourceID, tc.client, PlatformOpenAI)
 		selection, _, err := svc.SelectAccountWithScheduler(ctx, &sourceID, "", "", tc.upstream, nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)
 		require.Equal(t, tc.id, selection.Account.ID)
@@ -177,7 +196,7 @@ func TestAstraRouteClientModelAndSettingsFailures(t *testing.T) {
 func TestAstraRoutePreservesSourceProfitGateAndStickyIsolation(t *testing.T) {
 	svc, _, _ := astraRouteFixture(t, false)
 	source := profitControlTestGroup(10, 0.5, 0)
-	ctx := svc.WithOpenAIModelRoute(profitControlTestCtx(source), "gpt-6-astra", PlatformOpenAI)
+	ctx := svc.WithOpenAIModelRoute(profitControlTestCtx(source), &source.ID, "gpt-6-astra", PlatformOpenAI)
 	require.Same(t, source, ctx.Value(ctxkey.Group))
 	gate := svc.resolveOpenAIProfitControlGate(ctx, &source.ID)
 	require.NotNil(t, gate)
@@ -205,7 +224,7 @@ func TestAstraRouteWebSocketModelSwitchAndUserBinding(t *testing.T) {
 	special, _ := svc.accountRepo.GetByID(context.Background(), 2)
 	require.False(t, svc.OpenAIModelRouteAllowsAccount(context.Background(), normal, &sourceID, "gpt-6-astra", PlatformOpenAI))
 	require.True(t, svc.OpenAIModelRouteAllowsAccount(context.Background(), special, &sourceID, "gpt-6-astra", PlatformOpenAI))
-	astraCtx := svc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI)
+	astraCtx := svc.WithOpenAIModelRoute(context.Background(), &sourceID, "gpt-6-astra", PlatformOpenAI)
 	require.False(t, svc.OpenAIModelRouteAllowsAccount(astraCtx, special, &sourceID, "gpt-5.6-sol", PlatformOpenAI))
 	user := &User{AllowedGroups: []int64{20}}
 	group := &Group{ID: 20, SubscriptionType: SubscriptionTypeSpecial}
@@ -222,7 +241,7 @@ func TestAstraRouteUsageChargedToSourceGroup(t *testing.T) {
 	source := &Group{ID: 10, Platform: PlatformOpenAI, Status: StatusActive, RateMultiplier: 2.5}
 	key := &APIKey{ID: 100, GroupID: &source.ID, Group: source, Quota: 100}
 	account, _ := routeSvc.accountRepo.GetByID(context.Background(), 2)
-	ctx := routeSvc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI)
+	ctx := routeSvc.WithOpenAIModelRoute(context.Background(), &source.ID, "gpt-6-astra", PlatformOpenAI)
 	usage := OpenAIUsage{InputTokens: 1200, OutputTokens: 300}
 	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{Result: &OpenAIForwardResult{RequestID: "astra-route-billing", Usage: usage, Model: "gpt-6-astra", Duration: time.Second}, APIKey: key, User: &User{ID: 200}, Account: account, APIKeyService: &openAIRecordUsageAPIKeyQuotaStub{}})
 	require.NoError(t, err)
@@ -241,7 +260,7 @@ func TestAstraRouteUsageChargedToSourceGroup(t *testing.T) {
 func TestAstraRoutePreviousResponseCannotEscapePool(t *testing.T) {
 	svc, _, _ := astraRouteFixture(t, true)
 	sourceID := int64(10)
-	ctx := svc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI)
+	ctx := svc.WithOpenAIModelRoute(context.Background(), &sourceID, "gpt-6-astra", PlatformOpenAI)
 	store := svc.getOpenAIWSStateStore()
 	require.NoError(t, store.BindResponseAccount(ctx, sourceID, "resp_old_normal", 1, time.Hour))
 	selection, _, err := svc.SelectAccountWithScheduler(ctx, &sourceID, "resp_old_normal", "", "gpt-6-astra", nil, OpenAIUpstreamTransportAny, false)
@@ -302,14 +321,14 @@ func TestAstraRouteFailureDiagnosisUsesSpecialPool(t *testing.T) {
 	diagnosticRepo := &astraDiagnosisRepo{}
 	svc.accountRepo = diagnosticRepo
 	sourceID := int64(10)
-	ctx := svc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI)
+	ctx := svc.WithOpenAIModelRoute(context.Background(), &sourceID, "gpt-6-astra", PlatformOpenAI)
 	diagnosis := svc.DiagnoseModelAvailabilityForPlatform(ctx, &sourceID, "gpt-6-astra", PlatformOpenAI)
 	require.EqualValues(t, 20, diagnosticRepo.groupID)
 	require.True(t, diagnosis.HasModelSupport)
 	repo.err = errors.New("unavailable")
 	svc.settingService.invalidateOpenAIAstraGroupCache()
 	diagnosticRepo.groupID = 0
-	ctx = svc.WithOpenAIModelRoute(context.Background(), "gpt-6-astra", PlatformOpenAI)
+	ctx = svc.WithOpenAIModelRoute(context.Background(), &sourceID, "gpt-6-astra", PlatformOpenAI)
 	diagnosis = svc.DiagnoseModelAvailabilityForPlatform(ctx, &sourceID, "gpt-6-astra", PlatformOpenAI)
 	require.Zero(t, diagnosticRepo.groupID)
 	require.True(t, diagnosis.HasModelSupport, "settings outage must stay a temporary 503")

@@ -270,7 +270,7 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 	platform string,
 ) (*Account, error) {
 	var routeErr error
-	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, requestedModel, platform)
+	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, groupID, requestedModel, platform)
 	if routeErr != nil {
 		return nil, routeErr
 	}
@@ -888,7 +888,7 @@ func resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel string) strin
 
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, error) {
 	var routeErr error
-	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, requestedModel, platform)
+	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, groupID, requestedModel, platform)
 	if routeErr != nil {
 		return nil, routeErr
 	}
@@ -1126,7 +1126,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {
 	var routeErr error
-	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, requestedModel, platform)
+	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, groupID, requestedModel, platform)
 	if routeErr != nil {
 		return nil, routeErr
 	}

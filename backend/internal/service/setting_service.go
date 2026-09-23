@@ -121,6 +121,7 @@ type SettingService struct {
 	openAIAstraGroupCache              astraGroupSettingCache
 	openAISolGroupCache                astraGroupSettingCache
 	settingRepo                        SettingRepository
+	openAIOAuthTimezoneCache           oauthTimezoneSettingCache
 	defaultSubGroupReader              DefaultSubscriptionGroupReader
 	proxyRepo                          ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                                *config.Config

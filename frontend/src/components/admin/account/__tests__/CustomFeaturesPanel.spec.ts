@@ -6,6 +6,7 @@ import zhAccounts from '@/i18n/locales/zh/admin/accounts'
 import enAccounts from '@/i18n/locales/en/admin/accounts'
 
 import CustomFeaturesPanel from '../CustomFeaturesPanel.vue'
+import CodexTicketSettingsPanel from '../CodexTicketSettingsPanel.vue'
 
 const { getSettings, updateSettings, getGroups, showError, showSuccess } = vi.hoisted(() => ({
   getSettings: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/api/admin', () => ({
     },
     groups: {
       getAll: getGroups,
+      getAllIncludingInactive: getGroups,
     },
   },
 }))
@@ -43,8 +45,8 @@ const ToggleStub = defineComponent({
   template: '<input id="custom-toggle-stub" type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
 })
 
-function mountPanel(locale = 'zh') {
-  return mount(CustomFeaturesPanel, {
+function mountPanel(locale = 'zh', component = CodexTicketSettingsPanel) {
+  return mount(component, {
     global: {
       plugins: [createI18n({
         legacy: false,
@@ -63,7 +65,7 @@ function mountPanel(locale = 'zh') {
   })
 }
 
-describe('CustomFeaturesPanel', () => {
+describe('Account feature settings ownership', () => {
   beforeEach(() => {
     getGroups.mockReset().mockResolvedValue([])
     getSettings.mockReset()
@@ -79,7 +81,9 @@ describe('CustomFeaturesPanel', () => {
     await flushPromises()
     expect(wrapper.get('#custom-codex-ticket-proxy').attributes('placeholder'))
       .toBe('http://user:pass@proxy.example.com:1080')
-    expect(wrapper.find('#custom-astra-group').exists()).toBe(true)
+    expect(wrapper.find('#custom-astra-group').exists()).toBe(false)
+    expect(wrapper.get('details').attributes('open')).toBeUndefined()
+    expect(wrapper.get('summary').text()).toContain(locale === 'zh' ? '打票设置' : 'Ticket settings')
     wrapper.unmount()
     const errors = compilationErrors.mock.calls.slice()
     compilationErrors.mockRestore()
@@ -150,12 +154,12 @@ describe('CustomFeaturesPanel', () => {
   it('saves a special OpenAI pool and can disable routing', async () => {
     getSettings.mockResolvedValue({ openai_astra_group_id: 20, openai_sol_group_id: 20 })
     getGroups.mockResolvedValue([
-      { id: 20, name: 'Astra pool', platform: 'openai', subscription_type: 'special' },
+      { id: 20, name: 'Astra pool', platform: 'openai', subscription_type: 'special', status: 'active' },
       { id: 10, name: 'Ordinary', platform: 'openai', subscription_type: 'standard' },
       { id: 30, name: 'Other platform', platform: 'anthropic', subscription_type: 'special' },
     ])
     updateSettings.mockImplementation(async payload => payload)
-    const wrapper = mountPanel()
+    const wrapper = mountPanel('zh', CustomFeaturesPanel)
     await flushPromises()
     const select = wrapper.get('#custom-astra-group')
     const solSelect = wrapper.get('#custom-sol-group')
@@ -164,27 +168,91 @@ describe('CustomFeaturesPanel', () => {
     expect(select.text()).not.toContain('Ordinary')
     expect(select.text()).not.toContain('Other platform')
     expect(solSelect.element.value).toBe('20')
+    expect(wrapper.get('label[for="custom-astra-group"]').text()).toBe('目标分组')
+    expect(wrapper.get('label[for="custom-sol-group"]').text()).toBe('目标分组')
+    expect(wrapper.findAll('legend').map(legend => legend.text())).toEqual(['Astra 路由分组', 'Sol 路由分组'])
+    expect(wrapper.get('#custom-astra-group option[value="0"]').text()).toBe('使用原分组')
+    expect(wrapper.get('#custom-sol-group option[value="0"]').text()).toBe('使用原分组')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 20, openai_sol_group_id: 20, openai_codex_ticket_enabled: false })
+    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 20, openai_sol_group_id: 20, openai_astra_source_group_ids: [], openai_sol_source_group_ids: [] })
     await select.setValue('0')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
-    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 0, openai_sol_group_id: 20, openai_codex_ticket_enabled: false })
+    expect(updateSettings).toHaveBeenLastCalledWith({ openai_astra_group_id: 0, openai_sol_group_id: 20, openai_astra_source_group_ids: [], openai_sol_source_group_ids: [] })
+    expect(wrapper.find('#custom-codex-ticket-enabled').exists()).toBe(false)
+    expect(wrapper.find('#ticket-models').exists()).toBe(false)
+    expect(wrapper.find('account-timezone-panel-stub').exists()).toBe(true)
   })
 
   it('keeps an unavailable configured pool visible instead of silently resetting it', async () => {
     getSettings.mockResolvedValue({ openai_astra_group_id: 20, openai_sol_group_id: 20 })
-    const wrapper = mountPanel()
+    const wrapper = mountPanel('zh', CustomFeaturesPanel)
     await flushPromises()
     expect(wrapper.get('#custom-astra-group').element.value).toBe('20')
     expect(wrapper.get('#custom-astra-group option[value="20"]').attributes()).toHaveProperty('disabled')
   })
 
+  it.each(['zh', 'en'])('searches and selects eligible sources independently (%s)', async locale => {
+    getSettings.mockResolvedValue({ openai_astra_group_id: 20, openai_sol_group_id: 20 })
+    getGroups.mockResolvedValue([
+      { id: 10, name: 'Ordinary', platform: 'openai', status: 'active', subscription_type: 'standard' },
+      { id: 11, name: 'Composite', platform: 'composite', status: 'active', subscription_type: 'standard' },
+      { id: 20, name: 'Special', platform: 'openai', status: 'active', subscription_type: 'special' },
+      { id: 30, name: 'Other', platform: 'anthropic', status: 'active', subscription_type: 'standard' },
+      { id: 40, name: 'Disabled', platform: 'openai', status: 'inactive', subscription_type: 'standard' },
+    ])
+    updateSettings.mockImplementation(async payload => payload)
+    const wrapper = mountPanel(locale, CustomFeaturesPanel)
+    await flushPromises()
+    expect(wrapper.findAll('#custom-astra-source-20, #custom-astra-source-30, #custom-astra-source-40')).toHaveLength(0)
+    await wrapper.get('#custom-astra-sources').setValue('composite')
+    expect(wrapper.find('#custom-astra-source-10').exists()).toBe(false)
+    expect(wrapper.find('#custom-astra-source-11').exists()).toBe(true)
+    await wrapper.get('#custom-astra-select-all').trigger('click')
+    await wrapper.get('#custom-sol-source-11').setValue(true)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      openai_astra_group_id: 20, openai_sol_group_id: 20,
+      openai_astra_source_group_ids: [10, 11], openai_sol_source_group_ids: [11],
+    })
+    await wrapper.get('#custom-astra-clear').trigger('click')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ openai_astra_source_group_ids: [], openai_sol_source_group_ids: [11] }))
+    wrapper.unmount()
+  })
+
+  it('preserves invalid selections and unsaved edits after a failed save', async () => {
+    getSettings.mockResolvedValue({ openai_astra_source_group_ids: [40, 99] })
+    getGroups.mockResolvedValue([
+      { id: 10, name: 'Ordinary', platform: 'openai', status: 'active', subscription_type: 'standard' },
+      { id: 40, name: 'Disabled name', platform: 'openai', status: 'inactive', subscription_type: 'standard' },
+    ])
+    updateSettings.mockRejectedValue(new Error('invalid sources'))
+    const wrapper = mountPanel('zh', CustomFeaturesPanel)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Disabled name')
+    expect(wrapper.text()).toContain('已删除的分组')
+    await wrapper.get('#custom-astra-sources').setValue('no match')
+    expect(wrapper.find('#custom-astra-source-99').exists()).toBe(true)
+    await wrapper.get('#custom-astra-select-all').trigger('click')
+    await wrapper.get('#custom-astra-source-40').setValue(false)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ openai_astra_source_group_ids: [99, 10] }))
+    expect(wrapper.get('#custom-astra-source-99').element.checked).toBe(true)
+    await wrapper.get('#custom-astra-sources').setValue('')
+    expect(wrapper.get('#custom-astra-source-10').element.checked).toBe(true)
+    expect(showError).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('prevents a partial load failure from saving default settings', async () => {
     getSettings.mockResolvedValue({ openai_astra_group_id: 20, openai_sol_group_id: 20 })
     getGroups.mockRejectedValue(new Error('groups unavailable'))
-    const wrapper = mountPanel()
+    const wrapper = mountPanel('zh', CustomFeaturesPanel)
     await flushPromises()
     expect(wrapper.get('button[type="submit"]').attributes()).toHaveProperty('disabled')
     await wrapper.get('form').trigger('submit.prevent')
@@ -192,7 +260,7 @@ describe('CustomFeaturesPanel', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(true)
   })
 
-  it('loads the Codex ticket settings in the account-management custom tab', async () => {
+  it('loads ticket settings without depending on routing groups', async () => {
     getSettings.mockResolvedValue({
       openai_codex_ticket_enabled: true,
       openai_codex_ticket_harvest_proxy_url: 'http://user:***@proxy.example.com:1080',
@@ -203,6 +271,7 @@ describe('CustomFeaturesPanel', () => {
     await flushPromises()
 
     expect(getSettings).toHaveBeenCalledTimes(1)
+    expect(getGroups).not.toHaveBeenCalled()
     expect(wrapper.get('#custom-codex-ticket-enabled').element.checked).toBe(true)
     expect(wrapper.get('#custom-codex-ticket-proxy').element.value)
       .toBe('http://user:***@proxy.example.com:1080')
@@ -228,12 +297,11 @@ describe('CustomFeaturesPanel', () => {
     await flushPromises()
 
     expect(updateSettings).toHaveBeenCalledWith({
-      openai_astra_group_id: 0,
-      openai_sol_group_id: 0,
       openai_codex_ticket_enabled: true,
       openai_codex_ticket_harvest_proxy_url: 'socks5h://user:new-secret@proxy.example.com:1080',
     })
     expect(showSuccess).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('saved')).toHaveLength(1)
   })
 
   it('does not resubmit the masked proxy password when the field is untouched', async () => {
@@ -253,6 +321,32 @@ describe('CustomFeaturesPanel', () => {
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
-    expect(updateSettings).toHaveBeenCalledWith({ openai_astra_group_id: 0, openai_sol_group_id: 0, openai_codex_ticket_enabled: true })
+    expect(updateSettings).toHaveBeenCalledWith({ openai_codex_ticket_enabled: true })
+  })
+
+  it('prevents saving ticket defaults after a failed load and supports retry', async () => {
+    getSettings.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue({})
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.get('button[type="submit"]').attributes()).toHaveProperty('disabled')
+    await wrapper.get('form').trigger('submit.prevent')
+    expect(updateSettings).not.toHaveBeenCalled()
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('preserves ticket edits and does not emit saved when saving fails', async () => {
+    getSettings.mockResolvedValue({})
+    updateSettings.mockRejectedValue(new Error('unavailable'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('#custom-codex-ticket-enabled').setValue(true)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(wrapper.get('#custom-codex-ticket-enabled').element.checked).toBe(true)
+    expect(wrapper.emitted('saved')).toBeUndefined()
+    expect(showError).toHaveBeenCalledTimes(1)
   })
 })

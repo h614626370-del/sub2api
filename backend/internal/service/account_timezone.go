@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -14,8 +13,8 @@ import (
 const accountTimezoneDetectedKey = "account_timezone_detected"
 const accountTimezoneOverrideKey = "account_timezone_override"
 
-// Detection and override are separate JSONB keys: a slow probe cannot overwrite
-// a concurrent manual edit. The proxy fingerprint prevents stale cache reuse.
+// Detection stays separate from legacy overrides retained for rollback.
+// The proxy fingerprint prevents stale cache reuse.
 type accountTimezoneDetection struct {
 	Timezone         string    `json:"timezone"`
 	IP               string    `json:"ip"`
@@ -63,7 +62,6 @@ func timezoneProxyFingerprint(proxy *Proxy) string {
 
 func accountTimezoneState(account *Account, proxy *Proxy) *AccountTimezoneState {
 	state := &AccountTimezoneState{Source: "none", HasProxy: proxy != nil, ProxyFingerprint: timezoneProxyFingerprint(proxy)}
-	state.Override, _ = account.Extra[accountTimezoneOverrideKey].(string)
 	var detected accountTimezoneDetection
 	if raw, err := json.Marshal(account.Extra[accountTimezoneDetectedKey]); err == nil {
 		_ = json.Unmarshal(raw, &detected)
@@ -76,16 +74,32 @@ func accountTimezoneState(account *Account, proxy *Proxy) *AccountTimezoneState 
 			state.Timezone, state.Source = detected.Timezone, "proxy"
 		}
 	}
-	if validAccountTimezone(state.Override) {
-		state.Timezone, state.Source = state.Override, "manual"
-	}
 	return state
+}
+
+// Only a result bound to the request's proxy may override the global default.
+func resolveAccountTimezone(state *AccountTimezoneState, fingerprint, defaultZone string) (string, string) {
+	if state != nil && state.Source == "proxy" && !state.Stale &&
+		state.ProxyFingerprint == fingerprint && fingerprint != "" && validAccountTimezone(state.Timezone) {
+		return state.Timezone, "proxy"
+	}
+	if validAccountTimezone(defaultZone) {
+		return defaultZone, "global"
+	}
+	return "", "none"
+}
+
+func isAccountTimezoneEligible(account *Account) bool {
+	return account != nil && account.IsOpenAI() && account.Type == AccountTypeOAuth
 }
 
 func (s *adminServiceImpl) timezoneAccount(ctx context.Context, id int64) (*Account, *Proxy, error) {
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !isAccountTimezoneEligible(account) {
+		return nil, nil, infraerrors.BadRequest("ACCOUNT_TIMEZONE_UNSUPPORTED", "Timezone settings are only available for OpenAI OAuth accounts")
 	}
 	if account.ProxyID == nil {
 		return account, nil, nil
@@ -99,21 +113,13 @@ func (s *adminServiceImpl) GetAccountTimezone(ctx context.Context, id int64) (*A
 	if err != nil {
 		return nil, err
 	}
-	return accountTimezoneState(account, proxy), nil
+	state := accountTimezoneState(account, proxy)
+	state.Timezone, state.Source = resolveAccountTimezone(state, state.ProxyFingerprint, s.settingService.GetOpenAIOAuthDefaultTimezone(ctx))
+	return state, nil
 }
 
-func (s *adminServiceImpl) SetAccountTimezone(ctx context.Context, id int64, override string) (*AccountTimezoneState, error) {
-	override = strings.TrimSpace(override)
-	if override != "" && !validAccountTimezone(override) {
-		return nil, infraerrors.BadRequest("INVALID_ACCOUNT_TIMEZONE", "Use a valid IANA timezone, for example America/Los_Angeles")
-	}
-	if _, err := s.accountRepo.GetByID(ctx, id); err != nil {
-		return nil, err
-	}
-	if err := s.accountRepo.UpdateExtra(ctx, id, map[string]any{accountTimezoneOverrideKey: override}); err != nil {
-		return nil, err
-	}
-	return s.GetAccountTimezone(ctx, id)
+func (s *adminServiceImpl) SetAccountTimezone(_ context.Context, _ int64, _ string) (*AccountTimezoneState, error) {
+	return nil, infraerrors.BadRequest("ACCOUNT_TIMEZONE_OVERRIDE_UNSUPPORTED", "Account timezone overrides are no longer supported; configure the global OAuth timezone instead")
 }
 
 func (s *adminServiceImpl) DetectAccountTimezone(ctx context.Context, id int64, refresh bool) (*AccountTimezoneState, error) {
@@ -122,11 +128,11 @@ func (s *adminServiceImpl) DetectAccountTimezone(ctx context.Context, id int64, 
 		return nil, err
 	}
 	state := accountTimezoneState(account, proxy)
-	if !refresh && (state.Source == "manual" || state.Source == "proxy") {
+	if !refresh && state.Source == "proxy" {
 		return state, nil
 	}
 	if proxy == nil {
-		return nil, infraerrors.BadRequest("ACCOUNT_TIMEZONE_NO_PROXY", "Assign a fixed proxy or set a manual timezone")
+		return nil, infraerrors.BadRequest("ACCOUNT_TIMEZONE_NO_PROXY", "No proxy is assigned; the global OAuth timezone applies when configured")
 	}
 	if !proxy.IsActive() || proxy.IsExpired(time.Now()) {
 		return nil, infraerrors.BadRequest("ACCOUNT_TIMEZONE_PROXY_UNAVAILABLE", "The assigned proxy is inactive or expired")

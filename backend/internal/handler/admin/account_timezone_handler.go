@@ -55,21 +55,5 @@ func (h *AccountHandler) DetectTimezone(c *gin.Context) {
 }
 
 func (h *AccountHandler) SetTimezone(c *gin.Context) {
-	manager, id, ok := h.accountTimezoneManager(c)
-	if !ok {
-		return
-	}
-	var req struct {
-		Override *string `json:"override"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Override == nil {
-		response.BadRequest(c, "override is required; use an empty string for automatic mode")
-		return
-	}
-	state, err := manager.SetAccountTimezone(c.Request.Context(), id, *req.Override)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, state)
+	response.ErrorWithDetails(c, 400, "Account timezone overrides are no longer supported; configure the global OAuth timezone instead", "ACCOUNT_TIMEZONE_OVERRIDE_UNSUPPORTED", nil)
 }

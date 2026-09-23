@@ -457,7 +457,7 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	// 分组利润控制：公共入口装门，保证不经 selectAccountWithScheduler
 	// 的调用方也无法绕过利润准入（scheduler 内部路径已在唯一调度入口装门）。
 	var routeErr error
-	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, requestedModel, PlatformOpenAI)
+	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, groupID, requestedModel, PlatformOpenAI)
 	if routeErr != nil {
 		return nil, routeErr
 	}

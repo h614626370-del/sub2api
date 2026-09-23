@@ -249,6 +249,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingKeyOpenAIAstraGroupID:                                 "0",
 		SettingKeyOpenAISolGroupID:                                   "0",
+		SettingKeyOpenAIAstraSourceGroupIDs:                          "[]",
+		SettingKeyOpenAISolSourceGroupIDs:                            "[]",
+		SettingKeyOpenAIOAuthDefaultTimezone:                         "",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -903,6 +906,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAICodexTicketPolicy = &policy
 	result.OpenAIAstraGroupID, _ = strconv.ParseInt(settings[SettingKeyOpenAIAstraGroupID], 10, 64)
 	result.OpenAISolGroupID, _ = strconv.ParseInt(settings[SettingKeyOpenAISolGroupID], 10, 64)
+	result.OpenAIAstraSourceGroupIDs, _ = parseOpenAIRouteSourceIDs(settings[SettingKeyOpenAIAstraSourceGroupIDs])
+	result.OpenAISolSourceGroupIDs, _ = parseOpenAIRouteSourceIDs(settings[SettingKeyOpenAISolSourceGroupIDs])
+	result.OpenAIOAuthDefaultTimezone = settings[SettingKeyOpenAIOAuthDefaultTimezone]
 	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]

@@ -492,6 +492,15 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAISolGroupID != after.OpenAISolGroupID {
 		changed = append(changed, "openai_sol_group_id")
 	}
+	if !reflect.DeepEqual(before.OpenAIAstraSourceGroupIDs, after.OpenAIAstraSourceGroupIDs) {
+		changed = append(changed, "openai_astra_source_group_ids")
+	}
+	if !reflect.DeepEqual(before.OpenAISolSourceGroupIDs, after.OpenAISolSourceGroupIDs) {
+		changed = append(changed, "openai_sol_source_group_ids")
+	}
+	if before.OpenAIOAuthDefaultTimezone != after.OpenAIOAuthDefaultTimezone {
+		changed = append(changed, "openai_oauth_default_timezone")
+	}
 	if before.OpenAICodexTicketEnabled != after.OpenAICodexTicketEnabled {
 		changed = append(changed, "openai_codex_ticket_enabled")
 	}

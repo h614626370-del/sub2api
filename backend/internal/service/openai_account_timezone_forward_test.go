@@ -17,7 +17,8 @@ func TestAccountTimezoneForwardHTTPAndSSE(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		for _, stream := range []bool{false, true} {
 			s := newAstraOAuthSetup(t, passthrough)
-			s.account.Extra[accountTimezoneOverrideKey] = "Asia/Tokyo"
+			s.account.Extra[accountTimezoneOverrideKey] = "Europe/London"
+			s.svc.settingService = NewSettingService(&timezoneSettingsRepo{&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAIOAuthDefaultTimezone: "Asia/Tokyo"}}}, s.svc.cfg)
 			s.upstream.resp = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(codexCompletedSSE(`{"id":"resp_test","model":"gpt-5.6-sol","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)))}
 			streamJSON := "false"
 			if stream {

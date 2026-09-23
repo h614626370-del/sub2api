@@ -220,6 +220,9 @@ type SystemSettings struct {
 	OpenAICodexTicketPolicy                 *service.OpenAICodexTicketPolicy `json:"openai_codex_ticket_policy"`
 	OpenAIAstraGroupID                      int64                            `json:"openai_astra_group_id"`
 	OpenAISolGroupID                        int64                            `json:"openai_sol_group_id"`
+	OpenAIAstraSourceGroupIDs               []int64                          `json:"openai_astra_source_group_ids"`
+	OpenAISolSourceGroupIDs                 []int64                          `json:"openai_sol_source_group_ids"`
+	OpenAIOAuthDefaultTimezone              string                           `json:"openai_oauth_default_timezone"`
 	OpenAICodexTicketEnabled                bool                             `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL        string                           `json:"openai_codex_ticket_harvest_proxy_url"`
 	OpenAICodexTicketHarvestProxyConfigured bool                             `json:"openai_codex_ticket_harvest_proxy_configured"`

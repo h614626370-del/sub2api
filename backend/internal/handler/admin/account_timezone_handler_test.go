@@ -23,7 +23,7 @@ func (s *timezoneAdminStub) SetAccountTimezone(_ context.Context, _ int64, value
 	return &service.AccountTimezoneState{Override: value}, nil
 }
 
-func TestAccountTimezoneHandlerRequiresExplicitOverride(t *testing.T) {
+func TestAccountTimezoneHandlerRejectsLegacyOverride(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
 		id, body string
@@ -32,7 +32,7 @@ func TestAccountTimezoneHandlerRequiresExplicitOverride(t *testing.T) {
 	}{
 		{"1", `{}`, 400, false}, {"1", `{"override":null}`, 400, false},
 		{"0", `{"override":"UTC"}`, 400, false}, {"bad", `{"override":"UTC"}`, 400, false},
-		{"1", `{"override":""}`, 200, true}, {"1", `{"override":"Asia/Tokyo"}`, 200, true},
+		{"1", `{"override":""}`, 400, false}, {"1", `{"override":"Asia/Tokyo"}`, 400, false},
 	} {
 		s := &timezoneAdminStub{}
 		h := &AccountHandler{adminService: s}
@@ -44,5 +44,6 @@ func TestAccountTimezoneHandlerRequiresExplicitOverride(t *testing.T) {
 		r.ServeHTTP(w, req)
 		require.Equal(t, tc.status, w.Code, tc.body)
 		require.Equal(t, tc.called, s.called, tc.body)
+		require.Contains(t, w.Body.String(), "ACCOUNT_TIMEZONE_OVERRIDE_UNSUPPORTED")
 	}
 }

@@ -260,6 +260,9 @@ type UpdateSettingsRequest struct {
 	OpenAICodexTicketPolicy                *service.OpenAICodexTicketPolicy `json:"openai_codex_ticket_policy"`
 	OpenAIAstraGroupID                     *int64                           `json:"openai_astra_group_id"`
 	OpenAISolGroupID                       *int64                           `json:"openai_sol_group_id"`
+	OpenAIAstraSourceGroupIDs              *[]int64                         `json:"openai_astra_source_group_ids"`
+	OpenAISolSourceGroupIDs                *[]int64                         `json:"openai_sol_source_group_ids"`
+	OpenAIOAuthDefaultTimezone             *string                          `json:"openai_oauth_default_timezone"`
 	OpenAICodexTicketEnabled               *bool                            `json:"openai_codex_ticket_enabled"`
 	OpenAICodexTicketHarvestProxyURL       *string                          `json:"openai_codex_ticket_harvest_proxy_url"`
 
@@ -501,8 +504,17 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	auditReq := settingsAuditRequest(req)
 	omitted := omittedSettingKeys(sentFields)
+	if req.OpenAIOAuthDefaultTimezone == nil {
+		omitted[service.SettingKeyOpenAIOAuthDefaultTimezone] = struct{}{}
+	}
 	if req.OpenAIAstraGroupID == nil {
 		omitted[service.SettingKeyOpenAIAstraGroupID] = struct{}{}
+	}
+	if req.OpenAIAstraSourceGroupIDs == nil {
+		omitted[service.SettingKeyOpenAIAstraSourceGroupIDs] = struct{}{}
+	}
+	if req.OpenAISolSourceGroupIDs == nil {
+		omitted[service.SettingKeyOpenAISolSourceGroupIDs] = struct{}{}
 	}
 	if req.OpenAISolGroupID == nil {
 		omitted[service.SettingKeyOpenAISolGroupID] = struct{}{}
@@ -1783,11 +1795,29 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return previousSettings.OpenAICodexVersionAutoSyncEnabled
 		}(),
 		OpenAICodexTicketPolicy: req.OpenAICodexTicketPolicy,
+		OpenAIOAuthDefaultTimezone: func() string {
+			if req.OpenAIOAuthDefaultTimezone != nil {
+				return strings.TrimSpace(*req.OpenAIOAuthDefaultTimezone)
+			}
+			return previousSettings.OpenAIOAuthDefaultTimezone
+		}(),
 		OpenAIAstraGroupID: func() int64 {
 			if req.OpenAIAstraGroupID != nil {
 				return *req.OpenAIAstraGroupID
 			}
 			return previousSettings.OpenAIAstraGroupID
+		}(),
+		OpenAIAstraSourceGroupIDs: func() []int64 {
+			if req.OpenAIAstraSourceGroupIDs != nil {
+				return *req.OpenAIAstraSourceGroupIDs
+			}
+			return previousSettings.OpenAIAstraSourceGroupIDs
+		}(),
+		OpenAISolSourceGroupIDs: func() []int64 {
+			if req.OpenAISolSourceGroupIDs != nil {
+				return *req.OpenAISolSourceGroupIDs
+			}
+			return previousSettings.OpenAISolSourceGroupIDs
 		}(),
 		OpenAISolGroupID: func() int64 {
 			if req.OpenAISolGroupID != nil {
@@ -2356,6 +2386,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexTicketPolicy:                                updatedSettings.OpenAICodexTicketPolicy,
 		OpenAIAstraGroupID:                                     updatedSettings.OpenAIAstraGroupID,
 		OpenAISolGroupID:                                       updatedSettings.OpenAISolGroupID,
+		OpenAIAstraSourceGroupIDs:                              updatedSettings.OpenAIAstraSourceGroupIDs,
+		OpenAISolSourceGroupIDs:                                updatedSettings.OpenAISolSourceGroupIDs,
+		OpenAIOAuthDefaultTimezone:                             updatedSettings.OpenAIOAuthDefaultTimezone,
 		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
 		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",

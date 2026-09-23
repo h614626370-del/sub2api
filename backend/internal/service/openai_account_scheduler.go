@@ -2171,7 +2171,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	var routeErr error
-	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, requestedModel, platform)
+	ctx, routeErr = s.ensureOpenAIModelRoute(ctx, groupID, requestedModel, platform)
 	if routeErr != nil {
 		return nil, OpenAIAccountScheduleDecision{}, routeErr
 	}

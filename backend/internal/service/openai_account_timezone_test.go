@@ -62,16 +62,16 @@ func (m *timezoneManagerStub) DetectAccountTimezone(context.Context, int64, bool
 
 func TestAccountTimezoneGatewayProxyBindingAndRetry(t *testing.T) {
 	p := &Proxy{Host: "old.example", Protocol: "http", Port: 80}
-	a := &Account{ID: 1, Platform: PlatformOpenAI, Proxy: p}
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Proxy: p}
 	body := []byte(`{"tools":[{"type":"web_search"}]}`)
 	m := &timezoneManagerStub{state: &AccountTimezoneState{Source: "none", HasProxy: true, ProxyFingerprint: timezoneProxyFingerprint(p)}, err: errors.New("offline")}
 	s := &OpenAIGatewayService{accountTimezoneManager: m}
 	require.Equal(t, body, s.applyAccountTimezone(context.Background(), a, body))
 	require.Equal(t, body, s.applyAccountTimezone(context.Background(), a, body))
 	require.Equal(t, 1, m.calls)
-	// A saved manual override takes effect even while automatic retries back off.
+	// Legacy manual values no longer override the client.
 	m.state = &AccountTimezoneState{Source: "manual", Timezone: "Asia/Tokyo"}
-	require.Equal(t, "Asia/Tokyo", gjson.GetBytes(s.applyAccountTimezone(context.Background(), a, body), "tools.0.user_location.timezone").String())
+	require.Equal(t, body, s.applyAccountTimezone(context.Background(), a, body))
 	// No proxy on the active connection must not inherit a newly assigned proxy.
 	m.state = &AccountTimezoneState{Source: "proxy", Timezone: "Asia/Tokyo", ProxyFingerprint: timezoneProxyFingerprint(p)}
 	a.Proxy = nil
@@ -86,6 +86,62 @@ func TestAccountTimezoneGatewayProxyBindingAndRetry(t *testing.T) {
 	a.Platform = PlatformAnthropic
 	m.state = &AccountTimezoneState{Source: "manual", Timezone: "Asia/Tokyo"}
 	require.Equal(t, body, s.applyAccountTimezone(context.Background(), a, body))
+}
+
+func TestAccountTimezoneGatewayGlobalFallbackAndProxyPriority(t *testing.T) {
+	ctx := context.Background()
+	p := &Proxy{Host: "proxy.example", Protocol: "http", Port: 80}
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Proxy: p}
+	body := []byte(`{"tools":[{"type":"web_search","user_location":{"timezone":"UTC","city":"Boston"}}]}`)
+	repo := &codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAIOAuthDefaultTimezone: "Europe/London"}}
+	settings := NewSettingService(repo, nil)
+	fingerprint := timezoneProxyFingerprint(p)
+	m := &timezoneManagerStub{
+		state: &AccountTimezoneState{Source: "global", Timezone: "Europe/London", HasProxy: true, ProxyFingerprint: fingerprint},
+		err:   errors.New("offline"),
+	}
+	s := &OpenAIGatewayService{accountTimezoneManager: m, settingService: settings}
+	zone := func() string {
+		return gjson.GetBytes(s.applyAccountTimezone(ctx, a, body), "tools.0.user_location.timezone").String()
+	}
+	require.Equal(t, "Europe/London", zone())
+	require.Equal(t, "Europe/London", zone())
+	require.Equal(t, 1, m.calls, "global fallback must not suppress the first detection; failures back off")
+	repo.values[SettingKeyOpenAIOAuthDefaultTimezone] = "Asia/Shanghai"
+	settings.invalidateOpenAIOAuthTimezoneCache()
+	require.Equal(t, "Asia/Shanghai", zone(), "a changed default takes effect during backoff")
+	s.accountTimezoneFailures.Store("1:"+fingerprint, time.Now().Add(-time.Second))
+	m.err = nil
+	m.detected = &AccountTimezoneState{Source: "proxy", Timezone: "America/Los_Angeles", HasProxy: true, ProxyFingerprint: fingerprint}
+	require.Equal(t, "America/Los_Angeles", zone())
+	require.Equal(t, 2, m.calls)
+	m.state = m.detected
+	require.Equal(t, "America/Los_Angeles", zone())
+	require.Equal(t, 2, m.calls, "valid proxy results do not probe again")
+	// Both proxy reassignment and removal on a long-lived connection use the default.
+	a.Proxy = &Proxy{Host: "another.example", Protocol: "http", Port: 80}
+	require.Equal(t, "Asia/Shanghai", zone())
+	a.Proxy = nil
+	require.Equal(t, "Asia/Shanghai", zone())
+	m.state = &AccountTimezoneState{Source: "global", Timezone: "Asia/Shanghai"}
+	require.Equal(t, "Asia/Shanghai", zone())
+	require.Equal(t, 2, m.calls)
+	repo.values[SettingKeyOpenAIOAuthDefaultTimezone] = ""
+	settings.invalidateOpenAIOAuthTimezoneCache()
+	require.Equal(t, "UTC", zone())
+	// The active proxy must also match a result returned by a slow detection.
+	repo.values[SettingKeyOpenAIOAuthDefaultTimezone] = "Europe/London"
+	settings.invalidateOpenAIOAuthTimezoneCache()
+	a.Proxy = p
+	m.state = &AccountTimezoneState{Source: "global", HasProxy: true, ProxyFingerprint: fingerprint}
+	m.detected = &AccountTimezoneState{Source: "proxy", Timezone: "Asia/Tokyo", ProxyFingerprint: "changed"}
+	require.Equal(t, "Europe/London", zone())
+	for _, kind := range []string{AccountTypeAPIKey, AccountTypeSetupToken} {
+		a.Type = kind
+		require.Equal(t, body, s.applyAccountTimezone(ctx, a, body))
+	}
+	a.Type, a.Platform = AccountTypeOAuth, PlatformAnthropic
+	require.Equal(t, body, s.applyAccountTimezone(ctx, a, body))
 }
 
 func TestAlignTimezoneEnvironmentRejectsMalformedOrUnmarkedXML(t *testing.T) {

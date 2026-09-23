@@ -54,6 +54,8 @@
       </div>
     </div>
 
+    <CodexTicketSettingsPanel @saved="load" />
+
     <div class="card overflow-hidden">
       <div class="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-700 lg:flex-row lg:items-center lg:justify-between">
         <div>
@@ -240,6 +242,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import CodexTicketSettingsPanel from './CodexTicketSettingsPanel.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import CodexTicketDetailsPanel from '../CodexTicketDetailsPanel.vue'
+import CodexTicketSettingsPanel from '../CodexTicketSettingsPanel.vue'
 import Pagination from '@/components/common/Pagination.vue'
 
 const { getSettings, listAccounts, listAudits, getAudit, statistics, showError } = vi.hoisted(() => ({
@@ -45,6 +46,23 @@ describe('CodexTicketDetailsPanel', () => {
     getAudit.mockReset()
     statistics.mockReset().mockResolvedValue([])
     showError.mockReset()
+  })
+
+  it('hosts ticket settings and refreshes details after settings are saved', async () => {
+    getSettings.mockResolvedValue({ openai_codex_ticket_enabled: false })
+    listAccounts.mockResolvedValue({ items: [], total: 0 })
+    listAudits.mockResolvedValue({ items: [], total: 0 })
+    const wrapper = mount(CodexTicketDetailsPanel, { global: { stubs: { Icon: true } } })
+    await flushPromises()
+    const settingsPanel = wrapper.getComponent(CodexTicketSettingsPanel)
+    expect(settingsPanel.get('details').attributes('open')).toBeUndefined()
+    expect(settingsPanel.find('#custom-codex-ticket-enabled').exists()).toBe(true)
+    expect(listAccounts).toHaveBeenCalledTimes(1)
+    settingsPanel.vm.$emit('saved')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(listAudits).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
   })
 
   it('shows real connection metadata and hides failure and separately-probed IPs', async () => {
