@@ -847,7 +847,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
+	if isOAuth {
+		addOpenAIAccountTestTimezoneContext(payload)
+	}
 	payloadBytes, _ := json.Marshal(payload)
+	if isOAuth {
+		payloadBytes = s.applyOpenAIAccountTestTimezone(ctx, credentialAccount, payloadBytes)
+	}
 
 	// Send test_start event once. A task-invalid Agent Identity response may
 	// restart this probe after registering a replacement task.
@@ -2190,7 +2196,14 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		testModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
-	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID, isOAuth))
+	compactPayload := createOpenAICompactProbePayload(testModelID, isOAuth)
+	if isOAuth {
+		addOpenAICompactTestTimezoneContext(compactPayload)
+	}
+	payloadBytes, _ := json.Marshal(compactPayload)
+	if isOAuth {
+		payloadBytes = s.applyOpenAIAccountTestTimezone(ctx, credentialAccount, payloadBytes)
+	}
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -2751,6 +2764,68 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	payload["instructions"] = openai.DefaultInstructions
 
 	return payload
+}
+
+// addOpenAIAccountTestTimezoneContext keeps the admin OAuth probe aligned with
+// the environment metadata used by real Codex requests. The timezone helper
+// then replaces the UTC placeholder with the account's proxy/global timezone.
+func addOpenAIAccountTestTimezoneContext(payload map[string]any) {
+	payload["input"] = []map[string]any{
+		{
+			"role": "user",
+			"internal_chat_message_metadata_passthrough": map[string]any{
+				"content_item_kinds": []string{"user.text", "environments.environment_context"},
+			},
+			"content": []map[string]any{
+				{
+					"type": "input_text",
+					"text": "hi",
+				},
+				{
+					"type": "input_text",
+					"text": fmt.Sprintf("<environment_context><current_date>%s</current_date><timezone>UTC</timezone></environment_context>", time.Now().UTC().Format("2006-01-02")),
+				},
+			},
+		},
+	}
+}
+
+func addOpenAICompactTestTimezoneContext(payload map[string]any) {
+	payload["input"] = []any{
+		map[string]any{
+			"type": "message",
+			"role": "user",
+			"internal_chat_message_metadata_passthrough": map[string]any{
+				"content_item_kinds": []string{"user.text", "environments.environment_context"},
+			},
+			"content": []map[string]any{
+				{
+					"type": "input_text",
+					"text": "Respond with OK.",
+				},
+				{
+					"type": "input_text",
+					"text": fmt.Sprintf("<environment_context><current_date>%s</current_date><timezone>UTC</timezone></environment_context>", time.Now().UTC().Format("2006-01-02")),
+				},
+			},
+		},
+		map[string]any{"type": "compaction_trigger"},
+	}
+}
+
+func (s *AccountTestService) applyOpenAIAccountTestTimezone(ctx context.Context, account *Account, body []byte) []byte {
+	if s == nil || account == nil {
+		return body
+	}
+	if s.openaiGatewayService != nil {
+		return s.openaiGatewayService.applyAccountTimezone(ctx, account, body)
+	}
+	if s.settingService == nil {
+		return body
+	}
+	// Lightweight service construction keeps unit/test-only AccountTestService
+	// instances on the same global-timezone path as the wired gateway service.
+	return (&OpenAIGatewayService{settingService: s.settingService}).applyAccountTimezone(ctx, account, body)
 }
 
 func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {

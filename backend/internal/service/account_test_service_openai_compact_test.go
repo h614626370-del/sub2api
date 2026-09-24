@@ -74,6 +74,8 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
 	inputItems := gjson.GetBytes(upstream.lastBody, "input").Array()
 	require.NotEmpty(t, inputItems)
+	require.Equal(t, "environments.environment_context", gjson.GetBytes(upstream.lastBody, "input.0.internal_chat_message_metadata_passthrough.content_item_kinds.1").String())
+	require.Contains(t, gjson.GetBytes(upstream.lastBody, "input.0.content.1.text").String(), "<timezone>UTC</timezone>")
 	require.Equal(t, "compaction_trigger", inputItems[len(inputItems)-1].Get("type").String())
 
 	updates := <-updateCalls

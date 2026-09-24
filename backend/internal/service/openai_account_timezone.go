@@ -33,7 +33,7 @@ func (s *OpenAIGatewayService) applyAccountTimezone(ctx context.Context, account
 		return body
 	}
 	defaultZone := ""
-	if s != nil {
+	if s != nil && s.settingService != nil {
 		defaultZone = s.settingService.GetOpenAIOAuthDefaultTimezone(ctx)
 	}
 	fingerprint := timezoneProxyFingerprint(account.Proxy)
