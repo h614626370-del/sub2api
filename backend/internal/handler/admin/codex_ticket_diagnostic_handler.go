@@ -84,7 +84,7 @@ func codexDiagnosticOutput(raw []byte) (string, bool) {
 				gjson.Get(payload, "response.output").ForEach(func(_, message gjson.Result) bool {
 					message.Get("content").ForEach(func(_, part gjson.Result) bool {
 						if part.Get("type").String() == "output_text" {
-							output.WriteString(part.Get("text").String())
+							_, _ = output.WriteString(part.Get("text").String())
 						}
 						return true
 					})

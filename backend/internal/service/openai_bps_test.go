@@ -248,7 +248,7 @@ func TestOpenAIBPSCompactionAndIsolation(t *testing.T) {
 	require.Error(t, next.bpsBind(c2.Request.Context(), r.Scope, &other))
 	stranger, _ := bpsContext(2, "/v1/responses")
 	require.ErrorContains(t, next.PrepareOpenAIBPSRouting(stranger, nextBody), "expired")
-	store := s.cache.(*bpsMemoryStore)
+	store := bpsTestValue[*bpsMemoryStore](t, s.cache)
 	store.data = map[string][]byte{}
 	require.ErrorContains(t, next.PrepareOpenAIBPSRouting(c2, nextBody), "expired")
 }
@@ -315,7 +315,7 @@ func TestOpenAIBPSForward(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, rec.Body.String(), bpsCompactPrefix)
 		require.NotContains(t, rec.Body.String(), `"text":"summary"`)
-		up := s.httpUpstream.(*bpsHTTPStub)
+		up := bpsTestValue[*bpsHTTPStub](t, s.httpUpstream)
 		require.NotContains(t, string(up.requestBody), "compaction_trigger")
 	})
 }
