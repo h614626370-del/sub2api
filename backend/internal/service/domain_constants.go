@@ -40,6 +40,7 @@ const (
 const (
 	PlatformAnthropic   = domain.PlatformAnthropic
 	PlatformOpenAI      = domain.PlatformOpenAI
+	PlatformOpenAIBPS   = domain.PlatformOpenAIBPS
 	PlatformGemini      = domain.PlatformGemini
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformGrok        = domain.PlatformGrok
@@ -125,6 +126,7 @@ func IsMultiProtocolAPIKeyProvider(platform string) bool {
 // ent/schema/user_platform_quota.go 的 Validate 函数独立维护（构建期约束），
 // 若新增平台需同步修改该 schema。
 var AllowedQuotaPlatforms = []string{
+	PlatformOpenAIBPS,
 	PlatformAnthropic,
 	PlatformOpenAI,
 	PlatformGemini,
@@ -711,17 +713,11 @@ const (
 	SettingKeyOpenAICodexClientVersionSynced = "openai_codex_client_version_synced"
 	// SettingKeyOpenAICodexVersionAutoSyncEnabled 是否启用 Codex 客户端版本号自动同步（默认 true）。
 	SettingKeyOpenAICodexVersionAutoSyncEnabled = "openai_codex_version_auto_sync_enabled"
-	// SettingKeyOpenAICodexTicketEnabled Codex 292 打票总开关（后台可改、热更新）。
-	// 关闭：不打票、不注入 x-codex-turn-state，按原链路转发。
-	// 开启：后台打票并在业务请求中覆盖该头。
-	SettingKeyOpenAICodexTicketEnabled   = "openai_codex_ticket_enabled"
-	SettingKeyOpenAIAstraGroupID         = "openai_astra_group_id"
-	SettingKeyOpenAISolGroupID           = "openai_sol_group_id"
-	SettingKeyOpenAIAstraSourceGroupIDs  = "openai_astra_source_group_ids"
-	SettingKeyOpenAISolSourceGroupIDs    = "openai_sol_source_group_ids"
-	SettingKeyOpenAIOAuthDefaultTimezone = "openai_oauth_default_timezone"
-	// SettingKeyOpenAICodexTicketHarvestProxyURL Codex 292 打票出口（socks5h/http），后台可改、热更新。
-	SettingKeyOpenAICodexTicketHarvestProxyURL = "openai_codex_ticket_harvest_proxy_url"
+	SettingKeyOpenAIAstraGroupID                = "openai_astra_group_id"
+	SettingKeyOpenAISolGroupID                  = "openai_sol_group_id"
+	SettingKeyOpenAIAstraSourceGroupIDs         = "openai_astra_source_group_ids"
+	SettingKeyOpenAISolSourceGroupIDs           = "openai_sol_source_group_ids"
+	SettingKeyOpenAIOAuthDefaultTimezone        = "openai_oauth_default_timezone"
 	// SettingKeyClaudeCodeClientVersion 网关对 Anthropic 上游声明的 Claude Code CLI 客户端版本号（管理员覆写）。
 	// 空值表示跟随自动同步值；自动同步也没有结果时回退到 claude.CLIVersion()（环境变量覆盖 + 内置基线）。
 	// 版本太旧会被 Anthropic 拒绝（claude_code_version_too_old），故该值需保持跟随官方发布。
@@ -731,6 +727,14 @@ const (
 	SettingKeyClaudeCodeClientVersionSynced = "claude_code_client_version_synced"
 	// SettingKeyClaudeCodeVersionAutoSyncEnabled 是否启用 Claude Code 客户端版本号自动同步（默认 true）。
 	SettingKeyClaudeCodeVersionAutoSyncEnabled = "claude_code_version_auto_sync_enabled"
+	// SettingKeyOpenAICodexTicketEnabled Codex 292 打票总开关（后台可改、热更新）。
+	// 关闭：不打票、不注入 x-codex-turn-state，按原链路转发。
+	// 开启：后台打票并在业务请求中覆盖该头。
+	SettingKeyOpenAICodexTicketEnabled            = "openai_codex_ticket_enabled"
+	SettingKeyOpenAICodexTicketPromptTemplate     = "openai_codex_ticket_prompt_template"
+	SettingKeyOpenAICodexTicketAllowWithoutTicket = "openai_codex_ticket_allow_without_ticket"
+	// SettingKeyOpenAICodexTicketHarvestProxyURL Codex 292 打票出口（socks5h/http），后台可改、热更新。
+	SettingKeyOpenAICodexTicketHarvestProxyURL = "openai_codex_ticket_harvest_proxy_url"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"

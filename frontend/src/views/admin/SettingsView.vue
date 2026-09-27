@@ -4055,7 +4055,7 @@
                       </tr>
                     </thead>
                     <tbody class="space-y-2">
-                      <tr v-for="p in (['anthropic', 'openai', 'gemini', 'antigravity', 'grok'] as const)" :key="p" class="align-top">
+                      <tr v-for="p in (['anthropic', 'openai', 'openai_bps', 'gemini', 'antigravity', 'grok'] as const)" :key="p" class="align-top">
                         <td class="pr-4 py-1">
                           <span class="font-mono text-xs text-gray-700 dark:text-gray-300">{{ p }}</span>
                         </td>
@@ -4390,7 +4390,7 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="p in (['anthropic', 'openai', 'gemini', 'antigravity', 'grok'] as const)" :key="`${authSource.source}-pq-${p}`" class="align-top">
+                            <tr v-for="p in (['anthropic', 'openai', 'openai_bps', 'gemini', 'antigravity', 'grok'] as const)" :key="`${authSource.source}-pq-${p}`" class="align-top">
                               <td class="pr-4 py-1">
                                 <span class="font-mono text-xs text-gray-700 dark:text-gray-300">{{ p }}</span>
                               </td>
@@ -4502,6 +4502,39 @@
               </h2>
             </div>
             <div class="p-6 space-y-4">
+                <div class="flex items-center justify-between gap-4">
+                  <div class="min-w-0">
+                    <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.gatewayForwarding.codexTicketEnabled") }}
+                    </h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.codexTicketEnabledDesc") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    id="codex-ticket-enabled"
+                    v-model="form.openai_codex_ticket_enabled"
+                  />
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <div class="min-w-0">
+                    <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.gatewayForwarding.codexTicketAllowWithoutTicket") }}</h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexTicketAllowWithoutTicketDesc") }}</p>
+                  </div>
+                  <Toggle id="codex-ticket-allow-without" v-model="form.openai_codex_ticket_allow_without_ticket" />
+                </div>
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <label for="codex-probe-template" class="text-base font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.gatewayForwarding.codexProbeTemplate") }}</label>
+                    <button type="button" class="btn btn-secondary btn-sm" data-testid="codex-probe-template-reset" :disabled="saving || !form.openai_codex_ticket_prompt_template_default" @click="form.openai_codex_ticket_prompt_template = form.openai_codex_ticket_prompt_template_default">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateReset") }}</button>
+                  </div>
+                  <p id="codex-probe-template-help" class="text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateDesc") }}</p>
+                  <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span v-for="placeholder in codexProbeTemplatePlaceholders" :key="placeholder.token"><code class="font-mono">{{ placeholder.token }}</code> — {{ t(placeholder.label) }}</span>
+                  </div>
+                  <textarea id="codex-probe-template" v-model="form.openai_codex_ticket_prompt_template" data-testid="codex-probe-template" aria-describedby="codex-probe-template-help" class="input w-full font-mono text-xs" rows="12" wrap="off" :spellcheck="false" :disabled="saving" />
+                </div>
+                <CodexTicketCadenceSettings ref="codexTicketCadenceRef" :saving="saving" />
                 <div>
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">
                     {{ t("admin.settings.gatewayForwarding.codexClientRestrictionTitle") }}
@@ -8882,7 +8915,7 @@
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <div v-show="activeTab !== 'backup'" class="settings-save-bar flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -8955,6 +8988,7 @@
 </template>
 
 <script setup lang="ts">
+import CodexTicketCadenceSettings from '@/components/admin/account/CodexTicketCadenceSettings.vue'
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
@@ -9072,6 +9106,7 @@ type SettingsTab =
   | "email"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
+const codexTicketCadenceRef = ref<InstanceType<typeof CodexTicketCadenceSettings> | null>(null);
 const settingsTabs = [
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
@@ -9683,13 +9718,11 @@ interface DefaultSubscriptionGroupOption {
 
 type SettingsForm = Omit<
   SystemSettings,
-  | "openai_codex_ticket_policy"
   | "openai_astra_group_id"
   | "openai_sol_group_id"
   | "openai_astra_source_group_ids"
   | "openai_sol_source_group_ids"
   | "openai_oauth_default_timezone"
-  | "openai_codex_ticket_enabled"
   | "openai_codex_ticket_harvest_proxy_url"
   | "openai_codex_ticket_harvest_proxy_configured"
   | "wechat_connect_open_enabled"
@@ -10000,6 +10033,10 @@ const form = reactive<SettingsForm>({
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   claude_code_client_version_synced: "",
   claude_code_version_auto_sync_enabled: true,
+  openai_codex_ticket_enabled: false,
+  openai_codex_ticket_allow_without_ticket: true,
+  openai_codex_ticket_prompt_template: "",
+  openai_codex_ticket_prompt_template_default: "",
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -10995,6 +11032,13 @@ const claudeSyncedVersionLabel = computed(() => {
   });
 });
 
+const codexProbeTemplatePlaceholders = [
+  { token: '{{TIMEZONE}}', label: 'admin.settings.gatewayForwarding.codexProbeTimezone' },
+  { token: '{{CURRENT_DATE}}', label: 'admin.settings.gatewayForwarding.codexProbeDate' },
+  { token: '{{MODEL}}', label: 'admin.settings.gatewayForwarding.codexProbeModel' },
+  { token: '{{MODELTRACE_PROMPT}}', label: 'admin.settings.gatewayForwarding.codexProbeChallenge' },
+];
+
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
@@ -11263,6 +11307,14 @@ const siteBillingModeHint = computed(() =>
 );
 
 async function saveSettings() {
+  const cadence = codexTicketCadenceRef.value;
+  try {
+    if (activeTab.value === "gateway" || cadence?.isDirty?.()) cadence?.validate?.();
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t("admin.settings.failedToSave")));
+    return;
+  }
+  let settingsSaved = false;
   saving.value = true;
   try {
     const normalizedTableDefaultPageSize = Math.floor(
@@ -11631,6 +11683,12 @@ async function saveSettings() {
       claude_code_client_version: form.claude_code_client_version?.trim() || "",
       claude_code_version_auto_sync_enabled:
         form.claude_code_version_auto_sync_enabled,
+      openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
+      openai_codex_ticket_allow_without_ticket: form.openai_codex_ticket_allow_without_ticket,
+      openai_codex_ticket_prompt_template:
+        form.openai_codex_ticket_prompt_template === form.openai_codex_ticket_prompt_template_default
+          ? ""
+          : form.openai_codex_ticket_prompt_template,
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:
@@ -11785,6 +11843,8 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    settingsSaved = true;
+    if (cadence?.isDirty?.()) await cadence.save();
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {
@@ -11869,6 +11929,10 @@ async function saveSettings() {
       appStore.showSuccess(t("admin.settings.settingsSaved"));
     }
   } catch (error: unknown) {
+    if (settingsSaved) {
+      appStore.showError(`${localText("普通设置已保存，但打票间隔或其他附加设置保存失败：", "Settings saved, but a separate setting failed: ")}${extractApiErrorMessage(error, t("admin.settings.failedToSave"))}`);
+      return;
+    }
     // 用户取消 step-up 验证：静默返回，不弹错误
     if (isStepUpCancelled(error)) {
       return;
@@ -13249,6 +13313,21 @@ watch(
 .default-sub-delete-btn {
   @apply h-[42px];
 }
+
+.settings-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  margin: 0 -0.25rem;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  border: 1px solid rgb(226 232 240 / 0.85);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -8px 24px rgb(15 23 42 / 0.06);
+}
+
+:global(.dark) .settings-save-bar { background: rgb(30 41 59 / 0.94); border-color: rgb(71 85 105 / 0.7); }
 
 /* ============ 系统设置 Tab 导航 ============ */
 .settings-tabs-shell {

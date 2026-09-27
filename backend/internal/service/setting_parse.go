@@ -246,7 +246,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersion:                           "",
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
-		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingKeyOpenAIAstraGroupID:                                 "0",
 		SettingKeyOpenAISolGroupID:                                   "0",
 		SettingKeyOpenAIAstraSourceGroupIDs:                          "[]",
@@ -255,6 +254,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyClaudeCodeClientVersion:                            "",
 		SettingKeyClaudeCodeClientVersionSynced:                      "",
 		SettingKeyClaudeCodeVersionAutoSyncEnabled:                   "true",
+		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -905,8 +905,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else if s != nil && s.cfg != nil {
 		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
 	}
-	policy := s.parseCodexTicketPolicy(settings[SettingKeyOpenAICodexTicketPolicy])
-	result.OpenAICodexTicketPolicy = &policy
 	result.OpenAIAstraGroupID, _ = strconv.ParseInt(settings[SettingKeyOpenAIAstraGroupID], 10, 64)
 	result.OpenAISolGroupID, _ = strconv.ParseInt(settings[SettingKeyOpenAISolGroupID], 10, 64)
 	result.OpenAIAstraSourceGroupIDs, _ = parseOpenAIRouteSourceIDs(settings[SettingKeyOpenAIAstraSourceGroupIDs])
@@ -921,6 +919,17 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.ClaudeCodeVersionAutoSyncEnabled = true
 	}
+	if v, ok := settings[SettingKeyOpenAICodexTicketEnabled]; ok && v != "" {
+		result.OpenAICodexTicketEnabled = v == "true"
+	} else if s != nil && s.cfg != nil {
+		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
+	}
+	result.OpenAICodexTicketAllowWithoutTicket = s == nil || s.cfg == nil || !s.cfg.Gateway.OpenAICodexTicket.FailClosed
+	if v, ok := settings[SettingKeyOpenAICodexTicketAllowWithoutTicket]; ok && v != "" {
+		result.OpenAICodexTicketAllowWithoutTicket = v == "true"
+	}
+	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
+	result.OpenAICodexTicketPromptTemplate = settings[SettingKeyOpenAICodexTicketPromptTemplate]
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

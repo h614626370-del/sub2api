@@ -130,18 +130,6 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
-		registerCodexTicketRoutes(admin, h)
-	}
-}
-
-func registerCodexTicketRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
-	tickets := admin.Group("/codex-ticket")
-	{
-		tickets.GET("/audits", h.Admin.CodexTicket.ListAudits)
-		tickets.GET("/statistics", h.Admin.CodexTicket.Statistics)
-		tickets.GET("/audits/:id", h.Admin.CodexTicket.GetAudit)
-		tickets.POST("/audits/clear", h.Admin.CodexTicket.ClearAudits)
-		tickets.POST("/discard", h.Admin.CodexTicket.DiscardTickets)
 	}
 }
 
@@ -382,6 +370,17 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/timezone", h.Admin.Account.GetTimezone)
 		accounts.PUT("/:id/timezone", h.Admin.Account.SetTimezone)
 		accounts.POST("/:id/timezone/detect", h.Admin.Account.DetectTimezone)
+		accounts.GET("/codex-ticket-cadence", h.Admin.Account.GetCodexTicketCadence)
+		accounts.PUT("/codex-ticket-cadence", h.Admin.Account.UpdateCodexTicketCadence)
+		accounts.GET("/codex-ticket-fingerprint", h.Admin.Account.GetCodexFingerprintVersion)
+		accounts.POST("/codex-ticket-fingerprint/refresh", h.Admin.Account.RefreshCodexFingerprint)
+		accounts.GET("/:id/codex-ticket-history", h.Admin.Account.GetCodexTicketHistory)
+		accounts.GET("/:id/codex-ticket-events", h.Admin.Account.GetCodexTicketEvents)
+		accounts.GET("/:id/codex-ticket-invalidations", h.Admin.Account.ListCodexTicketInvalidations)
+		accounts.GET("/:id/codex-ticket-invalidations/:event_id", gin.HandlerFunc(stepUpAuth), h.Admin.Account.GetCodexTicketInvalidation)
+		accounts.POST("/:id/codex-ticket-harvest", h.Admin.Account.HarvestCodexTicket)
+		accounts.POST("/:id/codex-ticket-diagnostic", h.Admin.Account.DiagnoseCodexModels)
+		accounts.PUT("/:id/codex-ticket-participation", h.Admin.Account.SetCodexTicketParticipation)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)
@@ -532,6 +531,8 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 	{
 		proxies.GET("", h.Admin.Proxy.List)
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
+		proxies.GET("/codex-ticket-pool", h.Admin.Proxy.GetCodexTicketPool)
+		proxies.PUT("/codex-ticket-pool", h.Admin.Proxy.UpdateCodexTicketPool)
 		// 代理导出泄露账号密码原文——要求 step-up 2FA
 		proxies.GET("/data", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)

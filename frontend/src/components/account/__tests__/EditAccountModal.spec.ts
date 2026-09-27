@@ -324,6 +324,32 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('loads, changes and clears the OpenAI OAuth base URL', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.credentials.base_url = 'https://relay.example/codex'
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const input = wrapper.get<HTMLInputElement>('#edit-openai-oauth-base-url')
+    expect(input.element.value).toBe('https://relay.example/codex')
+    await input.setValue('https://new.example/custom')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.base_url).toBe('https://new.example/custom')
+    await input.setValue('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[1]?.[1]?.credentials.base_url).toBe('')
+    wrapper.unmount()
+  })
+
+  it('does not expose the OAuth base URL for API keys or credential shadows', () => {
+    const apiKey = mountModal()
+    expect(apiKey.find('#edit-openai-oauth-base-url').exists()).toBe(false)
+    apiKey.unmount()
+    const shadow = mountModal({ ...buildOpenAIOAuthParentAccount(), parent_account_id: 99 })
+    expect(shadow.find('#edit-openai-oauth-base-url').exists()).toBe(false)
+    shadow.unmount()
+  })
+
   beforeEach(() => {
     authIsSimpleMode.value = true
   })
@@ -1709,6 +1735,21 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     await wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').setValue('0')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('EditAccountModal OpenAI BPS', () => {
+  it('keeps an empty token out of the update and tests the saved account', async () => {
+    const account = { ...buildAccount(), platform: 'openai_bps', type: 'oauth', credentials: { chatgpt_account_id: 'workspace', model_mapping: { 'gpt-6-astra': 'gpt-6-astra' } } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="bps-save-and-test"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(wrapper.emitted('test')).toEqual([[account]]))
+    expect(updateAccountMock.mock.calls[0][1].credentials).not.toHaveProperty('access_token')
+    expect(updateAccountMock.mock.calls[0][1].credentials.chatgpt_account_id).toBe('workspace')
     wrapper.unmount()
   })
 })

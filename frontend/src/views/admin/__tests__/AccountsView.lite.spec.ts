@@ -31,6 +31,7 @@ const {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    settings: { getSettings: async () => ({ openai_codex_ticket_enabled: false }) },
     accounts: {
       list: listAccounts,
       getById,
@@ -129,7 +130,6 @@ function mountView(stubActionMenu = true) {
         HelpTooltip: true,
         Icon: true,
         CustomFeaturesPanel: { template: '<div data-test="custom-features-panel" />' },
-        CodexTicketDetailsPanel: { template: '<div data-test="codex-ticket-details-panel" />' },
         Teleport: stubActionMenu
       }
     }
@@ -159,24 +159,18 @@ const fullAccount = {
 }
 
 describe('admin AccountsView lite account list', () => {
-  it('switches between the account list, ticket details, and custom features tabs', async () => {
+  it('switches between the account list and custom features tabs', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(2)
     expect(wrapper.find('[data-test="custom-features-panel"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="codex-ticket-details-panel"]').exists()).toBe(false)
 
     await tabs[1].trigger('click')
 
-    expect(wrapper.find('[data-test="codex-ticket-details-panel"]').exists()).toBe(true)
-    expect(tabs[1].attributes('aria-selected')).toBe('true')
-
-    await tabs[2].trigger('click')
-
     expect(wrapper.find('[data-test="custom-features-panel"]').exists()).toBe(true)
-    expect(tabs[2].attributes('aria-selected')).toBe('true')
+    expect(tabs[1].attributes('aria-selected')).toBe('true')
     wrapper.unmount()
   })
 
@@ -317,4 +311,32 @@ describe('admin AccountsView lite account list', () => {
     consoleError.mockRestore()
     wrapper.unmount()
   })
+
+  it('refreshes BPS rows and modal details after a test and again on close with auto refresh off', async () => {
+    const bps = { ...listRow, platform: 'openai_bps', type: 'oauth', credentials: { expires_at: '2099-01-01T00:00:00Z' } }
+    listAccounts.mockResolvedValue({ items: [bps], total: 1, page: 1, page_size: 20, pages: 1 })
+    getById.mockResolvedValue({ ...fullAccount, ...bps })
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.findComponent(AccountActionMenu).vm.$emit('test', bps)
+    await flushPromises()
+    const modal = wrapper.findComponent(AccountTestModalStub)
+    expect(modal.props('show')).toBe(true)
+    const revoked = { ...fullAccount, ...bps, status: 'error', bps_credential_state: { status: 'revoked', error_code: 'token_revoked' } }
+    getById.mockResolvedValue(revoked)
+    listAccounts.mockResolvedValue({ items: [revoked], total: 1, page: 1, page_size: 20, pages: 1 })
+    const before = listAccounts.mock.calls.length
+    modal.vm.$emit('completed', bps.id)
+    await flushPromises()
+    expect(listAccounts.mock.calls.length).toBeGreaterThan(before)
+    expect(modal.props('account').bps_credential_state.status).toBe('revoked')
+    expect(wrapper.findComponent(DataTableStub).props('data')[0].bps_credential_state.status).toBe('revoked')
+    const beforeClose = getById.mock.calls.length
+    modal.vm.$emit('close')
+    await flushPromises()
+    expect(modal.props('show')).toBe(false)
+    expect(getById.mock.calls.length).toBeGreaterThan(beforeClose)
+    wrapper.unmount()
+  })
+
 })

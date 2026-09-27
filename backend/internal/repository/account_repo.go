@@ -533,7 +533,7 @@ func (r *accountRepository) updateLockedAccount(
 	account.Extra = extra
 
 	schedulable := account.Schedulable
-	if account.Status == service.StatusError {
+	if account.Status == service.StatusError && !account.IsOpenAIBPS() {
 		schedulable = false
 	}
 
@@ -701,10 +701,10 @@ func lockAndMergeAccountProbeExtra(
 		currentOllamaSession           []byte
 		currentOllamaAutoRefresh       []byte
 		currentOllamaSnapshot          []byte
-		currentExtraJSON               []byte
 		opencodeGroupIdentityUnchanged bool
 		currentOpenCodeAutoRefresh     []byte
 		currentOpenCodeSnapshot        []byte
+		currentExtraJSON               []byte
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -742,6 +742,7 @@ func lockAndMergeAccountProbeExtra(
 	}
 	extra := service.MergeOpenAICodexTicketExtra(copyJSONMap(normalizeJSONMap(account.Extra)), currentExtra)
 	extra = service.MergeAccountTimezoneExtra(extra, currentExtra)
+	extra = service.MergeOpenAIBPSCredentialStateExtra(account, extra, currentExtra, identityUnchanged)
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
@@ -1808,6 +1809,10 @@ func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, ac
 	if err := r.schedulerCache.SetAccount(ctx, account); err != nil {
 		logger.LegacyPrintf("repository.account", "[Scheduler] sync account snapshot write failed: id=%d err=%v", accountID, err)
 	}
+}
+
+func (r *accountRepository) RefreshSchedulerAccount(ctx context.Context, accountID int64) {
+	r.syncSchedulerAccountSnapshotDetached(ctx, accountID)
 }
 
 func (r *accountRepository) syncSchedulerAccountSnapshotDetached(ctx context.Context, accountID int64) {

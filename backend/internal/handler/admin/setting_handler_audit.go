@@ -483,9 +483,6 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.AntigravityUserAgentVersion != after.AntigravityUserAgentVersion {
 		changed = append(changed, "antigravity_user_agent_version")
 	}
-	if req.OpenAICodexTicketPolicy != nil && !reflect.DeepEqual(before.OpenAICodexTicketPolicy, after.OpenAICodexTicketPolicy) {
-		changed = append(changed, "openai_codex_ticket_policy")
-	}
 	if before.OpenAIAstraGroupID != after.OpenAIAstraGroupID {
 		changed = append(changed, "openai_astra_group_id")
 	}
@@ -500,6 +497,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.OpenAIOAuthDefaultTimezone != after.OpenAIOAuthDefaultTimezone {
 		changed = append(changed, "openai_oauth_default_timezone")
+	}
+	if before.OpenAICodexTicketPromptTemplate != after.OpenAICodexTicketPromptTemplate {
+		changed = append(changed, "openai_codex_ticket_prompt_template")
 	}
 	if before.OpenAICodexTicketEnabled != after.OpenAICodexTicketEnabled {
 		changed = append(changed, "openai_codex_ticket_enabled")

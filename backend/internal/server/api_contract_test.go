@@ -5,6 +5,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -897,12 +898,6 @@ func TestAPIContracts(t *testing.T) {
 						"table_page_size_options": [10, 20, 50, 100],
 					"min_claude_code_version": "",
 					"max_claude_code_version": "",
-					"openai_codex_ticket_policy": {"ttl_seconds":3600,"refresh_before_seconds":600,"probe_interval_seconds":6,"attempt_timeout_seconds":25,"target_length":292,"models":["gpt-6-astra","gpt-5.6-sol"],"fail_closed":false,"cookie_enabled":false,"cookie_required":false,"cookie_ttl_seconds":240},
-                    "openai_astra_group_id": 0,
-                    "openai_sol_group_id": 0,
-                    "openai_astra_source_group_ids": [],
-                    "openai_sol_source_group_ids": [],
-                    "openai_oauth_default_timezone": "",
 					"openai_codex_ticket_enabled": false,
 					"openai_codex_ticket_harvest_proxy_url": "",
 					"openai_codex_ticket_harvest_proxy_configured": false,
@@ -1238,12 +1233,6 @@ func TestAPIContracts(t *testing.T) {
 					"rewrite_message_cache_control": false,
 					"enable_client_dateline_normalization": true,
 					"antigravity_user_agent_version": "",
-					"openai_codex_ticket_policy": {"ttl_seconds":3600,"refresh_before_seconds":600,"probe_interval_seconds":6,"attempt_timeout_seconds":25,"target_length":292,"models":["gpt-6-astra","gpt-5.6-sol"],"fail_closed":false,"cookie_enabled":false,"cookie_required":false,"cookie_ttl_seconds":240},
-                    "openai_astra_group_id": 0,
-                    "openai_sol_group_id": 0,
-                    "openai_astra_source_group_ids": [],
-                    "openai_sol_source_group_ids": [],
-                    "openai_oauth_default_timezone": "",
 					"openai_codex_ticket_enabled": false,
 					"openai_codex_ticket_harvest_proxy_url": "",
 					"openai_codex_ticket_harvest_proxy_configured": false,
@@ -1434,7 +1423,25 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status)
-			require.JSONEq(t, tt.wantJSON, body)
+			wantJSON := tt.wantJSON
+			if tt.method == http.MethodGet && tt.path == "/api/v1/admin/settings" {
+				var expected map[string]any
+				require.NoError(t, json.Unmarshal([]byte(wantJSON), &expected))
+				data := expected["data"].(map[string]any)
+				data["openai_astra_group_id"] = 0
+				data["openai_sol_group_id"] = 0
+				data["openai_astra_source_group_ids"] = []int64{}
+				data["openai_sol_source_group_ids"] = []int64{}
+				data["openai_oauth_default_timezone"] = ""
+				data["openai_codex_ticket_allow_without_ticket"] = true
+				data["openai_codex_ticket_prompt_template"] = service.DefaultCodexProbeTemplate()
+				data["openai_codex_ticket_prompt_template_default"] = service.DefaultCodexProbeTemplate()
+				data["default_platform_quotas"].(map[string]any)["openai_bps"] = map[string]any{"daily": nil, "weekly": nil, "monthly": nil}
+				encoded, err := json.Marshal(expected)
+				require.NoError(t, err)
+				wantJSON = string(encoded)
+			}
+			require.JSONEq(t, wantJSON, body)
 		})
 	}
 }

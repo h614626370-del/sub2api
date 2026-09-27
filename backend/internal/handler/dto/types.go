@@ -214,9 +214,10 @@ type Account struct {
 	// 的存在性通过 CredentialsStatus（has_<key>）暴露，原始值不返回前端。
 	Credentials             map[string]any                    `json:"credentials"`
 	CredentialsStatus       map[string]bool                   `json:"credentials_status,omitempty"`
+	BPSCredentialState      *service.OpenAIBPSCredentialState `json:"bps_credential_state,omitempty"`
 	Extra                   map[string]any                    `json:"extra"`
 	OllamaCloudUsage        *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
-	CodexTurnTickets        []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
+	OpenCodeGoUsage         *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
 	ProxyID                 *int64                            `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64                            `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName *string                           `json:"proxy_fallback_origin_name,omitempty"`
@@ -231,7 +232,8 @@ type Account struct {
 	AutoPauseOnExpired      bool                              `json:"auto_pause_on_expired"`
 	CreatedAt               time.Time                         `json:"created_at"`
 	UpdatedAt               time.Time                         `json:"updated_at"`
-	OpenCodeGoUsage         *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
+	CodexTurnTickets        []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
+	CodexTicketLatestEvent  *service.CodexTicketRecentEvent   `json:"codex_ticket_latest_event,omitempty"`
 
 	Schedulable bool `json:"schedulable"`
 
@@ -338,12 +340,14 @@ type AccountListItem struct {
 	Platform string  `json:"platform"`
 	Type     string  `json:"type"`
 
-	Credentials       map[string]any                    `json:"credentials,omitempty"`
-	CredentialsStatus map[string]bool                   `json:"credentials_status,omitempty"`
-	Extra             map[string]any                    `json:"extra,omitempty"`
-	OllamaCloudUsage  *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
-	CodexTurnTickets  []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
-	OpenCodeGoUsage   *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
+	Credentials            map[string]any                    `json:"credentials,omitempty"`
+	CredentialsStatus      map[string]bool                   `json:"credentials_status,omitempty"`
+	BPSCredentialState     *service.OpenAIBPSCredentialState `json:"bps_credential_state,omitempty"`
+	Extra                  map[string]any                    `json:"extra,omitempty"`
+	OllamaCloudUsage       *service.OllamaCloudUsageState    `json:"ollama_cloud_usage,omitempty"`
+	OpenCodeGoUsage        *service.OpenCodeGoUsageState     `json:"opencode_go_usage,omitempty"`
+	CodexTurnTickets       []service.OpenAICodexTicketStatus `json:"codex_turn_tickets,omitempty"`
+	CodexTicketLatestEvent *service.CodexTicketRecentEvent   `json:"codex_ticket_latest_event,omitempty"`
 
 	ProxyID                 *int64     `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`

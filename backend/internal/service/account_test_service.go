@@ -50,12 +50,16 @@ const (
 
 // TestEvent represents a SSE event for account testing
 type TestEvent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Status   string `json:"status,omitempty"`
-	Code     string `json:"code,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
+	UpstreamStatus    int    `json:"upstream_status,omitempty"`
+	UpstreamErrorCode string `json:"upstream_error_code,omitempty"`
+	UpstreamModel     string `json:"upstream_model,omitempty"`
+	RequestID         string `json:"request_id,omitempty"`
+	Type              string `json:"type"`
+	Text              string `json:"text,omitempty"`
+	Model             string `json:"model,omitempty"`
+	Status            string `json:"status,omitempty"`
+	Code              string `json:"code,omitempty"`
+	ImageURL          string `json:"image_url,omitempty"`
 	// AudioURL / VideoURL are data: or https URLs for in-browser media players.
 	AudioURL string `json:"audio_url,omitempty"`
 	VideoURL string `json:"video_url,omitempty"`
@@ -396,6 +400,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		}
 	}
 
+	if account.IsOpenAIBPS() {
+		return s.testOpenAIBPSAccountConnection(c, account, modelID, prompt, mode)
+	}
 	if account.IsOpenAI() {
 		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
 	}
@@ -836,7 +843,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 
 		// OAuth uses ChatGPT internal API
-		apiURL = chatgptCodexAPIURL
+		var err error
+		apiURL, err = resolveOpenAIOAuthURL(credentialAccount, chatgptCodexAPIURL, s.validateUpstreamBaseURL)
+		if err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
+		}
 	} else if credentialAccount.Type == "apikey" {
 		// API Key - use Platform API
 		authToken = credentialAccount.GetOpenAIProtocolAPIKey()
@@ -915,7 +926,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Set OAuth-specific headers for ChatGPT internal API
 	if isOAuth {
-		req.Host = "chatgpt.com"
+		req.Host = req.URL.Host
 		req.Header.Set("accept", "text/event-stream")
 		req.Header.Set("OpenAI-Beta", "responses=experimental")
 		canonical := resolveCodexOutboundIdentity("")
@@ -2197,7 +2208,11 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if authToken == "" && !credentialAccount.IsOpenAIAgentIdentity() {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
-		apiURL = chatgptCodexAPIURL
+		var err error
+		apiURL, err = resolveOpenAIOAuthURL(credentialAccount, chatgptCodexAPIURL, s.validateUpstreamBaseURL)
+		if err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
+		}
 	case account.Type == AccountTypeAPIKey:
 		authToken = account.GetOpenAIProtocolAPIKey()
 		if authToken == "" {
@@ -2270,7 +2285,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	req.Header.Set("Conversation_ID", probeSessionID)
 
 	if isOAuth {
-		req.Host = "chatgpt.com"
+		req.Host = req.URL.Host
 		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
 		// 指纹收敛：探测与真实转发走同一个 /responses 端点，身份也必须同构，
 		// 否则探测流量会以「缺 x-codex-installation-id + 非收敛 session」的
@@ -3212,6 +3227,10 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
 	}
+	targetURL, err = resolveOpenAIOAuthURL(credentialAccount, targetURL, s.validateUpstreamBaseURL)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
 
 	direct := usesCodexDirectImages(upstreamModel)
 	if direct {
@@ -3224,7 +3243,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
-	req.Host = "chatgpt.com"
+	req.Host = req.URL.Host
 	if credentialAccount.IsOpenAIAgentIdentity() {
 		authHeaders, authErr := buildAgentIdentityAuthenticationHeaders(ctx, s.accountRepo, s.agentIdentityWS, &s.agentIdentityTaskMu, credentialAccount)
 		if authErr != nil {

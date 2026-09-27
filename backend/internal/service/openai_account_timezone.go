@@ -13,11 +13,22 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Only explicit environment metadata and structured search tools are eligible.
+// Only user environment blocks and structured search tools are eligible.
 // Ordinary messages, instructions, timestamps and unrelated platforms stay intact.
 func hasAccountTimezoneFields(body []byte) bool {
-	if strings.Contains(string(body), "environments.environment_context") {
-		return true
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if item.Get("role").String() != "user" {
+			continue
+		}
+		content := item.Get("content")
+		if content.Type == gjson.String && strings.HasPrefix(strings.TrimSpace(content.String()), "<environment_context>") {
+			return true
+		}
+		for _, part := range content.Array() {
+			if part.Get("type").String() == "input_text" && strings.HasPrefix(strings.TrimSpace(part.Get("text").String()), "<environment_context>") {
+				return true
+			}
+		}
 	}
 	for _, tool := range gjson.GetBytes(body, "tools").Array() {
 		kind := tool.Get("type").String()
@@ -89,26 +100,31 @@ func alignAccountTimezone(body []byte, zone string, now time.Time) []byte {
 	date := now.In(loc).Format("2006-01-02")
 	// sjson changes only selected strings and retains raw number representations.
 	result := body
+	alignText := func(path string, text gjson.Result) {
+		if text.Type != gjson.String {
+			return
+		}
+		aligned := alignTimezoneEnvironment(text.String(), date, zone)
+		if aligned == text.String() {
+			return
+		}
+		if next, err := sjson.SetBytes(result, path, aligned); err == nil {
+			result = next
+		}
+	}
 	for i, item := range gjson.GetBytes(body, "input").Array() {
 		if item.Get("role").String() != "user" {
 			continue
 		}
-		kinds := item.Get("internal_chat_message_metadata_passthrough.content_item_kinds").Array()
-		for j, part := range item.Get("content").Array() {
-			if j >= len(kinds) || kinds[j].String() != "environments.environment_context" || part.Get("type").String() != "input_text" {
-				continue
-			}
-			text := part.Get("text")
-			if text.Type != gjson.String {
-				continue
-			}
-			aligned := alignTimezoneEnvironment(text.String(), date, zone)
-			if aligned == text.String() {
-				continue
-			}
-			path := "input." + strconv.Itoa(i) + ".content." + strconv.Itoa(j) + ".text"
-			if next, err := sjson.SetBytes(result, path, aligned); err == nil {
-				result = next
+		content := item.Get("content")
+		path := "input." + strconv.Itoa(i) + ".content"
+		if content.Type == gjson.String {
+			alignText(path, content)
+		} else if content.IsArray() {
+			for j, part := range content.Array() {
+				if part.Get("type").String() == "input_text" {
+					alignText(path+"."+strconv.Itoa(j)+".text", part.Get("text"))
+				}
 			}
 		}
 	}

@@ -300,6 +300,19 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 		if err != nil {
 			return nil, false, err
 		}
+		if account.IsOpenAIOAuthLike() && !account.IsShadow() {
+			if _, ok := account.Extra[service.CodexTicketReadyModelsExtraKey]; !ok {
+				return nil, false, nil
+			}
+			// Older projections omitted participation and could wrongly block excluded accounts.
+			if _, ok := account.Extra["codex_ticket_harvest_enabled"].(bool); !ok {
+				return nil, false, nil
+			}
+			if _, ok := account.Extra["codex_ticket_harvest_models"].(map[string]any); !ok {
+				return nil, false, nil
+			}
+			account.SchedulerTicketProjection = true
+		}
 		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
 			return nil, false, err
 		}
@@ -863,6 +876,16 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
+	extra := filterSchedulerExtra(account.Extra)
+	if account.IsOpenAIOAuthLike() && !account.IsShadow() {
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		extra[service.CodexTicketReadyModelsExtraKey] = service.OpenAICodexTicketReadyModels(&account)
+		// Materialize the default so readers can distinguish old projections from accounts with default participation.
+		extra["codex_ticket_harvest_enabled"] = account.Extra["codex_ticket_harvest_enabled"] != false
+		extra["codex_ticket_harvest_models"] = filterSchedulerCodexTicketModels(account.Extra["codex_ticket_harvest_models"])
+	}
 	return service.Account{
 		ID:                      account.ID,
 		Name:                    account.Name,
@@ -890,8 +913,26 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
 		Credentials:             filterSchedulerCredentials(account.Credentials),
-		Extra:                   filterSchedulerExtra(account.Extra),
+		Extra:                   extra,
 	}
+}
+
+// Always emit an object, including for absent settings, so old projections can be rebuilt.
+func filterSchedulerCodexTicketModels(raw any) map[string]bool {
+	models := make(map[string]bool)
+	switch values := raw.(type) {
+	case map[string]bool:
+		for model, enabled := range values {
+			models[model] = enabled
+		}
+	case map[string]any:
+		for model, value := range values {
+			if enabled, ok := value.(bool); ok {
+				models[model] = enabled
+			}
+		}
+	}
+	return models
 }
 
 func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []service.AccountGroup {
@@ -956,7 +997,9 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
+	// BPS admission also needs workspace identity and JWT expiry before hydration;
+	// neither access_token nor refresh_token belongs in this metadata projection.
+	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold", "chatgpt_account_id", "expires_at"}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -974,6 +1017,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		service.OpenAIBPSCredentialStateExtraKey,
 		// Anthropic shared-window and Fable-only threshold checks run on this
 		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
 		"session_window_utilization",
@@ -1023,6 +1067,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_oauth_passthrough",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
+		"codex_allow_without_ticket",
+		"codex_ticket_harvest_enabled",
+		"codex_ticket_harvest_models",
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",
 		"codex_5h_reset_at",

@@ -66,6 +66,9 @@ type AccountHandler struct {
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
+	codexTicketGateway      *service.OpenAIGatewayService
+	codexTicketRouter       http.Handler
+	codexTicketAPIKeys      *service.APIKeyService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
@@ -79,13 +82,16 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 	h.ollamaCloudUsage = usage
 }
 
+func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
+	h.opencodeGoUsage = usage
+}
+
 // SetCodexTicketSettings supplies the live policy without mutating shared config.
 func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService) {
 	h.codexTicketSettings = settings
 }
-
-func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
-	h.opencodeGoUsage = usage
+func (h *AccountHandler) SetCodexTicketGateway(gateway *service.OpenAIGatewayService) {
+	h.codexTicketGateway = gateway
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -371,8 +377,8 @@ func (h *AccountHandler) enrichCodexTicketStatus(account *service.Account, out *
 	if h != nil && h.cfg != nil && out != nil {
 		cfg := h.cfg.Gateway.OpenAICodexTicket
 		if h.codexTicketSettings != nil {
-			cfg = h.codexTicketSettings.GetOpenAICodexTicketPolicy(context.Background()).Apply(cfg)
 			cfg.Enabled = h.codexTicketSettings.GetOpenAICodexTicketEnabled(context.Background(), cfg.Enabled)
+			cfg.FailClosed = !h.codexTicketSettings.GetOpenAICodexTicketAllowWithoutTicket(context.Background(), !cfg.FailClosed)
 		}
 		out.CodexTurnTickets = service.OpenAICodexTicketStatuses(account, cfg, time.Now())
 	}
@@ -814,6 +820,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		_ = g.Wait()
 	}
 
+	var ticketEvents map[int64]service.CodexTicketRecentEvent
+	if pageHasOpenAIAccounts && h.codexTicketGateway != nil {
+		var ticketAccountIDs []int64
+		for _, account := range accounts {
+			if account.Platform == service.PlatformOpenAI {
+				ticketAccountIDs = append(ticketAccountIDs, account.ID)
+			}
+		}
+		var err error
+		ticketEvents, err = h.codexTicketGateway.CodexTicketLatestEvents(c.Request.Context(), ticketAccountIDs)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+
 	// Build response with concurrency info
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
@@ -824,6 +846,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if h.isSimpleMode() {
 				accountResponse.GroupIDs = filterSimpleModeGroupIDs(accountResponse.GroupIDs, simpleModeCompositeServiceGroupIDs(acc))
 			}
+		}
+		if event, ok := ticketEvents[acc.ID]; ok {
+			accountResponse.CodexTicketLatestEvent = &event
 		}
 		item := AccountWithConcurrency{
 			Account:            accountResponse,
@@ -1420,6 +1445,9 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 // refreshSingleAccount refreshes credentials for a single OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
+	if account.IsOpenAIBPS() {
+		return nil, "", infraerrors.BadRequest("BPS_MANUAL_TOKEN_ONLY", "Replace access_token in the BPS account settings; automatic refresh is unsupported")
+	}
 	if !account.IsOAuth() {
 		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
 	}
@@ -1632,6 +1660,10 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	existing, err := h.adminService.GetAccount(ctx, accountID)
 	if err != nil {
 		response.NotFound(c, "Account not found")
+		return
+	}
+	if existing.IsOpenAIBPS() {
+		response.BadRequest(c, "Replace access_token through the BPS account editor")
 		return
 	}
 	if !existing.IsOAuth() {
@@ -2821,6 +2853,22 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	if account.IsOpenAIBPS() {
+		ids := service.OpenAIBPSDefaultModels()
+		if mapping := account.GetModelMapping(); len(mapping) > 0 {
+			ids = make([]string, 0, len(mapping))
+			for id := range mapping {
+				ids = append(ids, id)
+			}
+		}
+		sort.Strings(ids)
+		models := make([]openai.Model, 0, len(ids))
+		for _, id := range ids {
+			models = append(models, openai.Model{ID: id, Object: "model", Type: "model", DisplayName: id})
+		}
+		response.Success(c, models)
+		return
+	}
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
 		// Prefer the shared, account-keyed upstream catalog. If discovery fails,

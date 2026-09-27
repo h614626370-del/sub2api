@@ -1,17 +1,4 @@
-export interface CodexTicketPolicy {
-  reuse_connection?: boolean;
-  connection_max_age_seconds?: number;
-  ttl_seconds: number;
-  refresh_before_seconds: number;
-  probe_interval_seconds: number;
-  attempt_timeout_seconds: number;
-  target_length: number;
-  models: string[];
-  fail_closed: boolean;
-  cookie_enabled: boolean;
-  cookie_required: boolean;
-  cookie_ttl_seconds: number;
-}
+
 
 /**
  * Admin Settings API endpoints
@@ -32,7 +19,7 @@ export interface DefaultSubscriptionSetting {
 }
 
 // ── 平台限额类型 ──────────────────────────────────────────────────
-export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity" | "grok"
+export type PlatformType = "anthropic" | "openai" | "openai_bps" | "gemini" | "antigravity" | "grok"
 export type QuotaWindowType = "daily" | "weekly" | "monthly"
 
 /** 单平台三档限额；null = 不限制，undefined = 未填（等价 null） */
@@ -45,7 +32,7 @@ export interface PlatformQuotaLimits {
 /** 全平台默认限额 map（key = PlatformType） */
 export type DefaultPlatformQuotasMap = Partial<Record<PlatformType, PlatformQuotaLimits>>
 
-const PLATFORMS: PlatformType[] = ["anthropic", "openai", "gemini", "antigravity", "grok"]
+const PLATFORMS: PlatformType[] = ["anthropic", "openai", "openai_bps", "gemini", "antigravity", "grok"]
 
 export type SchedulingThresholdPlatformType =
   | "openai"
@@ -654,7 +641,6 @@ export interface SystemSettings {
   openai_codex_client_version: string;
   openai_codex_client_version_synced: string;
   openai_codex_version_auto_sync_enabled: boolean;
-  openai_codex_ticket_policy: CodexTicketPolicy;
   openai_astra_group_id: number;
   openai_sol_group_id: number;
   openai_astra_source_group_ids: number[];
@@ -666,6 +652,9 @@ export interface SystemSettings {
   claude_code_client_version: string;
   claude_code_client_version_synced: string;
   claude_code_version_auto_sync_enabled: boolean;
+  openai_codex_ticket_allow_without_ticket: boolean;
+  openai_codex_ticket_prompt_template: string;
+  openai_codex_ticket_prompt_template_default: string;
   // codex_cli_only 加固
   min_codex_version: string;
   max_codex_version: string;
@@ -986,7 +975,6 @@ export interface UpdateSettingsRequest {
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;
   openai_codex_version_auto_sync_enabled?: boolean;
-  openai_codex_ticket_policy?: CodexTicketPolicy;
   openai_astra_group_id?: number;
   openai_sol_group_id?: number;
   openai_astra_source_group_ids?: number[];
@@ -996,6 +984,8 @@ export interface UpdateSettingsRequest {
   openai_codex_ticket_harvest_proxy_url?: string;
   claude_code_client_version?: string;
   claude_code_version_auto_sync_enabled?: boolean;
+  openai_codex_ticket_allow_without_ticket?: boolean;
+  openai_codex_ticket_prompt_template?: string;
   // codex_cli_only 加固
   min_codex_version?: string;
   max_codex_version?: string;

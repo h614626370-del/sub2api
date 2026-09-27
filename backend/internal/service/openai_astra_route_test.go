@@ -286,7 +286,8 @@ func TestAstraRouteTargetUnavailableAndTicketGate(t *testing.T) {
 			svc.cfg.Gateway.OpenAICodexTicket = config.OpenAICodexTicketConfig{Enabled: true, FailClosed: true}
 			// Production services share the startup config; this fixture creates two.
 			svc.settingService.cfg = svc.cfg
-			svc.settingService.invalidateCodexTicketPolicy()
+			svc.settingService.InvalidateOpenAICodexTicketEnabledCache()
+			svc.settingService.InvalidateOpenAICodexTicketAllowCache()
 			_, _, err = svc.SelectAccountWithScheduler(context.Background(), &sourceID, "", "", "gpt-6-astra", nil, OpenAIUpstreamTransportAny, false)
 			require.ErrorIs(t, err, ErrNoAvailableAccounts, "routing must not bypass ticket gating")
 		})

@@ -89,6 +89,7 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 	s.invalidateOpenAIAstraGroupCache()
 	s.invalidateOpenAISolGroupCache()
 	s.invalidateOpenAIOAuthTimezoneCache()
+	s.InvalidateCodexProbeTemplateCache()
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -542,17 +543,12 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		}
 		updates[SettingKeyOpenAIOAuthDefaultTimezone] = zone
 	}
-	if settings.OpenAICodexTicketPolicy != nil {
-		if err := settings.OpenAICodexTicketPolicy.Validate(); err != nil {
-			return nil, err
-		}
-		raw, err := json.Marshal(settings.OpenAICodexTicketPolicy)
-		if err != nil {
-			return nil, err
-		}
-		updates[SettingKeyOpenAICodexTicketPolicy] = string(raw)
-	}
 	updates[SettingKeyOpenAICodexTicketEnabled] = strconv.FormatBool(settings.OpenAICodexTicketEnabled)
+	updates[SettingKeyOpenAICodexTicketAllowWithoutTicket] = strconv.FormatBool(settings.OpenAICodexTicketAllowWithoutTicket)
+	if _, err := ParseCodexProbeTemplate(settings.OpenAICodexTicketPromptTemplate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_PROBE_TEMPLATE", err.Error())
+	}
+	updates[SettingKeyOpenAICodexTicketPromptTemplate] = settings.OpenAICodexTicketPromptTemplate
 	if err := ValidateOpenAICodexTicketHarvestProxyURL(settings.OpenAICodexTicketHarvestProxyURL); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
 	}
@@ -821,10 +817,10 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	s.invalidateOpenAIAstraGroupCache()
 	s.invalidateOpenAISolGroupCache()
 	s.invalidateOpenAIOAuthTimezoneCache()
-	s.invalidateCodexTicketPolicy()
-	s.InvalidateOpenAICodexTicketEnabledCache()
-	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	s.InvalidateClaudeCodeClientVersionCache()
+	s.InvalidateOpenAICodexTicketEnabledCache()
+	s.InvalidateOpenAICodexTicketAllowCache()
+	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,

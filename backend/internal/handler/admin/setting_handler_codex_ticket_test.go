@@ -46,33 +46,3 @@ func TestSettingsCodexTicketRejectInvalidProxyWithoutLeakingPassword(t *testing.
 	require.NotContains(t, rec.Body.String(), "invalid-secret")
 	require.Equal(t, "http://previous.example.com:8080", repo.values[key])
 }
-
-func TestSettingsCodexTicketPolicyHotReloadAndValidation(t *testing.T) {
-	key := service.SettingKeyOpenAICodexTicketPolicy
-	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
-	policy := h.settingService.GetOpenAICodexTicketPolicy(context.Background())
-	policy.TTLSeconds = 240
-	policy.RefreshBeforeSeconds = 30
-	policy.CookieEnabled = true
-	policy.CookieRequired = true
-	rec := doUpdateSettings(t, h, map[string]any{key: policy}, nil)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Equal(t, policy, h.settingService.GetOpenAICodexTicketPolicy(context.Background()))
-	require.Contains(t, rec.Body.String(), `"ttl_seconds":240`)
-	stored := repo.values[key]
-	rec = doUpdateSettings(t, h, map[string]any{"site_name": "Other setting"}, nil)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Equal(t, stored, repo.values[key])
-	policy.RefreshBeforeSeconds = 240
-	rec = doUpdateSettings(t, h, map[string]any{key: policy}, nil)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Equal(t, stored, repo.values[key])
-	policy.RefreshBeforeSeconds = 0
-	policy.CookieEnabled = false
-	rec = doUpdateSettings(t, h, map[string]any{key: policy}, nil)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	policy.CookieRequired = false
-	rec = doUpdateSettings(t, h, map[string]any{key: policy}, nil)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Zero(t, h.settingService.GetOpenAICodexTicketPolicy(context.Background()).RefreshBeforeSeconds)
-}

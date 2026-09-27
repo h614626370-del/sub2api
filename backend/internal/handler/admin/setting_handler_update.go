@@ -243,30 +243,31 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	OpenAITTFTMode                         *string                          `json:"openai_ttft_mode"`
-	EnableFingerprintUnification           *bool                            `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough              *bool                            `json:"enable_metadata_passthrough"`
-	EnableCCHSigning                       *bool                            `json:"enable_cch_signing"`
-	EnableClaudeOAuthSystemPromptInjection *bool                            `json:"enable_claude_oauth_system_prompt_injection"`
-	ClaudeOAuthSystemPrompt                *string                          `json:"claude_oauth_system_prompt"`
-	ClaudeOAuthSystemPromptBlocks          *string                          `json:"claude_oauth_system_prompt_blocks"`
-	EnableAnthropicCacheTTL1hInjection     *bool                            `json:"enable_anthropic_cache_ttl_1h_injection"`
-	RewriteMessageCacheControl             *bool                            `json:"rewrite_message_cache_control"`
-	EnableClientDatelineNormalization      *bool                            `json:"enable_client_dateline_normalization"`
-	AntigravityUserAgentVersion            *string                          `json:"antigravity_user_agent_version"`
-	OpenAICodexUserAgent                   *string                          `json:"openai_codex_user_agent"`
-	OpenAICodexClientVersion               *string                          `json:"openai_codex_client_version"`
-	OpenAICodexVersionAutoSyncEnabled      *bool                            `json:"openai_codex_version_auto_sync_enabled"`
-	OpenAICodexTicketPolicy                *service.OpenAICodexTicketPolicy `json:"openai_codex_ticket_policy"`
-	OpenAIAstraGroupID                     *int64                           `json:"openai_astra_group_id"`
-	OpenAISolGroupID                       *int64                           `json:"openai_sol_group_id"`
-	OpenAIAstraSourceGroupIDs              *[]int64                         `json:"openai_astra_source_group_ids"`
-	OpenAISolSourceGroupIDs                *[]int64                         `json:"openai_sol_source_group_ids"`
-	OpenAIOAuthDefaultTimezone             *string                          `json:"openai_oauth_default_timezone"`
-	OpenAICodexTicketEnabled               *bool                            `json:"openai_codex_ticket_enabled"`
-	OpenAICodexTicketHarvestProxyURL       *string                          `json:"openai_codex_ticket_harvest_proxy_url"`
-	ClaudeCodeClientVersion                *string                          `json:"claude_code_client_version"`
-	ClaudeCodeVersionAutoSyncEnabled       *bool                            `json:"claude_code_version_auto_sync_enabled"`
+	OpenAITTFTMode                         *string  `json:"openai_ttft_mode"`
+	EnableFingerprintUnification           *bool    `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough              *bool    `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                       *bool    `json:"enable_cch_signing"`
+	EnableClaudeOAuthSystemPromptInjection *bool    `json:"enable_claude_oauth_system_prompt_injection"`
+	ClaudeOAuthSystemPrompt                *string  `json:"claude_oauth_system_prompt"`
+	ClaudeOAuthSystemPromptBlocks          *string  `json:"claude_oauth_system_prompt_blocks"`
+	EnableAnthropicCacheTTL1hInjection     *bool    `json:"enable_anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl             *bool    `json:"rewrite_message_cache_control"`
+	EnableClientDatelineNormalization      *bool    `json:"enable_client_dateline_normalization"`
+	AntigravityUserAgentVersion            *string  `json:"antigravity_user_agent_version"`
+	OpenAICodexUserAgent                   *string  `json:"openai_codex_user_agent"`
+	OpenAICodexClientVersion               *string  `json:"openai_codex_client_version"`
+	OpenAICodexVersionAutoSyncEnabled      *bool    `json:"openai_codex_version_auto_sync_enabled"`
+	ClaudeCodeClientVersion                *string  `json:"claude_code_client_version"`
+	ClaudeCodeVersionAutoSyncEnabled       *bool    `json:"claude_code_version_auto_sync_enabled"`
+	OpenAICodexTicketEnabled               *bool    `json:"openai_codex_ticket_enabled"`
+	OpenAICodexTicketAllowWithoutTicket    *bool    `json:"openai_codex_ticket_allow_without_ticket"`
+	OpenAICodexTicketHarvestProxyURL       string   `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketPromptTemplate        *string  `json:"openai_codex_ticket_prompt_template"`
+	OpenAIAstraGroupID                     *int64   `json:"openai_astra_group_id"`
+	OpenAISolGroupID                       *int64   `json:"openai_sol_group_id"`
+	OpenAIAstraSourceGroupIDs              *[]int64 `json:"openai_astra_source_group_ids"`
+	OpenAISolSourceGroupIDs                *[]int64 `json:"openai_sol_source_group_ids"`
+	OpenAIOAuthDefaultTimezone             *string  `json:"openai_oauth_default_timezone"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -523,6 +524,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	if req.OpenAISolGroupID == nil {
 		omitted[service.SettingKeyOpenAISolGroupID] = struct{}{}
+	}
+	if req.OpenAICodexTicketPromptTemplate == nil {
+		// Keep omitted templates out of the write, including concurrent partial saves.
+		omitted[service.SettingKeyOpenAICodexTicketPromptTemplate] = struct{}{}
 	}
 
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
@@ -1805,7 +1810,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexVersionAutoSyncEnabled
 		}(),
-		OpenAICodexTicketPolicy: req.OpenAICodexTicketPolicy,
 		OpenAIOAuthDefaultTimezone: func() string {
 			if req.OpenAIOAuthDefaultTimezone != nil {
 				return strings.TrimSpace(*req.OpenAIOAuthDefaultTimezone)
@@ -1836,22 +1840,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAISolGroupID
 		}(),
-		OpenAICodexTicketEnabled: func() bool {
-			if req.OpenAICodexTicketEnabled != nil {
-				return *req.OpenAICodexTicketEnabled
-			}
-			return previousSettings.OpenAICodexTicketEnabled
-		}(),
-		OpenAICodexTicketHarvestProxyURL: func() string {
-			if req.OpenAICodexTicketHarvestProxyURL == nil {
-				return previousSettings.OpenAICodexTicketHarvestProxyURL
-			}
-			next := strings.TrimSpace(*req.OpenAICodexTicketHarvestProxyURL)
-			if service.IsMaskedProxyURL(next) {
-				return previousSettings.OpenAICodexTicketHarvestProxyURL
-			}
-			return next
-		}(),
 		ClaudeCodeClientVersion: func() string {
 			if req.ClaudeCodeClientVersion != nil {
 				return *req.ClaudeCodeClientVersion
@@ -1865,6 +1853,31 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.ClaudeCodeVersionAutoSyncEnabled
 			}
 			return previousSettings.ClaudeCodeVersionAutoSyncEnabled
+		}(),
+		OpenAICodexTicketEnabled: func() bool {
+			if req.OpenAICodexTicketEnabled != nil {
+				return *req.OpenAICodexTicketEnabled
+			}
+			return previousSettings.OpenAICodexTicketEnabled
+		}(),
+		OpenAICodexTicketAllowWithoutTicket: func() bool {
+			if req.OpenAICodexTicketAllowWithoutTicket != nil {
+				return *req.OpenAICodexTicketAllowWithoutTicket
+			}
+			return previousSettings.OpenAICodexTicketAllowWithoutTicket
+		}(),
+		OpenAICodexTicketPromptTemplate: func() string {
+			if req.OpenAICodexTicketPromptTemplate != nil {
+				return *req.OpenAICodexTicketPromptTemplate
+			}
+			return previousSettings.OpenAICodexTicketPromptTemplate
+		}(),
+		OpenAICodexTicketHarvestProxyURL: func() string {
+			next := strings.TrimSpace(req.OpenAICodexTicketHarvestProxyURL)
+			if service.IsMaskedProxyURL(next) {
+				return previousSettings.OpenAICodexTicketHarvestProxyURL
+			}
+			return next
 		}(),
 		MinCodexVersion:       strings.TrimSpace(req.MinCodexVersion),
 		MaxCodexVersion:       strings.TrimSpace(req.MaxCodexVersion),
@@ -2409,18 +2422,20 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexClientVersion:                               updatedSettings.OpenAICodexClientVersion,
 		OpenAICodexClientVersionSynced:                         updatedSettings.OpenAICodexClientVersionSynced,
 		OpenAICodexVersionAutoSyncEnabled:                      updatedSettings.OpenAICodexVersionAutoSyncEnabled,
-		OpenAICodexTicketPolicy:                                updatedSettings.OpenAICodexTicketPolicy,
 		OpenAIAstraGroupID:                                     updatedSettings.OpenAIAstraGroupID,
 		OpenAISolGroupID:                                       updatedSettings.OpenAISolGroupID,
 		OpenAIAstraSourceGroupIDs:                              updatedSettings.OpenAIAstraSourceGroupIDs,
 		OpenAISolSourceGroupIDs:                                updatedSettings.OpenAISolSourceGroupIDs,
 		OpenAIOAuthDefaultTimezone:                             updatedSettings.OpenAIOAuthDefaultTimezone,
-		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
-		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
-		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
 		ClaudeCodeClientVersion:                                updatedSettings.ClaudeCodeClientVersion,
 		ClaudeCodeClientVersionSynced:                          updatedSettings.ClaudeCodeClientVersionSynced,
 		ClaudeCodeVersionAutoSyncEnabled:                       updatedSettings.ClaudeCodeVersionAutoSyncEnabled,
+		OpenAICodexTicketEnabled:                               updatedSettings.OpenAICodexTicketEnabled,
+		OpenAICodexTicketAllowWithoutTicket:                    updatedSettings.OpenAICodexTicketAllowWithoutTicket,
+		OpenAICodexTicketHarvestProxyURL:                       service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
+		OpenAICodexTicketHarvestProxyConfigured:                strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
+		OpenAICodexTicketPromptTemplate:                        service.EffectiveCodexProbeTemplate(updatedSettings.OpenAICodexTicketPromptTemplate),
+		OpenAICodexTicketPromptTemplateDefault:                 service.DefaultCodexProbeTemplate(),
 		MinCodexVersion:                                        updatedSettings.MinCodexVersion,
 		MaxCodexVersion:                                        updatedSettings.MaxCodexVersion,
 		CodexCLIOnlyBlacklist:                                  updatedSettings.CodexCLIOnlyBlacklist,

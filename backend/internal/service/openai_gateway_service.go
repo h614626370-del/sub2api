@@ -305,7 +305,7 @@ type OpenAIForwardResult struct {
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
-	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
+	if r == nil || (!r.OpenAIWSMode && r.UpstreamEndpoint != "/basispoints/api/responses") || r.UpstreamTerminalEvent == "" {
 		return true
 	}
 	switch r.UpstreamTerminalEvent {
@@ -471,8 +471,6 @@ type OpenAIGatewayService struct {
 	balanceNotifyService    *BalanceNotifyService
 	settingService          *SettingService
 	userPlatformQuotaRepo   UserPlatformQuotaRepository
-	codexTicketAuditRepo    OpenAICodexTicketAuditRepository
-	codexTicketProxyProber  ProxyExitInfoProber
 	liveAttestation         liveattestation.Provider
 	liveAttestationCipher   SecretEncryptor
 
@@ -515,34 +513,18 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
 	openaiCodexTickets           sync.Map
-	openaiCodexTicketAccounts    sync.Map
-	openaiCodexTicketSessions    sync.Map
-	openaiCodexTicketFlight      singleflight.Group
+	openaiCodexTicketInFlight    sync.Map
+	openaiCodexTicketProxyTurns  sync.Map
+	openaiCodexTicketNextAttempt sync.Map
+	openaiCodexTicketHistory     CodexTicketAttemptRepository
+	openaiCodexTicketLifecycle   CodexTicketLifecycleRepository
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
 	openaiCodexTicketDone        chan struct{}
+	openaiCodexTicketWake        chan struct{}
 	openaiCodexTicketStopped     bool
 }
 
-// SetCodexTicketAuditRepository attaches optional persistence for probe diagnostics.
-// Keeping this optional preserves lightweight unit-test construction and does not
-// make audit storage part of the ticket success path.
-func (s *OpenAIGatewayService) SetCodexTicketAuditRepository(repo OpenAICodexTicketAuditRepository) {
-	if s != nil {
-		s.codexTicketAuditRepo = repo
-	}
-}
-
-// SetCodexTicketProxyProber attaches the shared proxy exit-IP probe used by
-// the ticket audit path when the upstream response does not expose an IP.
-func (s *OpenAIGatewayService) SetCodexTicketProxyProber(prober ProxyExitInfoProber) {
-	if s != nil {
-		s.codexTicketProxyProber = prober
-	}
-}
-
-// SetAccountTimezoneManager attaches the account-level proxy timezone resolver
-// after both gateway and admin services have been wired.
 func (s *OpenAIGatewayService) SetAccountTimezoneManager(manager AccountTimezoneManager) {
 	if s != nil {
 		s.accountTimezoneManager = manager
@@ -624,7 +606,6 @@ func NewOpenAIGatewayService(
 		openAITokenProvider.SetAccountRuntimeBlocker(svc)
 	}
 	svc.logOpenAIWSModeBootstrap()
-	svc.StartOpenAICodexTicketHarvester()
 	return svc
 }
 

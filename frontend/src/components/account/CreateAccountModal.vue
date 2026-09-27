@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show"
+    :show="show" :close-on-escape="!pendingBPSCreate"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -228,8 +228,18 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
+          <button type="button" @click="form.platform = 'openai_bps'"
+            :class="['flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium', form.platform === 'openai_bps' ? 'bg-white text-green-700 shadow-sm dark:bg-dark-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400']">
+            <PlatformIcon platform="openai_bps" size="sm" />OpenAI BPS
+          </button>
         </div>
       </div>
+
+      <div v-if="form.platform === 'openai_bps'" role="alert" data-testid="bps-risk-warning" class="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 p-4 text-amber-950 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100">
+        <div class="mb-1 flex items-center gap-2 font-bold"><Icon name="exclamationTriangle" size="md" />{{ t('admin.accounts.bps.riskTitle') }}</div>
+        <p class="text-sm font-medium">{{ t('admin.accounts.bps.riskDescription') }}</p>
+      </div>
+      <OpenAIBPSAccountFields v-if="form.platform === 'openai_bps'" v-model="bpsDraft" />
 
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
@@ -2297,6 +2307,13 @@
         </div>
       </div>
 
+      <div v-if="form.platform === 'openai' && isOAuthFlow" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label for="create-openai-oauth-base-url" class="input-label">{{ t('admin.accounts.openaiOAuthBaseUrl.label') }}</label>
+        <input id="create-openai-oauth-base-url" v-model="openaiOAuthBaseUrl" type="url" class="input" placeholder="https://chatgpt.com/backend-api/codex" />
+        <p class="input-hint">{{ t('admin.accounts.openaiOAuthBaseUrl.default') }}</p>
+        <p class="mt-2 text-sm text-amber-700 dark:text-amber-400">{{ t('admin.accounts.openaiOAuthBaseUrl.warning') }}</p>
+      </div>
+
       <!-- OpenAI OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
       <div
         v-if="(form.platform === 'openai' || form.platform === 'grok') && isOAuthFlow"
@@ -3089,6 +3106,7 @@
         </div>
       </div>
 
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="form.platform === 'openai' && form.type === 'oauth'"
@@ -3243,6 +3261,15 @@
         </div>
       </div>
 
+      <div v-if="form.platform === 'openai' && accountCategory === 'oauth-based'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="codex-ticket-create-policy">{{ t('admin.accounts.openai.codexTicketAccountPolicy') }}</label>
+        <select id="codex-ticket-create-policy" v-model="codexTicketAccountPolicy" class="input" data-testid="codex-ticket-create-policy">
+          <option value="inherit">{{ t('admin.accounts.openai.codexTicketPolicyInherit') }}</option>
+          <option value="allow">{{ t('admin.accounts.openai.codexTicketPolicyAllow') }}</option>
+          <option value="deny">{{ t('admin.accounts.openai.codexTicketPolicyDeny') }}</option>
+        </select>
+        <p class="input-hint">{{ t('admin.accounts.openai.codexTicketAccountPolicyDesc') }}</p>
+      </div>
       <div
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3578,9 +3605,14 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
+        <button v-if="form.platform === 'openai_bps'" type="submit" form="create-account-form" :disabled="submitting"
+          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
+          {{ t('admin.accounts.bps.saveAndTest') }}
+        </button>
         <button
           type="submit"
           form="create-account-form"
+          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3872,6 +3904,17 @@
     </template>
   </BaseDialog>
 
+  <ConfirmDialog
+    :show="pendingBPSCreate !== null"
+    :title="t('admin.accounts.bps.riskConfirmTitle')"
+    :message="t('admin.accounts.bps.riskConfirmMessage')"
+    :confirm-text="t('admin.accounts.bps.riskConfirmButton')"
+    :cancel-text="t('common.cancel')"
+    :danger="true"
+    data-testid="bps-risk-confirmation"
+    @confirm="confirmBPSRisk"
+    @cancel="cancelBPSRisk"
+  />
   <!-- Mixed Channel Warning Dialog -->
   <ConfirmDialog
     :show="showMixedChannelWarning"
@@ -3886,6 +3929,8 @@
 </template>
 
 <script setup lang="ts">
+import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
+import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3915,6 +3960,7 @@ import type {
   AdminGroup,
   AccountPlatform,
   AccountType,
+  Account,
   CheckMixedChannelResponse,
   CreateAccountRequest,
   CodexSessionImportMessage,
@@ -4079,6 +4125,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
+  test: [account: Account]
   created: []
 }>()
 
@@ -4390,6 +4437,7 @@ const headerOverrideRows = ref<HeaderOverrideRow[]>([])
 // Grok OAuth：自定义上游地址（base_url 仅改写转发端点，OAuth 授权/刷新不受影响）
 const grokOAuthCustomBaseUrlEnabled = ref(false)
 const grokOAuthBaseUrl = ref('')
+const openaiOAuthBaseUrl = ref('')
 
 // Grok OAuth 三条创建路径（授权码/RT 批量/SSO 批量）共用的前置校验。
 // 授权码路径必须在兑换 code 之前调用，避免校验失败时白白消耗一次性授权码。
@@ -4436,6 +4484,8 @@ const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+type CodexTicketAccountPolicy = 'inherit' | 'allow' | 'deny'
+const codexTicketAccountPolicy = ref<CodexTicketAccountPolicy>('inherit')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
@@ -4716,6 +4766,10 @@ const tempUnschedPresets = computed(() => [
   }
 ])
 
+const bpsDraft = ref(newBPSAccountDraft())
+const bpsTestAfterSave = ref(false)
+const pendingBPSCreate = ref<{ payload: CreateAccountRequest; testAfterSave: boolean } | null>(null)
+
 const form = reactive({
   name: '',
   notes: '',
@@ -4733,6 +4787,7 @@ const form = reactive({
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
+  if (form.platform === 'openai_bps') return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -4903,6 +4958,7 @@ watch(
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
+      codexTicketAccountPolicy.value = 'inherit'
     }
     if (newPlatform !== 'anthropic') {
       anthropicPassthroughEnabled.value = false
@@ -5272,8 +5328,10 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     appStore.showSuccess(t('admin.accounts.accountCreated'))
+    const openBPSTest = payload.platform === 'openai_bps' && bpsTestAfterSave.value
     emit('created')
     handleClose()
+    if (openBPSTest) emit('test', account)
   } catch (error: any) {
     if (error.response?.status === 409 && error.response?.data?.error === 'mixed_channel_warning' && needsMixedChannelCheck(form.platform)) {
       openMixedChannelDialog({
@@ -5293,6 +5351,9 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  pendingBPSCreate.value = null
+  bpsDraft.value = newBPSAccountDraft()
+  bpsTestAfterSave.value = false
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5348,6 +5409,7 @@ const resetForm = () => {
   grokOAuthCustomBaseUrlEnabled.value = false
   grokOAuthBaseUrl.value = ''
   interceptWarmupRequests.value = false
+  openaiOAuthBaseUrl.value = ''
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
@@ -5360,6 +5422,7 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexTicketAccountPolicy.value = 'inherit'
   codexFingerprintMode.value = 'off'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5410,6 +5473,8 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
+  pendingBPSCreate.value = null
+  bpsTestAfterSave.value = false
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5445,6 +5510,9 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
   extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
 
+  if (accountCategory.value === 'oauth-based' && codexTicketAccountPolicy.value !== 'inherit') {
+    extra.codex_allow_without_ticket = codexTicketAccountPolicy.value === 'allow'
+  }
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
     extra.codex_cli_only = true
   } else {
@@ -5528,7 +5596,28 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 }
 
 // Helper function to create account with mixed channel warning handling
-const doCreateAccount = async (payload: CreateAccountRequest) => {
+const cancelBPSRisk = () => {
+  pendingBPSCreate.value = null
+  bpsTestAfterSave.value = false
+}
+watch(() => [props.show, form.platform] as const, ([shown, platform]) => {
+  if (!shown || platform !== 'openai_bps') cancelBPSRisk()
+})
+const confirmBPSRisk = async () => {
+  const pending = pendingBPSCreate.value
+  if (!pending || submitting.value || !props.show) return
+  pendingBPSCreate.value = null
+  bpsTestAfterSave.value = pending.testAfterSave
+  await doCreateAccount(pending.payload, true)
+}
+const doCreateAccount = async (payload: CreateAccountRequest, bpsRiskConfirmed = false) => {
+  if (payload.platform === 'openai_bps') {
+    if (submitting.value || pendingBPSCreate.value) return
+    if (!bpsRiskConfirmed) {
+      pendingBPSCreate.value = { payload: JSON.parse(JSON.stringify(payload)), testAfterSave: bpsTestAfterSave.value }
+      return
+    }
+  }
   const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
     await submitCreateAccount(payload)
   })
@@ -5619,6 +5708,11 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (form.platform === 'openai_bps') {
+    if (!bpsDraft.value.token.trim()) { appStore.showError(t('admin.accounts.bps.tokenRequired')); return }
+    await createAccountAndFinish('openai_bps', 'oauth', bpsCredentials(bpsDraft.value))
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -6306,6 +6400,9 @@ const handleOpenAIExchange = async (authCode: string) => {
     if (!tokenInfo) return
 
     const credentials = oauthClient.buildCredentials(tokenInfo)
+    if (openaiOAuthBaseUrl.value.trim()) {
+      credentials.base_url = openaiOAuthBaseUrl.value.trim()
+    }
     const oauthExtra = oauthClient.buildExtraInfo(tokenInfo) as Record<string, unknown> | undefined
     const extra = buildOpenAIExtra(oauthExtra)
     const shouldCreateOpenAI = form.platform === 'openai'
@@ -6365,6 +6462,9 @@ const OPENAI_MOBILE_RT_CLIENT_ID = 'app_LlGpXReQgckcGGUo2JrYvtJK'
 
 const buildOpenAICodexImportCredentialExtras = (): Record<string, unknown> | null => {
   const credentials: Record<string, unknown> = {}
+  if (openaiOAuthBaseUrl.value.trim()) {
+    credentials.base_url = openaiOAuthBaseUrl.value.trim()
+  }
   if (!isOpenAIModelRestrictionDisabled.value) {
     const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
     if (modelMapping) {
@@ -6586,6 +6686,9 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         }
 
         const credentials = oauthClient.buildCredentials(tokenInfo)
+        if (openaiOAuthBaseUrl.value.trim()) {
+          credentials.base_url = openaiOAuthBaseUrl.value.trim()
+        }
         if (clientId) {
           credentials.client_id = clientId
         }

@@ -26,6 +26,8 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <OpenAIBPSAccountFields v-if="account.platform === 'openai_bps'" v-model="bpsDraft" editing :expires-at="String(account.credentials?.expires_at ?? '')" :credential-state="account.bps_credential_state" :account-status="account.status" :schedulable="account.schedulable" />
+
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
@@ -730,6 +732,13 @@
             @update:rows="headerOverrideRows = $event"
           />
         </div>
+      </div>
+
+      <div v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label for="edit-openai-oauth-base-url" class="input-label">{{ t('admin.accounts.openaiOAuthBaseUrl.label') }}</label>
+        <input id="edit-openai-oauth-base-url" v-model="openaiOAuthBaseUrl" type="url" class="input" placeholder="https://chatgpt.com/backend-api/codex" />
+        <p class="input-hint">{{ t('admin.accounts.openaiOAuthBaseUrl.default') }}</p>
+        <p class="mt-2 text-sm text-amber-700 dark:text-amber-400">{{ t('admin.accounts.openaiOAuthBaseUrl.warning') }}</p>
       </div>
 
       <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
@@ -1769,6 +1778,7 @@
         </div>
       </div>
 
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -2336,27 +2346,19 @@
         </div>
       </div>
 
-      <!-- Codex 292 门票状态（仅 OpenAI OAuth） -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket') }}</label>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
-        </p>
-        <div class="mt-3 space-y-1.5">
-          <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="flex items-center justify-between text-sm">
-            <span class="font-medium">{{ ticket.model }}</span>
-            <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
-              {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
-            </span>
-            <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
-              {{ t('admin.accounts.openai.codexTurnTicketPaused') }}
-            </span>
-            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
-          </div>
-        </div>
+      <div v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && !isSparkShadow" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="codex-ticket-account-policy">{{ t('admin.accounts.openai.codexTicketAccountPolicy') }}</label>
+        <select id="codex-ticket-account-policy" v-model="codexTicketAccountPolicy" class="input" data-testid="codex-ticket-account-policy">
+          <option value="inherit">{{ t('admin.accounts.openai.codexTicketPolicyInherit') }}</option>
+          <option value="allow">{{ t('admin.accounts.openai.codexTicketPolicyAllow') }}</option>
+          <option value="deny">{{ t('admin.accounts.openai.codexTicketPolicyDeny') }}</option>
+        </select>
+        <p class="input-hint">{{ t('admin.accounts.openai.codexTicketAccountPolicyDesc') }}</p>
+      </div>
+
+      <div v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-3"><label class="input-label mb-0">{{ t('admin.accounts.openai.codexTicketHistory') }}</label><button type="button" class="text-xs font-semibold text-indigo-600 dark:text-indigo-400" @click="emit('codex-tickets')">{{ t('admin.accounts.openai.codexTicketHistory') }} →</button></div>
+        <div class="mt-3 grid gap-2 sm:grid-cols-2"><div v-for="ticket in codexTurnTickets" :key="ticket.model" class="rounded-lg border border-gray-200 p-3 text-xs dark:border-dark-600"><div class="flex justify-between gap-2"><span class="break-all font-mono font-semibold">{{ ticket.model }}</span><span :class="ticket.ready ? 'text-emerald-600' : 'text-amber-600'">{{ ticket.ready ? '●' : '○' }} {{ t(ticket.ready ? 'admin.accounts.openai.codexTicketReadyShort' : 'admin.accounts.openai.codexTicketMissingShort') }}</span></div><p class="mt-2 text-gray-500">{{ ticket.length }} bytes · turn-state {{ ticket.turn_state_present ? '✓' : '—' }} · Cookie {{ ticket.cookie_present ? '✓' : '—' }}</p></div></div>
       </div>
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
@@ -3080,9 +3082,14 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
+        <button v-if="account.platform === 'openai_bps'" type="submit" form="edit-account-form" :disabled="submitting"
+          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
+          {{ t('admin.accounts.bps.saveAndTest') }}
+        </button>
         <button
           type="submit"
           form="edit-account-form"
+          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3127,6 +3134,8 @@
 </template>
 
 <script setup lang="ts">
+import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
+import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3234,7 +3243,9 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
+  test: [account: Account]
   updated: [account: Account]
+  'codex-tickets': []
 }>()
 
 const { t } = useI18n()
@@ -3258,12 +3269,7 @@ const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
 
-function formatCodexTicketRemaining(seconds: number) {
-  const total = Math.max(0, Math.floor(seconds || 0))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}m${String(s).padStart(2, '0')}s`
-}
+
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -3597,6 +3603,7 @@ const headerOverrideCapable = computed(
 // Grok OAuth 自定义上游地址（仅转发端点；OAuth 授权/令牌刷新不受影响）
 const grokOAuthCustomBaseUrlEnabled = ref(false)
 const grokOAuthBaseUrl = ref('')
+const openaiOAuthBaseUrl = ref('')
 // Grok Free OAuth accounts use client-tool prompt caching by default. Keep an
 // explicit false in the account extra as the opt-out signal.
 const grokClientToolCacheEnabled = ref(true)
@@ -3727,6 +3734,8 @@ const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+type CodexTicketAccountPolicy = 'inherit' | 'allow' | 'deny'
+const codexTicketAccountPolicy = ref<CodexTicketAccountPolicy>('inherit')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
@@ -4043,6 +4052,9 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
+const bpsDraft = ref(newBPSAccountDraft())
+const bpsTestAfterSave = ref(false)
+
 const form = reactive({
   name: '',
   notes: '',
@@ -4152,6 +4164,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
   mixedChannelWarningAction.value = null
+  bpsDraft.value = newBPSAccountDraft(newAccount.credentials)
+  bpsTestAfterSave.value = false
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
@@ -4213,6 +4227,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexTicketAccountPolicy.value = 'inherit'
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
@@ -4261,6 +4276,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       defaultMode: OPENAI_WS_MODE_OFF
     })
     if (newAccount.type === 'oauth' || newAccount.type === 'setup-token') {
+      codexTicketAccountPolicy.value = extra?.codex_allow_without_ticket === true ? 'allow' : extra?.codex_allow_without_ticket === false ? 'deny' : 'inherit'
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
@@ -4374,6 +4390,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   }
 
   // Load Grok OAuth custom upstream URL state（存储的官方地址视同未定制）
+  openaiOAuthBaseUrl.value = newAccount.platform === 'openai' && newAccount.type === 'oauth'
+    ? String(newAccount.credentials?.base_url || '')
+    : ''
   grokOAuthCustomBaseUrlEnabled.value = false
   grokOAuthBaseUrl.value = ''
   const grokClientToolCacheSetting =
@@ -5137,8 +5156,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
+    const openBPSTest = updatedAccount.platform === 'openai_bps' && bpsTestAfterSave.value
     emit('updated', updatedAccount)
     handleClose()
+    if (openBPSTest) emit('test', updatedAccount)
   } catch (error: any) {
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {
       openMixedChannelDialog({
@@ -5193,6 +5214,10 @@ const handleSubmit = async () => {
       if (upstreamBillingRateSyncEnabled.value) {
         delete updatePayload.rate_multiplier
       }
+    }
+
+    if (props.account.platform === 'openai_bps') {
+      updatePayload.credentials = bpsCredentials(bpsDraft.value)
     }
 
     // For apikey type, handle credentials update
@@ -5469,6 +5494,9 @@ const handleSubmit = async () => {
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
       if (props.account.platform === 'openai') {
         applyOpenAIModelMappingCredentials(newCredentials)
+        if (!isSparkShadow.value) {
+          newCredentials.base_url = openaiOAuthBaseUrl.value.trim()
+        }
       } else {
         const modelMapping = buildModelRestrictionMapping()
         if (modelMapping) {
@@ -5782,6 +5810,11 @@ const handleSubmit = async () => {
       }
 
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
+        if (codexTicketAccountPolicy.value === 'inherit') {
+          delete newExtra.codex_allow_without_ticket
+        } else {
+          newExtra.codex_allow_without_ticket = codexTicketAccountPolicy.value === 'allow'
+        }
         if (codexCLIOnlyEnabled.value) {
           newExtra.codex_cli_only = true
         } else if (hadCodexCLIOnlyEnabled) {

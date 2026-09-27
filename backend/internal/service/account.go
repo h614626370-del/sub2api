@@ -45,7 +45,8 @@ type Account struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
-	Schedulable bool
+	Schedulable               bool
+	SchedulerTicketProjection bool `json:"-"`
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time
@@ -179,6 +180,12 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	if a.IsOpenAIBPS() {
+		state := a.OpenAIBPSCredentialState(time.Now())
+		if state.Status == "expired" || state.Status == "revoked" || state.Status == "auth_failed" {
+			return false
+		}
+	}
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
@@ -298,7 +305,7 @@ func (a *Account) IsCNProvider() bool {
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
 // 兼容上游，也经 OpenAI 网关转发。OpenCode 同样经 OpenAI 网关按模型分流。
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo())
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformOpenAIBPS || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo())
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1839,6 +1846,9 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if !a.IsOpenAICompatible() {
 		return false
 	}
+	if a.Platform == PlatformOpenAIBPS {
+		return capability == OpenAIEndpointCapabilityResponses
+	}
 	if a.IsGrok() {
 		switch capability {
 		case OpenAIEndpointCapabilityChatCompletions:
@@ -2271,8 +2281,8 @@ func (a *Account) IsOpenAIWSForceHTTPEnabled() bool {
 // IsOpenAIResponsesFlattenNamespacesEnabled 返回账号级"摊平 Codex namespace 工具"开关。
 // 字段：accounts.extra.openai_responses_flatten_namespaces，缺省 false（原样保留）。
 //
-// namespace 是 Codex 后端定义的私有扩展，OAuth 出口恒为 chatgpt.com/backend-api/codex
-// （buildUpstreamRequest 只对 API Key 账号取 base_url），即定义方本身，因此默认保留。
+// namespace 是 Codex 后端定义的私有扩展，OAuth 默认出口为官方 Codex 后端。
+// 自定义 OAuth base_url 仍按 Codex 协议处理，因此默认保留。
 // 该开关只为把流量转发到不认识 namespace 的兼容上游的部署保留退路：打开后恢复
 // 0.1.166 及更早版本的摊平行为。仅对 OpenAI OAuth 账号有效——API Key 走 chat
 // completions 回退桥时由桥自行摊平，Grok/Anthropic 出口有各自的适配链路。

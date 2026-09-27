@@ -36,7 +36,6 @@ import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import pluginsAPI from './plugins'
-import codexTicketAPI from './codexTicket'
 
 /**
  * Unified admin API object for convenient access
@@ -75,7 +74,6 @@ export const adminAPI = {
   compliance: adminComplianceAPI,
   audit: auditAPI,
   plugins: pluginsAPI,
-  codexTicket: codexTicketAPI
 }
 
 export {
@@ -112,7 +110,6 @@ export {
   adminComplianceAPI,
   auditAPI,
   pluginsAPI,
-  codexTicketAPI
 }
 
 export default adminAPI
@@ -130,4 +127,3 @@ export type {
   PluginUISession,
   PluginTestResult
 } from './plugins'
-export type { CodexTicketAudit } from './codexTicket'

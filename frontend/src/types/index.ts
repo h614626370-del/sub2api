@@ -538,7 +538,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'composite'
+export type GroupPlatform = 'anthropic' | 'openai_bps' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'composite'
 
 export type VideoModelPrices = Record<string, Record<string, number>>
 
@@ -918,7 +918,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go'
+export type AccountPlatform = 'anthropic' | 'openai_bps' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -1195,6 +1195,8 @@ export interface OpenCodeGoUsageSettings {
   debounce_minutes: number
 }
 
+export type { BPSCredentialState } from "@/utils/openaiBps"
+
 export interface Account {
   id: number
   name: string
@@ -1207,24 +1209,24 @@ export interface Account {
   // 改为通过 credentials_status.has_<key> 暴露存在性。
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
+  bps_credential_state?: import("@/utils/openaiBps").BPSCredentialState
   ollama_cloud_usage?: OllamaCloudUsageState
   codex_turn_tickets?: Array<{
-    last_success_at?: string
-    last_success_ip?: string
-    last_success_ip_source?: string
-    last_success_duration_ms?: number
-    cookie_enabled?: boolean
-    cookie_count?: number
-    cookie_remaining_seconds?: number
     model: string
     length?: number
-    attempts?: number
     ready: boolean
     remaining_seconds: number
     blocked: boolean
+    captured_at?: string
+    turn_state_present?: boolean
+    cookie_present?: boolean
+    fingerprint_commit?: string
+    harvest_enabled?: boolean
+    harvest_paused?: boolean
     expires_at?: string
   }>
   opencode_go_usage?: OpenCodeGoUsageState
+  codex_ticket_latest_event?: { model: string; kind: string; occurred_at: string }
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
