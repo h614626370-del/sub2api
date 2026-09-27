@@ -124,6 +124,9 @@ func TestCompareVersionsSupportsCustomRevisionSegment(t *testing.T) {
 		{name: "older custom revision", current: "v0.2.7.3", latest: "v0.2.7.2", wantComparison: 1},
 		{name: "official version wins", current: "0.2.7.99", latest: "0.2.8", wantComparison: -1},
 		{name: "missing custom revision equals zero", current: "0.2.7", latest: "0.2.7.0", wantComparison: 0},
+		{name: "upgrade to next official baseline zero revision", current: "v0.2.7.8", latest: "v0.2.8.0", wantComparison: -1},
+		{name: "official baseline equals custom zero revision", current: "v0.2.8", latest: "v0.2.8.0", wantComparison: 0},
+		{name: "upgrade from custom zero revision", current: "v0.2.8.0", latest: "v0.2.8.1", wantComparison: -1},
 		{name: "multi digit custom revision", current: "0.2.7.9", latest: "0.2.7.10", wantComparison: -1},
 	}
 
