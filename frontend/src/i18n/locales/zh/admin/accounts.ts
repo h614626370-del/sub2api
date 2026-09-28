@@ -30,6 +30,10 @@ export default {
 
       bps: {
         modeEnabled: '启用 BPS',
+        enabledHint: 'BPS 已启用',
+        disabledHint: 'BPS 已关闭',
+        toggleFailed: '切换 BPS 失败，请重试',
+        listToggleHint: '在账号列表的 BPS 列开启或关闭，模型配置保存在这里。',
         modeModels: 'BPS 模型（每行一个）',
         testInterrupted: 'BPS 测试流已中断，未收到完成结果。',
         riskTitle: "封号风险提示",
@@ -119,8 +123,11 @@ export default {
         "probability": "匹配概率",
         "reason": "原因",
         "gateway": "网关响应",
+        "sampleCount": "有效数字样本",
+        "sampleCountValue": "已解析 {parsed} 个，最低需要 {required} 个",
+        "insufficientNumbersHint": "模型响应已完成，但样本不足，无法判定是否降智。",
         "templateInvalid": "共享模板配置无效，请在系统设置中修正后重试。",
-        "failureHint": "“请求失败”表示请求未完成，不代表模型降智。疑似降智或不确定的结果可以复测确认。",
+        "failureHint": "网关请求失败、响应未完成或有效样本不足，都不能单独作为模型降智结论。疑似降智或不确定的结果可以复测确认。",
         "missingResult": "未返回此模型的检测结果",
         "close": "关闭降智检测",
         "status": {
@@ -134,6 +141,7 @@ export default {
           "not_run": "未执行"
         },
         "caption": {
+          "insufficientNumbers": "响应已完成，但数字样本不足，无法判定",
           "normal": "响应特征与目标模型匹配",
           "degraded": "响应特征存在偏差，建议复测确认",
           "uncertain": "暂未得到明确结论",

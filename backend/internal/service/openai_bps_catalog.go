@@ -30,6 +30,9 @@ func applyOpenAIBPSModelCapabilities(model map[string]any) {
 	model["input_modalities"] = []string{"text"}
 	model["supports_image_detail_original"] = false
 	model["supports_search_tool"] = false
+	model["experimental_supported_tools"] = []string{}
+	model["web_search_tool_type"] = nil
+	model["default_reasoning_summary"] = "none"
 	model["additional_speed_tiers"] = []string{}
 	model["service_tiers"] = []any{}
 	model["default_service_tier"] = nil

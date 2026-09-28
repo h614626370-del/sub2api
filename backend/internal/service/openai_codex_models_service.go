@@ -187,13 +187,13 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		return nil
 	}
 
+	visible, catalogAccounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	if err != nil {
+		return fmt.Errorf("load group configured Codex models: %w", err)
+	}
 	var configuredModels []string
 	if !group.CodexModelsManifestConfig.Enabled {
-		var err error
-		configuredModels, err = s.groupConfiguredCodexModelIDs(ctx, group)
-		if err != nil {
-			return fmt.Errorf("load group configured Codex models: %w", err)
-		}
+		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
 	}
 	body, changed, err := mergeConfiguredCodexModelsManifest(
 		manifest.Body,
@@ -211,6 +211,11 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		}
 		changed = true
 	}
+	body, bpsChanged, err := applyBPSCatalogForAccounts(body, PlatformOpenAI, catalogAccounts, group, nil, true)
+	if err != nil {
+		return err
+	}
+	changed = changed || bpsChanged
 	if changed {
 		manifest.Body = body
 		manifest.ETag = codexModelsManifestBodyETag(body)
@@ -942,22 +947,11 @@ func buildCodexModelsManifestForAccounts(
 		}
 	}
 	body, err := buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
-	if err != nil || effectivePlatform != PlatformComposite {
-		return body, err
-	}
-	var catalog struct {
-		Models []map[string]any `json:"models"`
-	}
-	if err = json.Unmarshal(body, &catalog); err != nil {
+	if err != nil {
 		return nil, err
 	}
-	for _, model := range catalog.Models {
-		platform, _, ok := resolveCodexCompositeModelTarget(stringValue(model["slug"]), accounts, compositeRoutes, compositeRoutesAvailable)
-		if ok && platform == PlatformOpenAIBPS {
-			applyOpenAIBPSModelCapabilities(model)
-		}
-	}
-	return json.Marshal(catalog)
+	body, _, err = applyBPSCatalogForAccounts(body, effectivePlatform, accounts, group, compositeRoutes, compositeRoutesAvailable)
+	return body, err
 }
 
 func buildCodexModelsManifest(

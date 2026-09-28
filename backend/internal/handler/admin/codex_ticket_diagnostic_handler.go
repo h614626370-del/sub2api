@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,6 +32,7 @@ type codexDiagnosticItem struct {
 	PredictedModel   string                      `json:"predicted_model,omitempty"`
 	Probability      float64                     `json:"probability,omitempty"`
 	ParsedCount      int                         `json:"parsed_number_count,omitempty"`
+	RequiredCount    int                         `json:"required_number_count,omitempty"`
 	HTTPStatus       int                         `json:"http_status,omitempty"`
 	GatewayErrorCode string                      `json:"gateway_error_code,omitempty"`
 	Harvest          *service.CodexTicketAttempt `json:"harvest,omitempty"`
@@ -178,6 +180,7 @@ func (h *AccountHandler) diagnoseCodexModels(c *gin.Context, generateChallenge f
 			results = append(results, item)
 			continue
 		}
+		item.RequiredCount = max(80, int(math.Ceil(float64(challenge.ExpectedCount)*0.55)))
 		body, probeHeaders, buildErr := h.codexTicketGateway.BuildCodexDiagnosticRequest(probeCtx, accountID, model, challenge)
 		if buildErr != nil {
 			item.Reason = "request_build_failed"

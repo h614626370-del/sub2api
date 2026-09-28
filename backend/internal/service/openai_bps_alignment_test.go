@@ -66,7 +66,7 @@ func TestOpenAIBPSReferenceEnvelopes(t *testing.T) {
 func TestOpenAIBPSAdditionalToolsAndReplay(t *testing.T) {
 	s, a := bpsFixture()
 	c, _ := bpsContext(1, "/responses")
-	source := map[string]any{"model": "gpt-6-astra", "tools": []any{bpsFunction("exec")}, "input": []any{bpsMessage("user", "inspect"), map[string]any{"type": "additional_tools", "tools": []any{bpsFunction("exec"), map[string]any{"type": "namespace", "name": "functions", "tools": []any{map[string]any{"type": "custom", "name": "apply_patch"}}}}}}}
+	source := map[string]any{"model": "gpt-6-astra", "tools": []any{bpsFunction("exec")}, "input": []any{bpsMessage("user", "inspect"), map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{bpsFunction("exec"), map[string]any{"type": "namespace", "name": "functions", "tools": []any{map[string]any{"type": "custom", "name": "apply_patch"}}}}}}}
 	prepared, err := s.prepareOpenAIBPS(c.Request.Context(), c, a, []byte(bpsJSON(source)))
 	require.NoError(t, err)
 	require.Len(t, prepared.Tools, 2)
@@ -101,7 +101,7 @@ func TestOpenAIBPSAdditionalToolsAndReplay(t *testing.T) {
 	require.Equal(t, prepared.TurnID, replay.TurnID)
 	require.Equal(t, 2, replay.AgentIteration)
 	// A conflicting late declaration cannot silently change the schema.
-	source["input"] = []any{bpsMessage("user", "inspect"), map[string]any{"type": "additional_tools", "tools": []any{map[string]any{"type": "function", "name": "exec", "parameters": map[string]any{"type": "object"}}}}}
+	source["input"] = []any{bpsMessage("user", "inspect"), map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{map[string]any{"type": "function", "name": "exec", "parameters": map[string]any{"type": "object"}}}}}
 	_, err = s.prepareOpenAIBPS(c.Request.Context(), c, a, []byte(bpsJSON(source)))
 	require.ErrorContains(t, err, "Conflicting")
 	require.Equal(t, "fc_short", bpsFunctionOutputID("short"))

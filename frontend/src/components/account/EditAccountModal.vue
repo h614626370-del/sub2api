@@ -27,7 +27,7 @@
       </div>
 
       <OpenAIBPSModeFields v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow"
-        v-model:enabled="bpsModeEnabled" v-model:models="bpsModeModels" />
+        :enabled="bpsModeEnabled" v-model:models="bpsModeModels" hide-toggle />
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">

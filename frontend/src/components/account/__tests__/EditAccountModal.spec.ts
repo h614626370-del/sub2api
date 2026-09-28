@@ -1746,6 +1746,7 @@ describe('EditAccountModal OpenAI BPS', () => {
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     expect(wrapper.find('#bps-access-token').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="bps-mode-enabled"]').exists()).toBe(false)
     await wrapper.get('[data-testid="bps-mode-models"]').setValue(' gpt-6-astra \ngpt-6-astra\ngpt-5.6-sol\n')
     await wrapper.get('[data-testid="bps-save-and-test"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')

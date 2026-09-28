@@ -180,4 +180,5 @@ func TestCodexDiagnosticDefaultUsesModelTraceChallenge(t *testing.T) {
 	require.Equal(t, http.StatusOK, writer.Code)
 	require.Equal(t, 1, calls)
 	require.Equal(t, "insufficient_numbers", gjson.GetBytes(writer.Body.Bytes(), "data.items.0.reason").String())
+	require.Greater(t, int(gjson.GetBytes(writer.Body.Bytes(), "data.items.0.required_number_count").Int()), 0)
 }

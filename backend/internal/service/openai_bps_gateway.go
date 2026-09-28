@@ -20,6 +20,10 @@ import (
 
 // WriteOpenAIBPSError preserves an already-started SSE stream's protocol.
 func WriteOpenAIBPSError(c *gin.Context, err error) {
+	if IsResponseCommitted(c) {
+		return
+	}
+	defer MarkResponseCommitted(c)
 	failure := &bpsError{502, "bps_upstream_error", "BPS upstream request failed"}
 	var typed *bpsError
 	if errors.As(err, &typed) {

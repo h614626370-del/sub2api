@@ -57,6 +57,7 @@ export interface TicketDiagnostic {
   predicted_model?: string
   probability?: number
   parsed_number_count?: number
+  required_number_count?: number
   http_status?: number
   harvest?: TicketEvent
 }

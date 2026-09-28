@@ -30,6 +30,10 @@ export default {
 
       bps: {
         modeEnabled: 'Enable BPS',
+        enabledHint: 'BPS enabled',
+        disabledHint: 'BPS disabled',
+        toggleFailed: 'Failed to toggle BPS. Please try again.',
+        listToggleHint: 'Enable or disable BPS in the account list. Configure its models here.',
         modeModels: 'BPS models (one per line)',
         testInterrupted: 'The BPS test stream ended without a completion result.',
         riskTitle: "Account suspension risk",
@@ -119,8 +123,11 @@ export default {
         "probability": "Match probability",
         "reason": "Reason",
         "gateway": "Gateway response",
+        "sampleCount": "Valid number samples",
+        "sampleCountValue": "Parsed {parsed}; at least {required} required",
+        "insufficientNumbersHint": "The model response completed, but there are too few samples to determine degradation.",
         "templateInvalid": "The shared template is invalid. Correct it in system settings and retry.",
-        "failureHint": "A request failure does not imply model degradation. Repeat uncertain or potentially degraded results to confirm.",
+        "failureHint": "A gateway failure, incomplete response, or insufficient samples alone cannot establish model degradation. Repeat uncertain or potentially degraded results to confirm.",
         "missingResult": "No result was returned for this model",
         "close": "Close model degradation check",
         "status": {
@@ -134,10 +141,11 @@ export default {
           "not_run": "Not started"
         },
         "caption": {
+          "insufficientNumbers": "Response completed, but samples are insufficient to determine",
           "normal": "Response characteristics match the target model",
           "degraded": "Response characteristics differ; check again to confirm",
           "uncertain": "No clear conclusion yet",
-          "failed": "Request failed; this does not imply degradation",
+          "failed": "Request did not complete; this does not imply degradation",
           "pending": "Waiting for the previous model",
           "running": "Analyzing this response",
           "stopped": "No conclusion received",

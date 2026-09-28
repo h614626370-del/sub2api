@@ -176,6 +176,21 @@ describe('Codex diagnostic modal', () => {
     wrapper.unmount()
   })
 
+  it('explains insufficient samples separately from an incomplete gateway response', async () => {
+    diagnose.mockResolvedValueOnce({ items: [{ model: 'gpt-5.6-sol', status: 'failed', reason: 'insufficient_numbers', parsed_number_count: 37, required_number_count: 161, http_status: 200 }] })
+    const wrapper = mountModal()
+    await flushPromises()
+    await configure(wrapper, ['gpt-5.6-sol']).runDiagnostic()
+    await flushPromises()
+    const failed = wrapper.get('[data-model="gpt-5.6-sol"]')
+    expect(failed.text()).toContain('响应已完成，但数字样本不足，无法判定')
+    await failed.get('button[aria-expanded]').trigger('click')
+    expect(failed.text()).toContain('已解析 37 个，最低需要 161 个')
+    expect(failed.text()).toContain('模型响应已完成，但样本不足，无法判定是否降智。')
+    expect(failed.text()).toContain('HTTP 200')
+    wrapper.unmount()
+  })
+
   it('retains completed results when cancelled and marks unfinished and unstarted models separately', async () => {
     const second = deferred()
     diagnose.mockResolvedValueOnce({ items: [{ model: 'gpt-5.6-sol', status: 'normal' }] })

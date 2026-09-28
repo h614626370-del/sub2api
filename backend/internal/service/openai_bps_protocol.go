@@ -31,6 +31,7 @@ type bpsRequest struct {
 	TurnID                       string
 	AgentIteration               int
 	Structured                   *bpsStructuredOutput
+	ToolSessionExplicit          bool
 }
 type bpsNativeCall struct {
 	Native map[string]any `json:"native"`
@@ -74,15 +75,36 @@ func bpsCollectTools(raw any, namespace string, result map[string]bpsTool, catal
 	if !ok {
 		return bpsInvalid("tools must be an array")
 	}
-	for _, entry := range tools {
+	for index, entry := range tools {
 		spec, ok := entry.(map[string]any)
 		if !ok {
 			return bpsInvalid("Invalid tool declaration")
 		}
-		name := strings.TrimSpace(stringValue(spec["name"]))
+		// Accept Chat-style function declarations without losing the namespace.
 		kind := stringValue(spec["type"])
+		if nested, ok := spec["function"].(map[string]any); ok && (kind == "function" || kind == "") {
+			flat := make(map[string]any, len(nested)+1)
+			for key, value := range nested {
+				flat[key] = value
+			}
+			for _, key := range []string{"name", "description", "parameters", "strict"} {
+				if value, exists := spec[key]; exists {
+					if nestedValue, nestedExists := flat[key]; nestedExists && bpsJSON(value) != bpsJSON(nestedValue) {
+						return bpsInvalid(fmt.Sprintf("Conflicting function declaration at tools[%d]", index))
+					}
+					flat[key] = value
+				}
+			}
+			flat["type"], kind = "function", "function"
+			spec = flat
+		}
+		if kind != "function" && kind != "custom" && kind != "namespace" {
+			// Do not silently remove a tool the client expects to execute.
+			return bpsInvalid(fmt.Sprintf("Unsupported BPS tool type %q at tools[%d]; use function, custom or namespace client tools", kind, index))
+		}
+		name := strings.TrimSpace(stringValue(spec["name"]))
 		if name == "" {
-			return bpsInvalid("BPS only supports named function and custom client tools")
+			return bpsInvalid(fmt.Sprintf("Missing tool name at tools[%d] (type %q)", index, kind))
 		}
 		full := name
 		if namespace != "" {
@@ -93,9 +115,6 @@ func bpsCollectTools(raw any, namespace string, result map[string]bpsTool, catal
 				return e
 			}
 			continue
-		}
-		if kind != "function" && kind != "custom" {
-			return bpsInvalid("BPS only supports function, custom and namespace client tools")
 		}
 		if previous, exists := result[full]; exists {
 			if bpsJSON(previous.Spec) != bpsJSON(spec) {
@@ -172,6 +191,7 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 	if routing, ok := ctx.Value(bpsRoutingContextKey{}).(bpsRoutingContext); ok {
 		r.Scope = routing.Scope
 	}
+	r.ToolSessionExplicit = s.bpsExplicitSession(c, body) != ""
 	r.Stream, _ = source["stream"].(bool)
 	r.Compact = isOpenAIResponsesCompactPath(c) || HasCompactionTriggerInInput(body)
 	if !r.Compact {
@@ -215,43 +235,9 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 	default:
 		return nil, bpsInvalid("input must be a string or an array")
 	}
-	var catalog []any
-	if !r.Compact && source["tool_choice"] != "none" {
-		if e := bpsCollectTools(source["tools"], "", r.Tools, &catalog, 0); e != nil {
-			return nil, e
-		}
-		for _, raw := range input {
-			if item, ok := raw.(map[string]any); ok && item["type"] == "additional_tools" {
-				if e := bpsCollectTools(item["tools"], "", r.Tools, &catalog, 0); e != nil {
-					return nil, e
-				}
-			}
-		}
-		if choice, ok := source["tool_choice"].(map[string]any); ok {
-			name := stringValue(choice["name"])
-			if ns := stringValue(choice["namespace"]); ns != "" {
-				name = ns + "." + name
-			}
-			tool, found := r.Tools[name]
-			if !found {
-				return nil, bpsInvalid("tool_choice must name a declared client tool")
-			}
-			r.Tools = map[string]bpsTool{name: tool}
-			catalog = nil
-			if e := bpsCollectTools([]any{tool.Spec}, tool.Namespace, map[string]bpsTool{}, &catalog, 0); e != nil {
-				return nil, e
-			}
-			r.RequireTool = true
-		} else {
-			choice := stringValue(source["tool_choice"])
-			if choice != "" && choice != "auto" && choice != "required" {
-				return nil, bpsInvalid("Unsupported tool_choice")
-			}
-			r.RequireTool = choice == "required"
-		}
-	}
-	if r.RequireTool && len(r.Tools) == 0 {
-		return nil, bpsInvalid("tool_choice requires at least one client tool")
+	catalog, err := s.bpsPrepareTools(ctx, account, r, input)
+	if err != nil {
+		return nil, err
 	}
 	translated := make([]any, 0, len(input)+3)
 	restoredCalls := map[string]bool{}

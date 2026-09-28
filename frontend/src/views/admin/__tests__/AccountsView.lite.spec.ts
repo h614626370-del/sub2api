@@ -9,6 +9,7 @@ const {
   listAccounts,
   listWithEtag,
   getById,
+  updateAccount,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
@@ -20,6 +21,7 @@ const {
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getById: vi.fn(),
+  updateAccount: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       list: listAccounts,
       getById,
+      update: updateAccount,
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
@@ -68,6 +71,7 @@ const DataTableStub = defineComponent({
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-bps" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -179,6 +183,7 @@ describe('admin AccountsView lite account list', () => {
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
     listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
+    updateAccount.mockReset()
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
     getAllProxies.mockReset().mockResolvedValue([])
@@ -191,6 +196,79 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('toggles BPS using full settings and preserves models and scheduling', async () => {
+    const extra = { detail_only: true, openai_bps_models: ['custom-model'], openai_bps_enabled: false }
+    getById.mockResolvedValue({ ...fullAccount, extra })
+    updateAccount.mockResolvedValue({ ...fullAccount, extra: { ...extra, openai_bps_enabled: true } })
+    const wrapper = mountView()
+    await flushPromises()
+    const toggle = wrapper.get('button[role="switch"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(updateAccount).toHaveBeenCalledWith(42, { extra: { ...extra, openai_bps_enabled: true } })
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    getById.mockResolvedValue({ ...fullAccount, extra: { ...extra, openai_bps_enabled: true } })
+    updateAccount.mockResolvedValue({ ...fullAccount, extra })
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(updateAccount).toHaveBeenLastCalledWith(42, { extra })
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('disables BPS while saving and keeps the old state on failure', async () => {
+    let rejectSave!: (reason: unknown) => void
+    updateAccount.mockReturnValue(new Promise((_, reject) => { rejectSave = reject }))
+    const wrapper = mountView()
+    await flushPromises()
+    const toggle = wrapper.get('button[role="switch"]')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(toggle.attributes('disabled')).toBeDefined()
+    await toggle.trigger('click')
+    expect(updateAccount).toHaveBeenCalledTimes(1)
+    rejectSave(new Error('save failed'))
+    await flushPromises()
+    expect(toggle.attributes('disabled')).toBeUndefined()
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(showError).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('only offers BPS for non-shadow OpenAI OAuth accounts', async () => {
+    const items = [
+      listRow,
+      { ...listRow, id: 43, parent_account_id: 42 },
+      { ...listRow, id: 44, type: 'apikey' },
+      { ...listRow, id: 45, platform: 'anthropic' }
+    ]
+    listAccounts.mockResolvedValue({ items, total: items.length, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.findAll('button[role="switch"]')).toHaveLength(1)
+    expect(getById).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('refreshes the BPS switch even if the row timestamp is unchanged', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    listWithEtag.mockResolvedValue({
+      notModified: false, etag: 'bps-enabled',
+      data: { items: [{ ...listRow, extra: { openai_bps_enabled: true } }], total: 1, page: 1, page_size: 20, pages: 1 }
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('false')
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushPromises()
+    expect(wrapper.get('button[role="switch"]').attributes('aria-checked')).toBe('true')
+    wrapper.unmount()
   })
 
   it('keeps lite=1 on the initial list request', async () => {
