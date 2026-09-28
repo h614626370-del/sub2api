@@ -15,7 +15,7 @@ type timezoneSettingsRepo struct {
 
 func TestOAuthTimezoneFreshInstallDefaultPreservesExistingSettings(t *testing.T) {
 	ctx := context.Background()
-	repo := &forwardedIPMigrationRepoStub{values: map[string]string{}}
+	repo := &timezoneSettingsRepo{&codexPolicyMigrationRepoStub{values: map[string]string{}}}
 	s := NewSettingService(repo, &config.Config{})
 	require.NoError(t, s.InitializeDefaultSettings(ctx))
 	require.Equal(t, "America/Los_Angeles", repo.values[SettingKeyOpenAIOAuthDefaultTimezone])
@@ -35,6 +35,13 @@ func (r *timezoneSettingsRepo) GetMultiple(_ context.Context, keys []string) (ma
 		}
 	}
 	return result, nil
+}
+
+func (r *timezoneSettingsRepo) SetMultiple(_ context.Context, values map[string]string) error {
+	for key, value := range values {
+		r.values[key] = value
+	}
+	return nil
 }
 
 func TestOAuthTimezoneSettingCache(t *testing.T) {
