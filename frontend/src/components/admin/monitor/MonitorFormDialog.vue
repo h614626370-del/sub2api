@@ -470,7 +470,6 @@ interface ProviderOption {
 }
 
 const providerOptions = computed<ProviderOption[]>(() => [
-  { value: 'openai_bps', label: 'OpenAI BPS' },
   { value: PROVIDER_ANTHROPIC, label: t('monitorCommon.providers.anthropic') },
   { value: PROVIDER_OPENAI, label: t('monitorCommon.providers.openai') },
   { value: PROVIDER_GEMINI, label: t('monitorCommon.providers.gemini') },

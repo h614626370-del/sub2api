@@ -98,7 +98,7 @@ type Config struct {
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
 	SimpleMode              SimpleModeConfig              `mapstructure:"simple_mode" yaml:"simple_mode"`
 	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
-	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	Timezone                string                        `mapstructure:"timezone"` // e.g. "America/Los_Angeles", "UTC"
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
@@ -1581,7 +1581,7 @@ func (d *DatabaseConfig) DSN() string {
 // DSNWithTimezone returns DSN with timezone setting
 func (d *DatabaseConfig) DSNWithTimezone(tz string) string {
 	if tz == "" {
-		tz = "Asia/Shanghai"
+		tz = "America/Los_Angeles"
 	}
 	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
 	if d.Password == "" {
@@ -2337,8 +2337,8 @@ func setDefaults() {
 	viper.SetDefault("plugins.max_uncompressed_bytes", int64(256*1024*1024))
 	viper.SetDefault("plugins.start_timeout_seconds", 15)
 
-	// Timezone (default to Asia/Shanghai for Chinese users)
-	viper.SetDefault("timezone", "Asia/Shanghai")
+	// Timezone
+	viper.SetDefault("timezone", "America/Los_Angeles")
 
 	// API Key auth cache
 	viper.SetDefault("api_key_auth_cache.l1_size", 65535)

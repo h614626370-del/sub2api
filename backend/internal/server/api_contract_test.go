@@ -1436,7 +1436,6 @@ func TestAPIContracts(t *testing.T) {
 				data["openai_codex_ticket_allow_without_ticket"] = true
 				data["openai_codex_ticket_prompt_template"] = service.DefaultCodexProbeTemplate()
 				data["openai_codex_ticket_prompt_template_default"] = service.DefaultCodexProbeTemplate()
-				data["default_platform_quotas"].(map[string]any)["openai_bps"] = map[string]any{"daily": nil, "weekly": nil, "monthly": nil}
 				encoded, err := json.Marshal(expected)
 				require.NoError(t, err)
 				wantJSON = string(encoded)

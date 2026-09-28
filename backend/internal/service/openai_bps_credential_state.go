@@ -49,7 +49,7 @@ func bpsRequestCredentialSnapshot(ctx context.Context, account *Account) OpenAIB
 // Preserve the latest server-owned diagnosis while the account row is locked.
 // Changing AT/workspace invalidates it; a stale form cannot erase a newer 401.
 func MergeOpenAIBPSCredentialStateExtra(account *Account, desired, current map[string]any, identityUnchanged bool) map[string]any {
-	if !account.IsOpenAIBPS() {
+	if !account.IsOpenAIBPS() && !account.OpenAIBPSEnabled() {
 		return desired
 	}
 	delete(desired, OpenAIBPSCredentialStateExtraKey)
@@ -94,7 +94,7 @@ func isManagedBPSCredentialError(a *Account) bool {
 }
 
 func (a *Account) OpenAIBPSCredentialState(now time.Time) *OpenAIBPSCredentialState {
-	if !a.IsOpenAIBPS() {
+	if !a.IsOpenAIBPS() && !a.OpenAIBPSEnabled() {
 		return nil
 	}
 	state := &OpenAIBPSCredentialState{Status: "unknown", RequiresManualResume: a.Status == StatusActive && !a.Schedulable}
@@ -103,6 +103,9 @@ func (a *Account) OpenAIBPSCredentialState(now time.Time) *OpenAIBPSCredentialSt
 		state.Status = "not_expired"
 	}
 	if saved, ok := a.Extra[OpenAIBPSCredentialStateExtraKey].(map[string]any); ok {
+		if a.OpenAIBPSEnabled() && stringValue(saved["credential_identity"]) != OpenAIBPSCredentialIdentity(OpenAIBPSCredentialSnapshotFromAccount(a)) {
+			return state
+		}
 		if status := stringValue(saved["status"]); status == "revoked" || status == "auth_failed" {
 			state.Status = status
 			state.ErrorCode = stringValue(saved["error_code"])

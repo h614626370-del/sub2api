@@ -39,7 +39,6 @@ export const API_MODE_CHAT_COMPLETIONS: APIMode = 'chat_completions'
 export const API_MODE_RESPONSES: APIMode = 'responses'
 
 export const PROVIDERS: readonly Provider[] = [
-  PROVIDER_OPENAI_BPS,
   PROVIDER_OPENAI,
   PROVIDER_ANTHROPIC,
   PROVIDER_GEMINI,

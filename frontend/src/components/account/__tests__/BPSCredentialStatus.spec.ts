@@ -27,7 +27,7 @@ describe('BPS credential visibility', () => {
     expect(wrapper.text()).toContain('credentialStatus.expired')
     expect(wrapper.text()).toContain('admin.accounts.bps.replaceToken')
     expect(wrapper.find('.badge-danger').exists()).toBe(true)
-    expect(wrapper.find('.badge-success').exists()).toBe(false)
+    expect(wrapper.find('.badge-success').exists()).toBe(true)
   })
   it('updates across the deadline without account reloads', async () => {
     const wrapper = render(account({ credentials: { expires_at: '2026-09-25T08:00:10Z' } }))

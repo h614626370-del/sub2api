@@ -28,13 +28,13 @@ func (r *accountRepository) SetOpenAIBPSCredentialErrorIfMatch(ctx context.Conte
   UPDATE accounts AS a
   SET extra = jsonb_set(COALESCE(a.extra,'{}'::jsonb), ARRAY[$1]::text[],
        $2::jsonb || jsonb_build_object('managed_status_error',
-         a.status = $3 OR (a.status = $4 AND COALESCE(a.extra->$1->>'managed_status_error' = 'true', a.error_message IN ('BPS authentication failed; replace access_token', 'BPS access token expired; replace it manually', 'BPS access token revoked; replace access_token')))), true),
-      status = CASE WHEN a.status = $3 THEN $4 ELSE a.status END,
-      error_message = CASE WHEN a.status = $3 OR
+         a.platform = $7 AND (a.status = $3 OR (a.status = $4 AND COALESCE(a.extra->$1->>'managed_status_error' = 'true', a.error_message IN ('BPS authentication failed; replace access_token', 'BPS access token expired; replace it manually', 'BPS access token revoked; replace access_token'))))), true),
+      status = CASE WHEN a.platform = $7 AND a.status = $3 THEN $4 ELSE a.status END,
+      error_message = CASE WHEN a.platform = $7 AND (a.status = $3 OR
         (a.status = $4 AND COALESCE(a.extra->$1->>'managed_status_error' = 'true', a.error_message IN ('BPS authentication failed; replace access_token', 'BPS access token expired; replace it manually', 'BPS access token revoked; replace access_token')))
-        THEN $5 ELSE a.error_message END,
+        ) THEN $5 ELSE a.error_message END,
       updated_at = NOW()
-  WHERE a.id = $6 AND a.deleted_at IS NULL AND a.platform = $7 AND a.type = $8
+  WHERE a.id = $6 AND a.deleted_at IS NULL AND (a.platform = $7 OR (a.platform = 'openai' AND a.extra->>'openai_bps_enabled' = 'true')) AND a.type = $8
     AND a.credentials->>'access_token' = $9
     AND a.credentials->>'chatgpt_account_id' = $10
   RETURNING a.id

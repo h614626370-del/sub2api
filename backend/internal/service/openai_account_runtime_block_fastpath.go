@@ -570,7 +570,7 @@ func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlockedContext(ctx c
 	if forward, ok := openAIForwardModelFromContext(ctx); ok {
 		outboundModel = s.openAICodexTicketOutboundModel(account, forward.model, forward.useCompactModelMapping)
 	}
-	if s.openAICodexTicketBlocksAccount(account, outboundModel) {
+	if !account.UsesOpenAIBPS(requestedModel) && s.openAICodexTicketBlocksAccount(account, outboundModel) {
 		return true
 	}
 	snapshot := s.peekOpenAIAccountRuntimeBlock(account)

@@ -8,7 +8,7 @@ export function useBPSCredentialState(account: MaybeRefOrGetter<BPSCredentialAcc
   const now = useCredentialClock()
   const state = computed(() => {
     const current = toValue(account)
-    return current?.platform === 'openai_bps' ? bpsCredentialState(current, now.value.getTime()) : null
+    return current ? bpsCredentialState(current, now.value.getTime()) : null
   })
   const failed = computed(() => isBPSCredentialFailure(state.value))
   return { state, failed }

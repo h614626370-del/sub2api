@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // WriteOpenAIBPSError preserves an already-started SSE stream's protocol.
@@ -45,7 +46,7 @@ func WriteOpenAIBPSError(c *gin.Context, err error) {
 }
 
 func buildOpenAIBPSRequest(ctx context.Context, account *Account, body []byte) (*http.Request, error) {
-	if account.Type != AccountTypeOAuth || !account.IsOpenAIBPS() {
+	if account.Type != AccountTypeOAuth || (!account.IsOpenAIBPS() && !account.OpenAIBPSEnabled()) {
 		return nil, bpsInvalid("Invalid BPS account")
 	}
 	token := strings.TrimSpace(account.GetCredential("access_token"))
@@ -105,7 +106,11 @@ func (s *OpenAIGatewayService) bpsHTTPError(ctx context.Context, c *gin.Context,
 		if upstreamCode == "model_not_allowed" || upstreamCode == "basispoints_model_access_changed" {
 			code = "bps_model_not_allowed"
 			if s.accountRepo != nil {
-				_ = s.accountRepo.SetModelRateLimit(ctx, account.ID, model, time.Now().Add(30*time.Minute), "BPS model is not permitted: "+upstreamCode)
+				key := model
+				if account.OpenAIBPSEnabled() {
+					key = "bps:" + model
+				}
+				_ = s.accountRepo.SetModelRateLimit(ctx, account.ID, key, time.Now().Add(30*time.Minute), "BPS model is not permitted: "+upstreamCode)
 			}
 		} else {
 			// A workspace, policy or model entitlement 403 does not prove
@@ -119,8 +124,10 @@ func (s *OpenAIGatewayService) bpsHTTPError(ctx context.Context, c *gin.Context,
 		} else if until, e := http.ParseTime(resp.Header.Get("Retry-After")); e == nil && until.After(time.Now()) {
 			delay = time.Until(until)
 		}
-		if s.accountRepo != nil {
+		if s.accountRepo != nil && account.IsOpenAIBPS() {
 			_ = s.accountRepo.SetRateLimited(ctx, account.ID, time.Now().Add(delay))
+		} else if s.accountRepo != nil && account.OpenAIBPSEnabled() {
+			_ = s.accountRepo.SetModelRateLimit(ctx, account.ID, "bps:"+model, time.Now().Add(delay), "BPS rate limited")
 		}
 	}
 	if value := resp.Header.Get("Retry-After"); value != "" {
@@ -239,6 +246,16 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 			}
 		}
 	}()
+	if account.OpenAIBPSEnabled() {
+		fresh, tokenErr := s.bpsOAuthCredentials(ctx, account, "")
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		account = fresh
+		if !account.UsesOpenAIBPS(gjson.GetBytes(body, "model").String()) {
+			return nil, bpsExpired()
+		}
+	}
 	if _, ok := ctx.Value(bpsRoutingContextKey{}).(bpsRoutingContext); !ok {
 		if err = s.PrepareOpenAIBPSRouting(c, body); err != nil {
 			return nil, err
@@ -273,6 +290,28 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		}
 		return nil, err
 	}
+	if resp.StatusCode == http.StatusUnauthorized && account.OpenAIBPSEnabled() {
+		fresh, refreshErr := s.bpsOAuthCredentials(ctx, account, snapshot.AccessToken)
+		if refreshErr != nil && account.GetOpenAIRefreshToken() == "" {
+			_ = s.bpsHTTPError(ctx, c, account, resp, r.Model)
+			_ = resp.Body.Close()
+			return nil, &bpsError{401, "bps_reauthorization_required", "BPS authentication failed; reauthorize the OpenAI OAuth account"}
+		}
+		if refreshErr == nil && fresh.GetCredential("access_token") != snapshot.AccessToken {
+			_ = resp.Body.Close()
+			account = fresh
+			req, err = buildOpenAIBPSRequest(ctx, account, r.Body)
+			if err != nil {
+				return nil, err
+			}
+			snapshot = OpenAIBPSCredentialSnapshotFromAccount(account)
+			ctx = context.WithValue(ctx, bpsCredentialSnapshotContextKey{}, snapshot)
+			resp, err = s.httpUpstream.Do(req.WithContext(ctx), proxyURL, account.ID, account.Concurrency)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	c.Set("bps_upstream_status", resp.StatusCode)
 	requestID := strings.ReplaceAll(resp.Header.Get("x-request-id"), snapshot.AccessToken, "[REDACTED]")
 	c.Set("bps_upstream_request_id", requestID)
@@ -291,6 +330,9 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 	defer timer.Stop()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, s.bpsHTTPError(ctx, c, account, resp, r.Model)
+	}
+	if account.OpenAIBPSEnabled() {
+		s.recordOpenAIBPSCredentialSuccess(ctx, account)
 	}
 	if err = s.bpsBind(ctx, r.Scope, account); err != nil {
 		return nil, err

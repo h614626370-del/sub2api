@@ -19,7 +19,15 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-	if account.IsOpenAIBPS() {
+	if bpsHasBinding(ctx) && !account.UsesOpenAIBPS(gjson.GetBytes(body, "model").String()) {
+		err := bpsExpired()
+		WriteOpenAIBPSError(c, err)
+		return nil, err
+	}
+	if err := rejectBPSUnsupportedEndpoint(c, account, body); err != nil {
+		return nil, err
+	}
+	if account.UsesOpenAIBPS(gjson.GetBytes(body, "model").String()) {
 		return s.forwardOpenAIBPS(ctx, c, account, body)
 	}
 	beginUpstreamResponseModelObservation(c)

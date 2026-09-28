@@ -29,13 +29,15 @@ export default {
       },
 
       bps: {
+        modeEnabled: '启用 BPS',
+        modeModels: 'BPS 模型（每行一个）',
         testInterrupted: 'BPS 测试流已中断，未收到完成结果。',
         riskTitle: "封号风险提示",
         riskDescription: "使用 OpenAI BPS 可能存在账号被限制或封禁的风险，请谨慎使用。",
         riskConfirmTitle: "确认添加 OpenAI BPS 账号？",
         riskConfirmMessage: "使用 OpenAI BPS 可能导致账号被限制或封禁。请确认你已了解风险，再继续添加账号。",
         riskConfirmButton: "我已了解风险，继续添加",
-        replaceToken: "请更换 Access Token 后重新测试。",
+        replaceToken: "请检查账号授权状态，必要时重新授权后测试。",
         errorCode: "错误码",
         manualResume: "调度开关仍为暂停；如需使用，请手动开启。",
         newTokenPending: "当前显示的是已保存凭证的状态，新 Token 保存后更新。",

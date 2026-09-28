@@ -29,13 +29,15 @@ export default {
       },
 
       bps: {
+        modeEnabled: 'Enable BPS',
+        modeModels: 'BPS models (one per line)',
         testInterrupted: 'The BPS test stream ended without a completion result.',
         riskTitle: "Account suspension risk",
         riskDescription: "Using OpenAI BPS may result in account restrictions or suspension. Proceed with caution.",
         riskConfirmTitle: "Add this OpenAI BPS account?",
         riskConfirmMessage: "Using OpenAI BPS may result in account restrictions or suspension. Confirm that you understand this risk before adding the account.",
         riskConfirmButton: "I understand the risk. Add account",
-        replaceToken: "Replace the access token and test the connection again.",
+        replaceToken: "Check account authorization and reauthorize if needed before testing again.",
         errorCode: "Error code",
         manualResume: "Scheduling remains paused. Enable it manually if you want to use this account.",
         newTokenPending: "This is the saved credential status. It will update after the new token is saved.",

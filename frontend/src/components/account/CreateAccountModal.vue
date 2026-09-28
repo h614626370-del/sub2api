@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show" :close-on-escape="!pendingBPSCreate"
+    :show="show"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -228,18 +228,11 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
-          <button type="button" @click="form.platform = 'openai_bps'"
-            :class="['flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium', form.platform === 'openai_bps' ? 'bg-white text-green-700 shadow-sm dark:bg-dark-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400']">
-            <PlatformIcon platform="openai_bps" size="sm" />OpenAI BPS
-          </button>
         </div>
       </div>
 
-      <div v-if="form.platform === 'openai_bps'" role="alert" data-testid="bps-risk-warning" class="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 p-4 text-amber-950 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100">
-        <div class="mb-1 flex items-center gap-2 font-bold"><Icon name="exclamationTriangle" size="md" />{{ t('admin.accounts.bps.riskTitle') }}</div>
-        <p class="text-sm font-medium">{{ t('admin.accounts.bps.riskDescription') }}</p>
-      </div>
-      <OpenAIBPSAccountFields v-if="form.platform === 'openai_bps'" v-model="bpsDraft" />
+      <OpenAIBPSModeFields v-if="form.platform === 'openai' && form.type === 'oauth' && accountCategory === 'oauth-based'"
+        v-model:enabled="bpsModeEnabled" v-model:models="bpsModeModels" />
 
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
@@ -3605,7 +3598,7 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
-        <button v-if="form.platform === 'openai_bps'" type="submit" form="create-account-form" :disabled="submitting"
+        <button v-if="form.platform === 'openai' && form.type === 'oauth' && accountCategory === 'oauth-based' && bpsModeEnabled" type="submit" form="create-account-form" :disabled="submitting"
           class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
           {{ t('admin.accounts.bps.saveAndTest') }}
         </button>
@@ -3904,17 +3897,6 @@
     </template>
   </BaseDialog>
 
-  <ConfirmDialog
-    :show="pendingBPSCreate !== null"
-    :title="t('admin.accounts.bps.riskConfirmTitle')"
-    :message="t('admin.accounts.bps.riskConfirmMessage')"
-    :confirm-text="t('admin.accounts.bps.riskConfirmButton')"
-    :cancel-text="t('common.cancel')"
-    :danger="true"
-    data-testid="bps-risk-confirmation"
-    @confirm="confirmBPSRisk"
-    @cancel="cancelBPSRisk"
-  />
   <!-- Mixed Channel Warning Dialog -->
   <ConfirmDialog
     :show="showMixedChannelWarning"
@@ -3929,8 +3911,7 @@
 </template>
 
 <script setup lang="ts">
-import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
-import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
+import OpenAIBPSModeFields from './OpenAIBPSModeFields.vue'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -4766,9 +4747,9 @@ const tempUnschedPresets = computed(() => [
   }
 ])
 
-const bpsDraft = ref(newBPSAccountDraft())
+const bpsModeEnabled = ref(false)
+const bpsModeModels = ref('gpt-6-astra\ngpt-5.6-sol')
 const bpsTestAfterSave = ref(false)
-const pendingBPSCreate = ref<{ payload: CreateAccountRequest; testAfterSave: boolean } | null>(null)
 
 const form = reactive({
   name: '',
@@ -5328,7 +5309,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     appStore.showSuccess(t('admin.accounts.accountCreated'))
-    const openBPSTest = payload.platform === 'openai_bps' && bpsTestAfterSave.value
+    const openBPSTest = payload.platform === 'openai' && payload.extra?.openai_bps_enabled === true && bpsTestAfterSave.value
     emit('created')
     handleClose()
     if (openBPSTest) emit('test', account)
@@ -5351,8 +5332,8 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
-  pendingBPSCreate.value = null
-  bpsDraft.value = newBPSAccountDraft()
+  bpsModeEnabled.value = false
+  bpsModeModels.value = 'gpt-6-astra\ngpt-5.6-sol'
   bpsTestAfterSave.value = false
   step.value = 1
   form.name = ''
@@ -5473,7 +5454,6 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
-  pendingBPSCreate.value = null
   bpsTestAfterSave.value = false
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
@@ -5486,6 +5466,10 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  if (accountCategory.value === 'oauth-based' && form.type === 'oauth') {
+    extra.openai_bps_enabled = bpsModeEnabled.value
+    extra.openai_bps_models = [...new Set(bpsModeModels.value.split('\n').map(s => s.trim()).filter(Boolean))]
+  }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5596,27 +5580,9 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 }
 
 // Helper function to create account with mixed channel warning handling
-const cancelBPSRisk = () => {
-  pendingBPSCreate.value = null
-  bpsTestAfterSave.value = false
-}
-watch(() => [props.show, form.platform] as const, ([shown, platform]) => {
-  if (!shown || platform !== 'openai_bps') cancelBPSRisk()
-})
-const confirmBPSRisk = async () => {
-  const pending = pendingBPSCreate.value
-  if (!pending || submitting.value || !props.show) return
-  pendingBPSCreate.value = null
-  bpsTestAfterSave.value = pending.testAfterSave
-  await doCreateAccount(pending.payload, true)
-}
-const doCreateAccount = async (payload: CreateAccountRequest, bpsRiskConfirmed = false) => {
+const doCreateAccount = async (payload: CreateAccountRequest) => {
   if (payload.platform === 'openai_bps') {
-    if (submitting.value || pendingBPSCreate.value) return
-    if (!bpsRiskConfirmed) {
-      pendingBPSCreate.value = { payload: JSON.parse(JSON.stringify(payload)), testAfterSave: bpsTestAfterSave.value }
-      return
-    }
+    throw new Error('Standalone BPS accounts are no longer supported')
   }
   const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
     await submitCreateAccount(payload)
@@ -5708,11 +5674,6 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
-  if (form.platform === 'openai_bps') {
-    if (!bpsDraft.value.token.trim()) { appStore.showError(t('admin.accounts.bps.tokenRequired')); return }
-    await createAccountAndFinish('openai_bps', 'oauth', bpsCredentials(bpsDraft.value))
-    return
-  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {

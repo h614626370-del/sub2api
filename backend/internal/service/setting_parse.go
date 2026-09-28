@@ -250,7 +250,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAISolGroupID:                                   "0",
 		SettingKeyOpenAIAstraSourceGroupIDs:                          "[]",
 		SettingKeyOpenAISolSourceGroupIDs:                            "[]",
-		SettingKeyOpenAIOAuthDefaultTimezone:                         "",
+		SettingKeyOpenAIOAuthDefaultTimezone:                         "America/Los_Angeles",
 		SettingKeyClaudeCodeClientVersion:                            "",
 		SettingKeyClaudeCodeClientVersionSynced:                      "",
 		SettingKeyClaudeCodeVersionAutoSyncEnabled:                   "true",

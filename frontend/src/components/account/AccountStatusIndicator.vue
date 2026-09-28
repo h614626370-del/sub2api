@@ -1,12 +1,11 @@
 <template>
   <div class="flex items-center gap-2">
+    <span v-if="account.platform === 'openai' && account.extra?.openai_bps_enabled === true && !account.parent_account_id" class="badge badge-green text-xs">BPS</span>
     <div v-if="bpsCredentialFailed" class="flex flex-col gap-1">
       <BPSCredentialStatus :state="bpsCredentialState" :show-expiry="false" />
-      <span v-if="account.status !== 'active' && account.status !== 'error'" class="badge badge-gray text-xs">{{ t(`admin.accounts.status.${account.status}`) }}</span>
-      <span v-if="account.schedulable === false" class="text-[11px] text-gray-500">{{ t('admin.accounts.status.paused') }}</span>
     </div>
     <!-- Rate Limit Display (429) - Two-line layout -->
-    <div v-else-if="isRateLimited" class="flex flex-col items-center gap-1">
+    <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
       <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
     </div>

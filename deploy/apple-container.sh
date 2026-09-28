@@ -423,7 +423,7 @@ prepare_environment() {
     POSTGRES_PASSWORD="$(read_env_value POSTGRES_PASSWORD)"
     POSTGRES_DB="$(read_env_value POSTGRES_DB sub2api)"
     REDIS_PASSWORD="$(read_env_value REDIS_PASSWORD)"
-    TZ_VALUE="$(read_env_value TZ Asia/Shanghai)"
+    TZ_VALUE="$(read_env_value TZ America/Los_Angeles)"
     NETWORK_SUBNET="$(read_env_value APPLE_CONTAINER_NETWORK_SUBNET)"
 
     [[ -n "${BIND_HOST}" ]] || die "BIND_HOST must not be empty."

@@ -428,6 +428,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	setOpsRequestContext(c, "", false)
 	sessionHashBody := body
+	c.Request = c.Request.WithContext(service.WithOpenAIChannelSelection(c.Request.Context()))
+	if err := h.gatewayService.RestoreOpenAIBPSRouting(c, sessionHashBody); err != nil {
+		service.WriteOpenAIBPSError(c, err)
+		return
+	}
 	if openAICompatibleRequestPlatform(c.Request.Context(), apiKey) != service.PlatformOpenAIBPS {
 		body, ok = h.normalizeOpenAIResponsesCompactRequest(c, reqLog, body)
 		if !ok {
@@ -578,7 +583,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	))
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
-	if openAICompatibleRequestPlatform(c.Request.Context(), apiKey) != service.PlatformOpenAIBPS && !h.validateFunctionCallOutputRequest(c, body, reqLog) {
+	// Tool-history validation depends on the selected account's upstream channel.
+	if service.ValidateFunctionCallOutputContextBytes(body).HasFunctionCallOutputMissingCallID &&
+		!h.validateFunctionCallOutputRequest(c, body, reqLog) {
 		return
 	}
 
@@ -688,7 +695,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
-			if requestPlatform == service.PlatformOpenAIBPS && service.OpenAIBPSHasBinding(c.Request.Context()) {
+			if service.OpenAIBPSHasBinding(c.Request.Context()) {
 				service.WriteOpenAIBPSAccountUnavailable(c)
 				return
 			}
@@ -734,6 +741,19 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
+		if err := service.SelectOpenAIChannel(c, account, forwardModel); err != nil {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			service.WriteOpenAIBPSError(c, err)
+			return
+		}
+		if !account.UsesOpenAIBPS(forwardModel) && !h.validateFunctionCallOutputRequest(c, body, reqLog) {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return
+		}
 		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !account.IsOpenAIApiKey() {
 			// The public Responses HTTP API supports previous_response_id on API-key
 			// accounts. OAuth/SetupToken upstreams do not, so keep searching instead
@@ -785,6 +805,19 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
+		if account.UsesOpenAIBPS(forwardModel) {
+			// Preserve BPS tool/compaction fields stripped by Codex normalization.
+			attemptBody = openAIModelMappedBody(sessionHashBody, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
+			if capped, _, policyErr := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, attemptBody); policyErr == nil {
+				attemptBody = capped
+			} else {
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				respondOpenAIReasoningEffortPolicyError(c, policyErr, h.errorResponse)
+				return
+			}
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {

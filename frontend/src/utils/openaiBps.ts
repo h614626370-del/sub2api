@@ -1,26 +1,16 @@
 export const BPS_DEFAULT_MODELS = ['gpt-6-astra', 'gpt-5.6-sol'] as const
-export interface BPSAccountDraft {
-  token: string
-  accountId: string
-  models: { from: string; to: string }[]
-}
-export function newBPSAccountDraft(credentials?: Record<string, unknown>): BPSAccountDraft {
-  const mapping = credentials?.model_mapping
-  return {
-    token: '',
-    accountId: typeof credentials?.chatgpt_account_id === 'string' ? credentials.chatgpt_account_id : '',
-    models: mapping && typeof mapping === 'object' && !Array.isArray(mapping)
-      ? Object.entries(mapping).map(([from, to]) => ({ from, to: String(to) }))
-      : BPS_DEFAULT_MODELS.map(model => ({ from: model, to: model }))
+
+export function resolveBPSMappedModel(model: string, mapping?: Record<string, string>): string {
+  if (!mapping) return model
+  const resolve = (name: string): string | undefined => {
+    if (!name) return undefined
+    if (Object.prototype.hasOwnProperty.call(mapping, name)) return mapping[name]
+    const pattern = Object.keys(mapping)
+      .filter(key => key.endsWith('*') && name.startsWith(key.slice(0, -1)))
+      .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))[0]
+    return pattern === undefined ? undefined : mapping[pattern]
   }
-}
-export function bpsCredentials(draft: BPSAccountDraft): Record<string, unknown> {
-  const credentials: Record<string, unknown> = {
-    chatgpt_account_id: draft.accountId.trim(),
-    model_mapping: Object.fromEntries(draft.models.filter(row => row.from.trim()).map(row => [row.from.trim(), row.to.trim() || row.from.trim()]))
-  }
-  if (draft.token.trim()) credentials.access_token = draft.token.trim()
-  return credentials
+  return resolve(model) ?? resolve(model.trim()) ?? model
 }
 
 export interface BPSCredentialState {
@@ -33,6 +23,7 @@ export interface BPSCredentialState {
 
 export interface BPSCredentialAccount {
   platform: string
+  extra?: Record<string, unknown> | null
   status?: string
   schedulable?: boolean
   error_message?: string | null
@@ -51,7 +42,7 @@ export function bpsExpiryMilliseconds(value: unknown): number | null {
 }
 
 export function bpsCredentialState(account: BPSCredentialAccount, now: number): BPSCredentialState | null {
-  if (account.platform !== 'openai_bps') return null
+  if (account.platform !== 'openai_bps' && !(account.platform === 'openai' && account.extra?.openai_bps_enabled === true)) return null
   const supplied = account.bps_credential_state
   const expires = bpsExpiryMilliseconds(supplied?.expires_at ?? account.credentials?.expires_at)
   const state: BPSCredentialState = {

@@ -14,7 +14,6 @@ import (
 //
 //nolint:gochecknoglobals // 静态查表，初始化后不变。
 var monitorProviders = map[string]struct{}{
-	MonitorProviderOpenAIBPS:   {},
 	MonitorProviderOpenAI:      {},
 	MonitorProviderAnthropic:   {},
 	MonitorProviderGemini:      {},
@@ -31,7 +30,6 @@ var monitorProviders = map[string]struct{}{
 //
 //nolint:gochecknoglobals // 静态查表，初始化后不变。
 var probeCapableProviders = map[string]struct{}{
-	MonitorProviderOpenAIBPS: {},
 	MonitorProviderOpenAI:    {},
 	MonitorProviderAnthropic: {},
 	MonitorProviderGemini:    {},

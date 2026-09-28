@@ -350,8 +350,8 @@ func TestOpenAIBPSCatalogAndPlatform(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, PlatformOpenAI, platform)
 	require.Equal(t, PlatformOpenAIBPS, NormalizeOpenAICompatiblePlatform(PlatformOpenAIBPS))
-	require.True(t, isConcreteRequestPlatform(PlatformOpenAIBPS))
-	require.NoError(t, validateProvider(MonitorProviderOpenAIBPS))
+	require.False(t, isConcreteRequestPlatform(PlatformOpenAIBPS))
+	require.Error(t, validateProvider(MonitorProviderOpenAIBPS))
 	require.NoError(t, validateAPIMode(MonitorProviderOpenAIBPS, MonitorAPIModeResponses))
 	require.Error(t, validateCheckMode(MonitorProviderOpenAIBPS, MonitorCheckModeQuota))
 }
@@ -408,9 +408,8 @@ func TestOpenAIBPSCompositeRequiresExplicitRule(t *testing.T) {
 func TestOpenAIBPSCreateValidatesCredentials(t *testing.T) {
 	_, err := buildAccountForCreate(&CreateAccountInput{Platform: PlatformOpenAIBPS, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "opaque"}}, nil)
 	require.Error(t, err)
-	account, err := buildAccountForCreate(&CreateAccountInput{Platform: PlatformOpenAIBPS, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "opaque", "chatgpt_account_id": "workspace"}}, nil)
-	require.NoError(t, err)
-	require.Len(t, account.GetModelMapping(), 2)
+	_, err = buildAccountForCreate(&CreateAccountInput{Platform: PlatformOpenAIBPS, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "opaque", "chatgpt_account_id": "workspace"}}, nil)
+	require.Error(t, err)
 	_, err = buildAccountForCreate(&CreateAccountInput{Platform: PlatformOpenAIBPS, Type: AccountTypeAPIKey, Credentials: map[string]any{"access_token": "opaque", "chatgpt_account_id": "workspace"}}, nil)
 	require.Error(t, err)
 }

@@ -25,7 +25,7 @@ func TestAccountRepositoryBPSCredentialConditionalState(t *testing.T) {
 	require.Contains(t, query, "a.credentials->>'chatgpt_account_id' = $10")
 	require.Contains(t, query, "INSERT INTO scheduler_outbox")
 	require.NotContains(t, query, "schedulable =")
-	require.Contains(t, query, "CASE WHEN a.status = $3 THEN $4 ELSE a.status END")
+	require.Contains(t, query, "CASE WHEN a.platform = $7 AND a.status = $3 THEN $4 ELSE a.status END")
 	require.Equal(t, "old-token", exec.execArgs[0][8])
 	require.Equal(t, "workspace", exec.execArgs[0][9])
 	var payload map[string]any

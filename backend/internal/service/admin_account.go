@@ -412,11 +412,7 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
 	if input.Platform == PlatformOpenAIBPS {
-		creds, err := NormalizeOpenAIBPSCredentials(input.Type, input.Credentials, nil)
-		if err != nil {
-			return nil, err
-		}
-		input.Credentials = creds
+		return nil, infraerrors.BadRequest("BPS_PLATFORM_RETIRED", "Use BPS mode on an OpenAI OAuth account")
 	}
 
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
@@ -444,6 +440,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Priority:    input.Priority,
 		Status:      StatusActive,
 		Schedulable: true,
+	}
+	if err := NormalizeOpenAIBPSMode(account, nil); err != nil {
+		return nil, infraerrors.BadRequest("BPS_INVALID_MODE", err.Error())
 	}
 	if err := normalizeOpenAIOAuthBaseURL(account); err != nil {
 		return nil, err
@@ -658,6 +657,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.Type != "" {
 		account.Type = input.Type
+		if input.Extra == nil {
+			if err := NormalizeOpenAIBPSMode(account, nil); err != nil {
+				return nil, infraerrors.BadRequest("BPS_INVALID_MODE", err.Error())
+			}
+		}
 	}
 	if input.Notes != nil {
 		account.Notes = normalizeAccountNotes(input.Notes)
@@ -749,6 +753,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		normalizedExtra = MergeOpenAICodexTicketExtra(normalizedExtra, account.Extra)
 		normalizedExtra = MergeAccountTimezoneExtra(normalizedExtra, account.Extra)
+		bpsAccount := *account
+		bpsAccount.Extra = normalizedExtra
+		if err := NormalizeOpenAIBPSMode(&bpsAccount, account.Extra); err != nil {
+			return nil, infraerrors.BadRequest("BPS_INVALID_MODE", err.Error())
+		}
+		normalizedExtra = bpsAccount.Extra
 		normalizedExtra = prepareCodexFingerprintExtraForUpdate(account, normalizedExtra)
 		account.Extra = normalizedExtra
 		if account.Platform == PlatformAntigravity && wasOveragesEnabled && !account.IsOveragesEnabled() {
@@ -906,7 +916,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	if account.IsOpenAIBPS() {
+	if account.IsOpenAIBPS() || account.OpenAIBPSEnabled() {
 		// This extra key is server-managed, including updates sent from stale forms.
 		delete(account.Extra, OpenAIBPSCredentialStateExtraKey)
 		if OpenAIBPSCredentialSnapshotFromAccount(account) == previousBPSIdentity && previousBPSDiagnostic != nil {
@@ -981,6 +991,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	_, enabled := updates[OpenAIBPSEnabledKey]
+	_, models := updates[OpenAIBPSModelsKey]
+	if enabled || models {
+		return infraerrors.BadRequest("BPS_MODE_UPDATE_REQUIRED", "Update BPS mode through the account edit endpoint")
+	}
 	updates = MergeOpenAICodexTicketExtra(updates, nil)
 	updates = MergeAccountTimezoneExtra(updates, nil)
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
@@ -1012,6 +1027,11 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	_, enabled := input.Extra[OpenAIBPSEnabledKey]
+	_, models := input.Extra[OpenAIBPSModelsKey]
+	if enabled || models {
+		return nil, infraerrors.BadRequest("BPS_MODE_UPDATE_REQUIRED", "Update BPS mode individually through the account edit endpoint")
+	}
 	delete(input.Extra, OpenAIBPSCredentialStateExtraKey)
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = MergeOpenAICodexTicketExtra(input.Extra, nil)

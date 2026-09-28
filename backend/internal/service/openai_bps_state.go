@@ -96,7 +96,7 @@ func (s *OpenAIGatewayService) bpsScope(c *gin.Context, body []byte) string {
 			}
 		}
 	}
-	return "openai_bps:" + bpsDigest(fmt.Sprintf("%d:%s", getAPIKeyIDFromContext(c), session))
+	return "openai_bps:mode-v1:" + bpsDigest(fmt.Sprintf("%d:%s", getAPIKeyIDFromContext(c), session))
 }
 
 type bpsCompactReference struct {
@@ -104,7 +104,7 @@ type bpsCompactReference struct {
 }
 
 func bpsCompactReferenceKey(apiKeyID int64, ref string) string {
-	return "openai_bps:ref:" + bpsDigest(fmt.Sprintf("%d:%s", apiKeyID, ref))
+	return "openai_bps:mode-v1:ref:" + bpsDigest(fmt.Sprintf("%d:%s", apiKeyID, ref))
 }
 
 // PrepareOpenAIBPSRouting runs before account selection. An established binding
@@ -166,9 +166,47 @@ func (s *OpenAIGatewayService) PrepareOpenAIBPSRouting(c *gin.Context, body []by
 	return nil
 }
 
+// Look up an existing BPS binding without interpreting an ordinary OpenAI
+// conversation as BPS. New BPS conversations are initialized after selection.
+func (s *OpenAIGatewayService) RestoreOpenAIBPSRouting(c *gin.Context, body []byte) error {
+	store, err := s.bpsStateStore()
+	if err != nil {
+		return nil
+	}
+	scope := s.bpsScope(c, body)
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if strings.HasPrefix(item.Get("encrypted_content").String(), bpsCompactPrefix) {
+			if err := s.PrepareOpenAIBPSRouting(c, body); err != nil {
+				return err
+			}
+			ctx := WithOpenAIChannelSelection(c.Request.Context())
+			selection, _ := ctx.Value(openAIChannelContextKey{}).(*openAIChannelSelection)
+			selection.selected, selection.bps = true, true
+			c.Request = c.Request.WithContext(ctx)
+			return nil
+		}
+	}
+	data, err := store.BPSGet(c.Request.Context(), scope+":session")
+	if err != nil {
+		return bpsUnavailable()
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	var binding bpsSessionBinding
+	if json.Unmarshal(data, &binding) != nil {
+		return bpsExpired()
+	}
+	ctx := WithOpenAIChannelSelection(c.Request.Context())
+	selection, _ := ctx.Value(openAIChannelContextKey{}).(*openAIChannelSelection)
+	selection.selected, selection.bps = true, true
+	c.Request = c.Request.WithContext(context.WithValue(ctx, bpsRoutingContextKey{}, bpsRoutingContext{Scope: scope, Binding: &binding}))
+	return nil
+}
+
 func bpsBoundAccountAllowed(ctx context.Context, account *Account) bool {
 	routing, ok := ctx.Value(bpsRoutingContextKey{}).(bpsRoutingContext)
-	return !ok || routing.Binding == nil || (account.ID == routing.Binding.AccountID && account.GetCredential("chatgpt_account_id") == routing.Binding.Identity)
+	return !ok || routing.Binding == nil || (account != nil && account.ID == routing.Binding.AccountID && account.GetCredential("chatgpt_account_id") == routing.Binding.Identity)
 }
 func bpsHasBinding(ctx context.Context) bool {
 	r, ok := ctx.Value(bpsRoutingContextKey{}).(bpsRoutingContext)

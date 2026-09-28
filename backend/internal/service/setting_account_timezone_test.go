@@ -5,11 +5,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
 type timezoneSettingsRepo struct {
 	*codexPolicyMigrationRepoStub
+}
+
+func TestOAuthTimezoneFreshInstallDefaultPreservesExistingSettings(t *testing.T) {
+	ctx := context.Background()
+	repo := &forwardedIPMigrationRepoStub{values: map[string]string{}}
+	s := NewSettingService(repo, &config.Config{})
+	require.NoError(t, s.InitializeDefaultSettings(ctx))
+	require.Equal(t, "America/Los_Angeles", repo.values[SettingKeyOpenAIOAuthDefaultTimezone])
+	for _, zone := range []string{"Asia/Tokyo", ""} {
+		repo.values[SettingKeyOpenAIOAuthDefaultTimezone] = zone
+		require.NoError(t, s.InitializeDefaultSettings(ctx))
+		s.invalidateOpenAIOAuthTimezoneCache()
+		require.Equal(t, zone, s.GetOpenAIOAuthDefaultTimezone(ctx))
+	}
 }
 
 func (r *timezoneSettingsRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
