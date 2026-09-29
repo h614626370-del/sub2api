@@ -146,7 +146,7 @@ func TestOpenAIBPSProtocolAndHeaders(t *testing.T) {
 	require.Equal(t, "workspace-1", req.Header.Get("chatgpt-account-id"))
 	require.Equal(t, "workspace-1", req.Header.Get("x-openai-account-id"))
 	require.Equal(t, "chatgpt", req.Header.Get("x-basispoints-auth-mode"))
-	for _, bad := range []string{`{"model":"gpt-6-astra","input":"hi","reasoning":{"effort":"max"}}`, `{"model":"gpt-6-astra","input":"hi","previous_response_id":"resp_1"}`, `{"model":"missing","input":"hi"}`, `{"model":"gpt-6-astra","input":[],"tools":[{"type":"web_search"}]}`} {
+	for _, bad := range []string{`{"model":"gpt-6-astra","input":"hi","reasoning":{"effort":"max"}}`, `{"model":"gpt-6-astra","input":"hi","previous_response_id":"resp_1"}`, `{"model":"missing","input":"hi"}`, `{"model":"gpt-6-astra","input":[],"tools":[{"type":"function"}]}`} {
 		_, err = s.prepareOpenAIBPS(c.Request.Context(), c, a, []byte(bad))
 		require.Error(t, err, bad)
 	}
@@ -531,22 +531,37 @@ func TestOpenAIBPSCompactionWithoutSessionHeader(t *testing.T) {
 	require.ErrorContains(t, fresh.PrepareOpenAIBPSRouting(stranger, nextBody), "expired")
 }
 
-func TestOpenAIBPSRefusesUnknownNativeItemsAndEvents(t *testing.T) {
+func TestOpenAIBPSPassesUnknownNativeItemsAndEvents(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		s, a := bpsFixture()
-		s.httpUpstream = &bpsHTTPStub{contentType: "application/json", body: bpsJSON(bpsResponse(map[string]any{"type": "web_search_call", "id": "ws1", "status": "completed"}))}
+		response := bpsResponse(map[string]any{"type": "web_search_call", "id": "ws1", "status": "completed"})
+		if stream {
+			s.httpUpstream = &bpsHTTPStub{
+				contentType: "text/event-stream",
+				body:        bpsEvent("response.completed", map[string]any{"response": response}),
+			}
+		} else {
+			s.httpUpstream = &bpsHTTPStub{contentType: "application/json", body: bpsJSON(response)}
+		}
 		c, rec := bpsContext(1, "/responses")
 		_, err := s.Forward(c.Request.Context(), c, a, bpsRequestBody("task", stream))
-		require.Error(t, err)
-		require.NotContains(t, rec.Body.String(), "web_search_call")
-		require.NotContains(t, rec.Body.String(), "event: response.completed")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), "web_search_call")
+		if stream {
+			require.Contains(t, rec.Body.String(), "response.completed")
+		}
 	}
 	s, a := bpsFixture()
-	s.httpUpstream = &bpsHTTPStub{contentType: "text/event-stream", body: bpsEvent("response.web_search_call.in_progress", map[string]any{"item_id": "ws1"})}
+	response := bpsResponse(bpsText("done"))
+	s.httpUpstream = &bpsHTTPStub{contentType: "text/event-stream", body: bpsEvent("response.web_search_call.in_progress", map[string]any{"item_id": "ws1"}) +
+		bpsEvent("response.completed", map[string]any{"response": response})}
 	c, rec := bpsContext(1, "/responses")
 	_, err := s.Forward(c.Request.Context(), c, a, bpsRequestBody("task", true))
-	require.Error(t, err)
-	require.Contains(t, rec.Body.String(), "bps_unsupported_event")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "event: response.web_search_call.in_progress")
+	require.Contains(t, rec.Body.String(), "event: response.completed")
 }
 
 func TestOpenAIBPSFailedJSONPreservesUsage(t *testing.T) {

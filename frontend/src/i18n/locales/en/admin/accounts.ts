@@ -7,6 +7,11 @@ export default {
       },
       accountTimezone: {
         title: 'Account request timezone',
+        helpTitle: 'Timezone rules',
+        helpAutomatic: 'Applies only to OpenAI OAuth accounts; no per-account switch is needed. When a proxy is assigned but has no valid detection result, detection is attempted on a relevant request or when selecting the account below.',
+        helpFallback: 'Priority: valid proxy timezone → default timezone → client value. Accounts without a proxy or a valid detection use the default timezone. Saving “Keep client timezone” only clears the default; a valid proxy timezone still takes priority.',
+        helpDefault: 'Fresh installations default to Los Angeles (America/Los_Angeles). Upgrades preserve existing settings, including an empty value, rather than forcing Los Angeles. Account details show the effective source.',
+        helpDetails: 'Account details let you view detection results or detect again; per-account manual timezone overrides are not supported. Only request environment dates, timezones and Web Search timezones are adjusted, not ordinary messages, reports or billing timezones.',
         defaultTimezone: 'Default timezone',
         searchTimezone: 'Search cities or timezones',
         saveDefault: 'Save timezone settings',

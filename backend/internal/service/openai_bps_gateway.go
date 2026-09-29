@@ -8,10 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +24,10 @@ func WriteOpenAIBPSError(c *gin.Context, err error) {
 		return
 	}
 	defer MarkResponseCommitted(c)
+	if errors.Is(err, context.Canceled) || (c.Request != nil && errors.Is(c.Request.Context().Err(), context.Canceled)) {
+		slog.InfoContext(c.Request.Context(), "bps_client_disconnected")
+		return
+	}
 	failure := &bpsError{502, "bps_upstream_error", "BPS upstream request failed"}
 	var typed *bpsError
 	if errors.As(err, &typed) {
@@ -244,6 +248,15 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 	started := time.Now()
 	defer func() {
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || (result != nil && result.ClientDisconnect) {
+				if result != nil {
+					result.ClientDisconnect = true
+					result.UpstreamTerminalEvent = ""
+				}
+				MarkResponseCommitted(c)
+				slog.InfoContext(ctx, "bps_client_disconnected")
+				return
+			}
 			var failover *UpstreamFailoverError
 			if !errors.As(err, &failover) {
 				WriteOpenAIBPSError(c, err)
@@ -323,15 +336,13 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		notify(resp.StatusCode, r.Model, requestID)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	// Bound silent upstream stalls. The timer only closes the reader; all
-	// downstream writes and stream state remain on this goroutine.
-	var timedOut atomic.Bool
 	idle := 5 * time.Minute
-	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+	if s.cfg != nil {
 		idle = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
 	}
-	timer := time.AfterFunc(idle, func() { timedOut.Store(true); _ = resp.Body.Close() })
-	defer timer.Stop()
+	watched := bpsWatchUpstream(resp.Body, idle)
+	resp.Body = watched
+	defer watched.stop()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, s.bpsHTTPError(ctx, c, account, resp, r.Model)
 	}
@@ -347,6 +358,17 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 	completed := false
 	seenItems := map[string]bool{}
 	pendingTools := map[string]bool{}
+	lastDownstreamWrite := time.Now()
+	keepaliveCount := 0
+	defer func() {
+		if keepaliveCount > 0 {
+			slog.InfoContext(ctx, "bps_stream_keepalive_summary",
+				"response_id", c.GetString("bps_response_id"),
+				"keepalive_count", keepaliveCount,
+				"completed", completed,
+				"duration_ms", time.Since(started).Milliseconds())
+		}
+	}()
 	emit := func(event string, payload map[string]any) error {
 		if !r.Stream {
 			return nil
@@ -365,9 +387,11 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		}
 		data, _ := json.Marshal(payload)
 		if _, e := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data); e != nil {
+			result.ClientDisconnect = true
 			return e
 		}
 		c.Writer.Flush()
+		lastDownstreamWrite = time.Now()
 		if result.FirstTokenMs == nil && (event == "response.output_text.delta" || event == "response.output_item.done") {
 			ms := int(time.Since(started).Milliseconds())
 			result.FirstTokenMs = &ms
@@ -378,8 +402,14 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxSize = s.cfg.Gateway.MaxLineSize
 	}
-	err = readBPSEvents(resp, maxSize, func(typ string, payload map[string]any) error {
-		timer.Reset(idle)
+	keepaliveInterval := time.Duration(0)
+	if r.Stream {
+		keepaliveInterval = 15 * time.Second
+		if s.cfg != nil {
+			keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+		}
+	}
+	err = readBPSEventsWithKeepalive(ctx, resp, maxSize, keepaliveInterval, func(typ string, payload map[string]any) error {
 		if completed {
 			return nil
 		}
@@ -498,15 +528,15 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		if r.Structured != nil && bpsStructuredMessageEvent(typ, item) {
 			return nil
 		}
-		if strings.HasPrefix(typ, "response.function_call_arguments.") || strings.HasPrefix(typ, "response.custom_tool_call_input.") {
+		if strings.Contains(typ, "function_call") || strings.Contains(typ, "custom_tool_call") {
 			return nil
 		}
 		if item, ok := payload["item"].(map[string]any); ok {
 			if item["type"] == "function_call" || item["type"] == "custom_tool_call" {
 				return nil
 			}
-			if item["type"] != "message" && item["type"] != "reasoning" {
-				return &bpsError{502, "bps_unsupported_tool", "BPS returned an unsupported output item"}
+			if err := validateBPSOutputItem(ctx, item, "stream"); err != nil {
+				return err
 			}
 			if typ == "response.output_item.done" {
 				seenItems[stringValue(item["id"])] = true
@@ -524,12 +554,32 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 			created = true
 		}
 		if !bpsSafeStreamingEvent(typ) {
-			return &bpsError{502, "bps_unsupported_event", "BPS returned an unsupported streaming event"}
+			if strings.TrimSpace(typ) == "" || strings.ContainsAny(typ, "\r\n") {
+				return &bpsError{502, "bps_invalid_response", "BPS returned an invalid streaming event type"}
+			}
+			slog.WarnContext(ctx, "bps_unknown_streaming_event_passthrough", "event_type", typ)
 		}
 		return emit(typ, payload)
+	}, func() error {
+		// Keep the tool buffer private, and never fabricate response.created or
+		// reset the upstream inactivity timer with downstream-only traffic.
+		responseID := c.GetString("bps_response_id")
+		if !created || completed || responseID == "" || time.Since(lastDownstreamWrite) < keepaliveInterval {
+			return nil
+		}
+		if e := emit("response.in_progress", map[string]any{
+			"response": map[string]any{
+				"id": responseID, "object": "response",
+				"status": "in_progress", "model": r.Source["model"],
+			},
+		}); e != nil {
+			return e
+		}
+		keepaliveCount++
+		return nil
 	})
 	result.Duration = time.Since(started)
-	if timedOut.Load() && !completed {
+	if watched.stop() && !completed && ctx.Err() == nil {
 		err = &bpsError{504, "bps_upstream_timeout", "BPS upstream stopped sending data"}
 	}
 	if err == nil && !completed {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -98,12 +99,16 @@ func bpsCollectTools(raw any, namespace string, result map[string]bpsTool, catal
 			flat["type"], kind = "function", "function"
 			spec = flat
 		}
-		if kind != "function" && kind != "custom" && kind != "namespace" {
-			// Do not silently remove a tool the client expects to execute.
-			return bpsInvalid(fmt.Sprintf("Unsupported BPS tool type %q at tools[%d]; use function, custom or namespace client tools", kind, index))
+		if kind == "" {
+			kind = "function"
 		}
 		name := strings.TrimSpace(stringValue(spec["name"]))
 		if name == "" {
+			if kind != "function" && kind != "custom" && kind != "namespace" {
+				// Match openai-proxy: unnamed built-ins are not client catalog tools.
+				slog.Warn("bps_unnamed_tool_skipped", "tool_type", kind, "tool_index", index)
+				continue
+			}
 			return bpsInvalid(fmt.Sprintf("Missing tool name at tools[%d] (type %q)", index, kind))
 		}
 		full := name
@@ -127,7 +132,8 @@ func bpsCollectTools(raw any, namespace string, result map[string]bpsTool, catal
 		}
 		tool := bpsTool{Name: name, Namespace: namespace, Kind: kind, Spec: spec}
 		declaration := map[string]any{"name": full, "type": kind, "description": spec["description"]}
-		if kind == "function" {
+		// Named non-custom tools use the ordinary function transport.
+		if kind != "custom" {
 			schema := spec["parameters"]
 			if schema == nil {
 				schema = spec["inputSchema"]
@@ -172,12 +178,11 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 	if background, _ := source["background"].(bool); background {
 		return nil, bpsInvalid("BPS does not support background responses")
 	}
+	// Match the reference proxy: these unsupported options are omitted from
+	// the rebuilt upstream request, not forwarded or enforced locally.
 	for _, key := range []string{"service_tier", "temperature", "top_p", "max_output_tokens"} {
 		if value, exists := source[key]; exists && value != nil {
-			if key == "service_tier" && (value == "auto" || value == "default") {
-				continue
-			}
-			return nil, bpsInvalid("BPS does not support " + key)
+			slog.InfoContext(ctx, "bps_request_option_ignored", "option", key)
 		}
 	}
 	model := strings.TrimSpace(stringValue(source["model"]))
@@ -280,7 +285,11 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 			if bpsIsNativePlan(stringValue(saved.Native["name"])) && strings.EqualFold(strings.TrimSpace(stringValue(output)), "Plan updated") {
 				output = `{"status":"ok"}`
 			}
-			translated = append(translated, map[string]any{"type": "function_call_output", "id": bpsFunctionOutputID(id), "call_id": id, "output": output})
+			if saved.Native["type"] == "custom_tool_call" {
+				translated = append(translated, map[string]any{"type": "custom_tool_call_output", "call_id": id, "output": output})
+			} else {
+				translated = append(translated, map[string]any{"type": "function_call_output", "id": bpsFunctionOutputID(id), "call_id": id, "output": output})
+			}
 		case "reasoning":
 			if stringValue(item["encrypted_content"]) != "" {
 				translated = append(translated, map[string]any{"type": "reasoning", "summary": []any{}, "encrypted_content": item["encrypted_content"]})
@@ -401,6 +410,36 @@ func bpsConvertTool(native map[string]any, r *bpsRequest) (map[string]any, error
 	invalid := func(message string) (map[string]any, error) {
 		return nil, &bpsError{502, "bps_invalid_tool_call", message}
 	}
+	if native["type"] == "custom_tool_call" {
+		name := stringValue(native["name"])
+		if ns := stringValue(native["namespace"]); ns != "" {
+			name = ns + "." + name
+		}
+		tool, ok := r.Tools[name]
+		if !ok || tool.Kind != "custom" {
+			return nil, &bpsError{502, "bps_unsupported_tool", "BPS returned an undeclared custom tool"}
+		}
+		callID := stringValue(native["call_id"])
+		if callID == "" || strings.TrimSpace(callID) != callID || stringValue(native["id"]) == "" {
+			return invalid("BPS custom tool call is missing its native identity")
+		}
+		input, ok := native["input"].(string)
+		if !ok || len(input) > bpsMaxEnvelopeBytes {
+			return invalid("BPS custom tool input must be text within 1 MiB")
+		}
+		if status := native["status"]; status != nil && status != "completed" {
+			return invalid("BPS returned an incomplete custom tool call")
+		}
+		client := map[string]any{}
+		for key, value := range native {
+			client[key] = value
+		}
+		client["name"] = tool.Name
+		if tool.Namespace != "" {
+			client["namespace"] = tool.Namespace
+		}
+		return client, nil
+	}
 	nativeName := stringValue(native["name"])
 	name := nativeName
 	var args map[string]any
@@ -508,10 +547,8 @@ func (s *OpenAIGatewayService) bpsTransformResponse(ctx context.Context, account
 		if !ok {
 			return nil, &bpsError{502, "bps_invalid_response", "BPS returned a malformed output item"}
 		}
-		switch item["type"] {
-		case "message", "reasoning", "function_call", "custom_tool_call":
-		default:
-			return nil, &bpsError{502, "bps_unsupported_tool", "BPS returned an unsupported output item"}
+		if err := validateBPSOutputItem(ctx, item, "completion"); err != nil {
+			return nil, err
 		}
 	}
 	if r.Structured != nil {
@@ -579,6 +616,26 @@ func (s *OpenAIGatewayService) bpsTransformResponse(ctx context.Context, account
 	}
 	response["model"] = r.Source["model"]
 	return response, nil
+}
+
+// validateBPSOutputItem keeps ordinary future output items compatible while
+// preserving the existing validation for malformed items. The exact type is
+// included in diagnostics so upstream protocol changes remain observable.
+func validateBPSOutputItem(ctx context.Context, item map[string]any, phase string) error {
+	kind := strings.TrimSpace(stringValue(item["type"]))
+	if kind == "" {
+		return &bpsError{502, "bps_invalid_response", "BPS returned an output item without a type"}
+	}
+	switch kind {
+	case "message", "reasoning", "function_call", "custom_tool_call":
+		return nil
+	}
+	attrs := []any{"output_type", kind, "phase", phase}
+	if id := strings.TrimSpace(stringValue(item["id"])); id != "" {
+		attrs = append(attrs, "item_id", id)
+	}
+	slog.WarnContext(ctx, "bps_unknown_output_item_passthrough", attrs...)
+	return nil
 }
 func bpsOutputText(response map[string]any) string {
 	var parts []string

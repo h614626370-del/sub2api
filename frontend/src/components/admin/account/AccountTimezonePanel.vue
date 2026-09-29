@@ -1,6 +1,21 @@
 <template>
   <section class="space-y-5 border-t border-gray-200 pt-6 dark:border-dark-700" aria-labelledby="account-timezone-title">
-    <h2 id="account-timezone-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t(`${key}.title`) }}</h2>
+    <div class="flex items-center gap-1">
+      <h2 id="account-timezone-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t(`${key}.title`) }}</h2>
+      <HelpTooltip trigger="click" width-class="w-64 max-w-[calc(100vw-2rem)]">
+        <template #trigger>
+          <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded text-gray-500 hover:text-primary-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 dark:text-gray-400" :aria-label="t(`${key}.helpTitle`)" :title="t(`${key}.helpTitle`)">
+            <Icon name="infoCircle" size="sm" />
+          </button>
+        </template>
+        <div class="space-y-2 pr-4">
+          <p>{{ t(`${key}.helpAutomatic`) }}</p>
+          <p>{{ t(`${key}.helpFallback`) }}</p>
+          <p>{{ t(`${key}.helpDefault`) }}</p>
+          <p>{{ t(`${key}.helpDetails`) }}</p>
+        </div>
+      </HelpTooltip>
+    </div>
     <form class="space-y-3" :aria-busy="settingsLoading || saving" @submit.prevent="saveDefault">
       <div class="flex flex-wrap items-end gap-3">
         <div class="w-full min-w-0 sm:max-w-lg sm:flex-1">
@@ -88,6 +103,7 @@ import { getSettings, updateSettings } from '@/api/admin/settings'
 import { getAccountTimezone, detectAccountTimezone, type AccountTimezoneState } from '@/api/admin/accountTimezone'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { formatDateTime } from '@/utils/format'
 import type { AccountListItem } from '@/types'
 

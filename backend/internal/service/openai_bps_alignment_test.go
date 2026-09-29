@@ -63,6 +63,49 @@ func TestOpenAIBPSReferenceEnvelopes(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestOpenAIBPSUnknownOutputItemsPassThrough(t *testing.T) {
+	s, a := bpsFixture()
+	c, _ := bpsContext(1, "/responses")
+	first, err := s.prepareOpenAIBPS(c.Request.Context(), c, a, []byte(`{"model":"gpt-6-astra","input":"hello"}`))
+	require.NoError(t, err)
+
+	unknown := map[string]any{
+		"type":   "future_annotation",
+		"id":     "annotation_1",
+		"status": "completed",
+		"value":  "opaque",
+	}
+	response, err := s.bpsTransformResponse(c.Request.Context(), a, first, bpsResponse(unknown))
+	require.NoError(t, err)
+	require.Equal(t, unknown, bpsTestValue[[]any](t, response["output"])[0])
+}
+
+func TestOpenAIBPSUnknownStreamingOutputItemsPassThrough(t *testing.T) {
+	s, a := bpsFixture()
+	c, rec := bpsContext(1, "/responses")
+	unknown := map[string]any{
+		"type":   "future_annotation",
+		"id":     "annotation_1",
+		"status": "completed",
+		"value":  "opaque",
+	}
+	s.httpUpstream = &bpsHTTPStub{
+		contentType: "text/event-stream",
+		body: bpsEvent("response.output_item.done", map[string]any{
+			"output_index": 0,
+			"item":         unknown,
+		}) + bpsEvent("response.completed", map[string]any{
+			"response": bpsResponse(unknown),
+		}),
+	}
+
+	_, err := s.Forward(c.Request.Context(), c, a, bpsRequestBody("hello", true))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"type":"future_annotation"`)
+	require.Contains(t, rec.Body.String(), "event: response.completed")
+}
+
 func TestOpenAIBPSAdditionalToolsAndReplay(t *testing.T) {
 	s, a := bpsFixture()
 	c, _ := bpsContext(1, "/responses")

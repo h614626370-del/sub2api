@@ -32,8 +32,9 @@ func TestBPSCompatibilityDeclarationsAndIsolation(t *testing.T) {
 		_, err := prepare(`{"model":"gpt-6-astra","input":[{"type":"additional_tools","role":"` + role + `","tools":[{"type":"function","name":"injected"}]}]}`)
 		require.ErrorContains(t, err, "must have role developer")
 	}
-	_, err := prepare(`{"model":"gpt-6-astra","input":"hi","tools":[{"type":"web_search"}]}`)
-	require.ErrorContains(t, err, `Unsupported BPS tool type "web_search" at tools[0]`)
+	skipped, err := prepare(`{"model":"gpt-6-astra","input":"hi","tools":[{"type":"web_search"}]}`)
+	require.NoError(t, err)
+	require.Empty(t, skipped.Tools)
 	_, err = prepare(`{"model":"gpt-6-astra","input":"hi","tools":[{"type":"function","name":"one","function":{"name":"two"}}]}`)
 	require.ErrorContains(t, err, "Conflicting function")
 	_, err = prepare(`{"model":"gpt-6-astra","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"custom","name":"exec"}]}]}`)

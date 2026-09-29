@@ -50,6 +50,26 @@ beforeEach(() => {
 })
 
 describe('AccountTimezonePanel', () => {
+  it.each(['zh', 'en'])('opens timezone help without probing accounts (%s)', async locale => {
+    const wrapper = panel(locale)
+    await flushPromises()
+    const label = locale === 'zh' ? '时区生效规则' : 'Timezone rules'
+    await wrapper.get(`button[aria-label="${label}"]`).trigger('click')
+    await flushPromises()
+    const tooltip = document.body.querySelector('[role="tooltip"]') as HTMLElement
+    expect(tooltip.style.display).not.toBe('none')
+    expect(tooltip.textContent).toContain('OpenAI OAuth')
+    expect(tooltip.textContent).toContain(locale === 'zh' ? '有效代理时区 → 统一时区 → 客户端原值' : 'valid proxy timezone → default timezone → client value')
+    expect(tooltip.textContent).toContain('America/Los_Angeles')
+    expect(tooltip.textContent).toContain(locale === 'zh' ? '升级保留已有设置，包括空值' : 'Upgrades preserve existing settings, including an empty value')
+    expect(tooltip.textContent).toContain(locale === 'zh' ? '已有有效代理时区仍优先' : 'a valid proxy timezone still takes priority')
+    expect(tooltip.textContent).toContain(locale === 'zh' ? '下方选择账号时尝试检测' : 'when selecting the account below')
+    expect(tooltip.textContent).toContain(locale === 'zh' ? '不提供单账号手动时区设置' : 'per-account manual timezone overrides are not supported')
+    expect(api.list).not.toHaveBeenCalled()
+    expect(api.detect).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it.each(['zh', 'en'])('loads a searchable default without loading accounts (%s)', async locale => {
     const wrapper = panel(locale)
     await flushPromises()

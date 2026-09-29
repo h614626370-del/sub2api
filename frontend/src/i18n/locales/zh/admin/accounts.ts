@@ -7,6 +7,11 @@ export default {
       },
       accountTimezone: {
         title: '账号请求时区',
+        helpTitle: '时区生效规则',
+        helpAutomatic: '仅适用于 OpenAI OAuth 账号，无需逐个开启。已配置代理但没有有效识别结果时，会在相关请求或下方选择账号时尝试检测代理出口时区。',
+        helpFallback: '生效顺序：有效代理时区 → 统一时区 → 客户端原值。无代理或没有有效识别结果时使用统一时区；选择“保留客户端时区”并保存，仅清空统一时区，已有有效代理时区仍优先。',
+        helpDefault: '新安装的统一时区默认为洛杉矶（America/Los_Angeles）；升级保留已有设置，包括空值，不会强制改成洛杉矶。当前生效来源可在账号详情中查看。',
+        helpDetails: '账号详情用于查看识别结果或重新检测，不提供单账号手动时区设置。仅调整请求环境中的日期、时区和 Web Search 时区，不影响普通消息、报表或计费时区。',
         defaultTimezone: '统一时区',
         searchTimezone: '搜索城市或时区',
         saveDefault: '保存时区设置',
