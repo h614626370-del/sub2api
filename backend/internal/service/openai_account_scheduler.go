@@ -888,7 +888,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	if req.RequireCompact {
 		candidates = make([]openAIAccountCandidateScore, 0, len(allCandidates))
 		for _, candidate := range allCandidates {
-			if openAICompactSupportTier(candidate.account, req.RequestedModel) == 0 {
+			if openAICompactSupportTier(candidate.account) == 0 {
 				staleSnapshotCompactRetry = append(staleSnapshotCompactRetry, candidate)
 				continue
 			}
@@ -1109,7 +1109,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		supported := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
 		unknown := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
 		for _, candidate := range plan.candidates {
-			switch openAICompactSupportTier(candidate.account, req.RequestedModel) {
+			switch openAICompactSupportTier(candidate.account) {
 			case 2:
 				supported = append(supported, candidate)
 			case 1:
@@ -1215,7 +1215,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			release(result)
 			continue
 		}
-		if req.RequireCompact && openAICompactSupportTier(fresh, req.RequestedModel) == 0 {
+		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
 			compactBlocked = true
 			release(result)
 			continue
@@ -1305,7 +1305,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		if !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 			continue
 		}
-		if req.RequireCompact && openAICompactSupportTier(account, req.RequestedModel) == 0 {
+		if req.RequireCompact && openAICompactSupportTier(account) == 0 {
 			continue
 		}
 		// Keep weighted sticky fallback subject to the same free-tier gate as the
@@ -1457,7 +1457,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("platform_mismatch")
 			continue
 		}
-		if s.service.isOpenAIAccountRequestRuntimeBlockedContext(ctx, account, req.RequestedModel, req.RequireCompact) {
+		if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 			filterStats.exclude("runtime_blocked")
 			continue
 		}
@@ -1641,7 +1641,7 @@ func openAICostOverflowExpanded(req OpenAIAccountScheduleRequest, plan openAIAcc
 	}
 	supported, unknown := 0, 0
 	for _, candidate := range plan.candidates {
-		switch openAICompactSupportTier(candidate.account, req.RequestedModel) {
+		switch openAICompactSupportTier(candidate.account) {
 		case 2:
 			supported++
 		case 1:
@@ -1718,7 +1718,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 				continue
 			}
-			if req.RequireCompact && openAICompactSupportTier(fresh, req.RequestedModel) == 0 {
+			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
 				compactBlocked = true
 				continue
 			}
@@ -1773,19 +1773,13 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 // openAISelectionFilterStats so that "no available accounts" errors state why
 // each candidate was dropped instead of failing silently (#4599).
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) (bool, string) {
-	if !openAIChannelAllowed(ctx, account, req.RequestedModel) {
-		return false, "upstream_channel_mismatch"
-	}
-	if account != nil && !bpsBoundAccountAllowed(ctx, account) {
-		return false, "bps_account_binding"
-	}
 	if account == nil {
 		return false, "account_nil"
 	}
 	if req.RequirePrivacySet && !account.IsPrivacySet() {
 		return false, "privacy_not_set"
 	}
-	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlockedContext(ctx, account, req.RequestedModel, req.RequireCompact) {
+	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 		return false, "runtime_blocked"
 	}
 	if s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {

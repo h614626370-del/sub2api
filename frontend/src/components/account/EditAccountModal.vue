@@ -26,9 +26,6 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
-      <OpenAIBPSModeFields v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow"
-        :enabled="bpsModeEnabled" v-model:models="bpsModeModels" hide-toggle />
-
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
@@ -1587,7 +1584,6 @@
         </div>
       </div>
 
-
       <div
         v-if="supportsAccountSchedulingThresholdOverride"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -1778,7 +1774,6 @@
           </button>
         </div>
       </div>
-
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
@@ -3083,14 +3078,9 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
-        <button v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow && bpsModeEnabled" type="submit" form="edit-account-form" :disabled="submitting"
-          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
-          {{ t('admin.accounts.bps.saveAndTest') }}
-        </button>
         <button
           type="submit"
           form="edit-account-form"
-          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3135,7 +3125,6 @@
 </template>
 
 <script setup lang="ts">
-import OpenAIBPSModeFields from './OpenAIBPSModeFields.vue'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3243,7 +3232,6 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  test: [account: Account]
   updated: [account: Account]
   'codex-tickets': []
 }>()
@@ -3268,7 +3256,6 @@ const selectableGroups = computed(() => {
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
-
 
 
 const hideAccountLongContextBilling = computed(() => {
@@ -4052,10 +4039,6 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
-const bpsModeEnabled = ref(false)
-const bpsModeModels = ref('gpt-6-astra\ngpt-5.6-sol')
-const bpsTestAfterSave = ref(false)
-
 const form = reactive({
   name: '',
   notes: '',
@@ -4165,11 +4148,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
   mixedChannelWarningAction.value = null
-  bpsModeEnabled.value = newAccount.extra?.openai_bps_enabled === true
-  bpsModeModels.value = Array.isArray(newAccount.extra?.openai_bps_models)
-    ? (newAccount.extra.openai_bps_models as string[]).join('\n')
-    : 'gpt-6-astra\ngpt-5.6-sol'
-  bpsTestAfterSave.value = false
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
@@ -4837,7 +4815,6 @@ const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
   return true
 }
 
-
 function supportsAccountSchedulingThresholdOverridePlatform(platform: Account['platform'] | undefined) {
   return platform === 'openai' || platform === 'anthropic' || platform === 'grok'
 }
@@ -5160,10 +5137,8 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
-    const openBPSTest = updatedAccount.platform === 'openai' && updatedAccount.extra?.openai_bps_enabled === true && bpsTestAfterSave.value
     emit('updated', updatedAccount)
     handleClose()
-    if (openBPSTest) emit('test', updatedAccount)
   } catch (error: any) {
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {
       openMixedChannelDialog({
@@ -5219,7 +5194,6 @@ const handleSubmit = async () => {
         delete updatePayload.rate_multiplier
       }
     }
-
 
     // For apikey type, handle credentials update
     if (props.account.type === 'apikey') {
@@ -5722,10 +5696,6 @@ const handleSubmit = async () => {
     if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')) {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (props.account.type === 'oauth' && !isSparkShadow.value) {
-        newExtra.openai_bps_enabled = bpsModeEnabled.value
-        newExtra.openai_bps_models = [...new Set(bpsModeModels.value.split('\n').map(s => s.trim()).filter(Boolean))]
-      }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value

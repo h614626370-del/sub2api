@@ -1,6 +1,10 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/components/admin/payment/__tests__/paymentDateRange.spec.ts \
+	src/components/admin/payment/__tests__/PaymentDateFilter.spec.ts \
+	src/views/admin/orders/__tests__/AdminPaymentDashboardView.spec.ts \
+	src/api/__tests__/payment.dashboard.spec.ts \
 	src/components/admin/account/__tests__/AccountTimezonePanel.spec.ts \
 	src/components/admin/account/__tests__/CustomFeaturesPanel.spec.ts \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \

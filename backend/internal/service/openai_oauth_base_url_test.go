@@ -114,10 +114,6 @@ func TestOpenAIOAuthBaseURLSecurityAndIsolation(t *testing.T) {
 	_, err = svc.resolveOpenAIOAuthURL(context.Background(), account, chatgptCodexURL)
 	require.Error(t, err)
 
-	account.Platform = PlatformOpenAIBPS
-	got, err = svc.resolveOpenAIOAuthURL(context.Background(), account, OpenAIBPSResponsesURL)
-	require.NoError(t, err)
-	require.Equal(t, OpenAIBPSResponsesURL, got)
 	account.Platform = PlatformOpenAI
 	account.Type = AccountTypeAPIKey
 	got, err = svc.resolveOpenAIOAuthURL(context.Background(), account, openaiPlatformAPIURL)

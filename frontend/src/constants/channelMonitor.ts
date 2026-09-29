@@ -10,7 +10,6 @@
 import type { APIMode, CheckMode, Provider, MonitorStatus } from '@/api/admin/channelMonitor'
 
 export const PROVIDER_OPENAI: Provider = 'openai'
-export const PROVIDER_OPENAI_BPS: Provider = 'openai_bps'
 export const PROVIDER_ANTHROPIC: Provider = 'anthropic'
 export const PROVIDER_GEMINI: Provider = 'gemini'
 export const PROVIDER_GROK: Provider = 'grok'

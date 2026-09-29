@@ -16,7 +16,7 @@ import (
 
 const (
 	billingBalanceKeyPrefix   = "billing:balance:"
-	billingSubKeyPrefix       = "billing:sub:bps-mode-v1:"
+	billingSubKeyPrefix       = "billing:sub:"
 	billingRateLimitKeyPrefix = "apikey:rate:"
 	subCacheInvalidateChannel = "subscription:cache:invalidate"
 	billingCacheTTL           = 5 * time.Minute

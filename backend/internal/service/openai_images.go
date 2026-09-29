@@ -607,15 +607,6 @@ func (s *OpenAIGatewayService) ForwardImages(
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
-	model := parsed.Model
-	if channelMappedModel != "" {
-		model = channelMappedModel
-	}
-	if account.UsesOpenAIBPS(model) {
-		err := &bpsError{400, "bps_unsupported_endpoint", "BPS mode does not support image endpoints"}
-		WriteOpenAIBPSError(c, err)
-		return nil, err
-	}
 	switch account.Type {
 	case AccountTypeAPIKey:
 		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)

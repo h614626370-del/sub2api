@@ -238,10 +238,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
-		if account.UsesOpenAIBPS(values[1].String()) {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation,
-				"BPS mode requires HTTP Responses; WebSocket is not supported", nil)
-		}
 		eventType := strings.TrimSpace(values[0].String())
 		normalized := trimmed
 		switch eventType {

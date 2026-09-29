@@ -20,8 +20,15 @@ func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*Dash
 	if days <= 0 {
 		days = 30
 	}
+	period, err := ParsePaymentDashboardRange("", "", strconv.Itoa(days), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return s.GetDashboardStatsForRange(ctx, period)
+}
+
+func (s *PaymentService) GetDashboardStatsForRange(ctx context.Context, period PaymentDashboardRange) (*DashboardStats, error) {
 	now := time.Now()
-	since := now.AddDate(0, 0, -days)
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	paidStatuses := []string{OrderStatusCompleted, OrderStatusPaid, OrderStatusRecharging}
@@ -29,15 +36,35 @@ func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*Dash
 	orders, err := s.entClient.PaymentOrder.Query().
 		Where(
 			paymentorder.StatusIn(paidStatuses...),
-			paymentorder.PaidAtGTE(since),
+			paymentorder.PaidAtGTE(period.Start),
+			paymentorder.PaidAtLT(period.End),
 		).
 		All(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	st := &DashboardStats{}
+	st := &DashboardStats{
+		StartDate: period.Start.Format(time.DateOnly),
+		EndDate:   period.End.AddDate(0, 0, -1).Format(time.DateOnly),
+		Timezone:  now.Location().String(),
+		Today:     now.Format(time.DateOnly),
+	}
 	computeBasicStats(st, orders, todayStart)
+	// Today's cards remain live when the selected reporting period is historical.
+	if todayStart.Before(period.Start) || !todayStart.Before(period.End) {
+		todayOrders, todayErr := s.entClient.PaymentOrder.Query().Where(
+			paymentorder.StatusIn(paidStatuses...),
+			paymentorder.PaidAtGTE(todayStart),
+			paymentorder.PaidAtLT(todayStart.AddDate(0, 0, 1)),
+		).All(ctx)
+		if todayErr != nil {
+			return nil, todayErr
+		}
+		todayStats := &DashboardStats{}
+		computeBasicStats(todayStats, todayOrders, todayStart)
+		st.TodayAmount, st.TodayCount = todayStats.TodayAmount, todayStats.TodayCount
+	}
 
 	st.PendingOrders, err = s.entClient.PaymentOrder.Query().
 		Where(paymentorder.StatusEQ(OrderStatusPending)).
@@ -46,7 +73,7 @@ func (s *PaymentService) GetDashboardStats(ctx context.Context, days int) (*Dash
 		return nil, err
 	}
 
-	st.DailySeries = buildDailySeries(orders, since, days)
+	st.DailySeries = buildDailySeries(orders, period.Start, period.Days)
 	st.PaymentMethods = buildMethodDistribution(orders)
 	st.TopUsers = buildTopUsers(orders)
 
@@ -83,7 +110,7 @@ func buildDailySeries(orders []*dbent.PaymentOrder, since time.Time, days int) [
 		if o.PaidAt == nil {
 			continue
 		}
-		date := o.PaidAt.Format("2006-01-02")
+		date := o.PaidAt.In(since.Location()).Format("2006-01-02")
 		ds, ok := dailyMap[date]
 		if !ok {
 			ds = &DailyStats{Date: date, Amount: make(CurrencyAmounts)}
@@ -94,7 +121,7 @@ func buildDailySeries(orders []*dbent.PaymentOrder, since time.Time, days int) [
 	}
 	series := make([]DailyStats, 0, days)
 	for i := 0; i < days; i++ {
-		date := since.AddDate(0, 0, i+1).Format("2006-01-02")
+		date := since.AddDate(0, 0, i).Format("2006-01-02")
 		if ds, ok := dailyMap[date]; ok {
 			roundCurrencyAmounts(ds.Amount)
 			series = append(series, *ds)

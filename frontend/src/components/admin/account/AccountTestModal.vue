@@ -376,7 +376,6 @@ import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel } from '@/types'
-import { resolveBPSMappedModel } from '@/utils/openaiBps'
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
@@ -398,7 +397,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'completed', accountId: number): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -424,15 +422,7 @@ const uploadAudioDataURL = ref('')
 const uploadAudioName = ref('')
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
-const isOpenAIAccount = computed(() => (props.account?.platform === 'openai' || props.account?.platform === 'openai_bps'))
-const usesBPS = computed(() => {
-  const account = props.account
-  if (account?.platform === 'openai_bps') return true
-  if (account?.platform !== 'openai' || account.type !== 'oauth' || account.parent_account_id || account.extra?.openai_bps_enabled !== true) return false
-  const mapping = account.credentials?.model_mapping as Record<string, string> | undefined
-  const model = resolveBPSMappedModel(selectedModelId.value, mapping)
-  return Array.isArray(account.extra.openai_bps_models) && account.extra.openai_bps_models.includes(model)
-})
+const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
@@ -507,7 +497,6 @@ const modelOptionsForMode = computed(() => {
 })
 
 const supportsPromptInput = computed(() => {
-  if (usesBPS.value) return true
   if (!isGrokAccount.value) {
     return supportsImageTest.value
   }
@@ -838,8 +827,6 @@ const scrollToBottom = async () => {
 
 const startTest = async () => {
   if (!props.account || !canStartTest.value) return
-  const testedAccountId = props.account.id
-  const testedBPS = usesBPS.value
 
   resetState()
   status.value = 'connecting'
@@ -939,10 +926,6 @@ const startTest = async () => {
         }
       }
     }
-    if (testedBPS && status.value === 'connecting') {
-      status.value = 'error'
-      errorMessage.value = t('admin.accounts.bps.testInterrupted')
-    }
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       status.value = 'idle'
@@ -952,8 +935,6 @@ const startTest = async () => {
     const msg = error instanceof Error ? error.message : t('common.unknownError')
     errorMessage.value = msg
     addLine(t('admin.accounts.errorPrefix', { message: msg }), 'text-red-400')
-  } finally {
-    if (testedBPS) emit('completed', testedAccountId)
   }
 }
 
@@ -961,11 +942,6 @@ const handleEvent = (event: {
   type: string
   text?: string
   model?: string
-  code?: string
-  upstream_status?: number
-  upstream_error_code?: string
-  upstream_model?: string
-  request_id?: string
   success?: boolean
   error?: string
   image_url?: string
@@ -975,7 +951,7 @@ const handleEvent = (event: {
 }) => {
   switch (event.type) {
     case 'test_start':
-      addLine(t(usesBPS.value ? 'admin.accounts.bps.requestingUpstream' : 'admin.accounts.connectedToApi'), usesBPS.value ? 'text-cyan-400' : 'text-green-400')
+      addLine(t('admin.accounts.connectedToApi'), 'text-green-400')
       if (event.model) {
         addLine(t('admin.accounts.usingModel', { model: event.model }), 'text-cyan-400')
       }
@@ -1040,12 +1016,6 @@ const handleEvent = (event: {
       }
       break
 
-    case 'upstream_response':
-      if (event.upstream_status) addLine(`${t('admin.accounts.bps.upstreamResponse')}: HTTP ${event.upstream_status}`, event.upstream_status >= 400 ? 'text-red-400' : 'text-cyan-400')
-      if (event.upstream_model) addLine(`${t('admin.accounts.bps.upstreamModelLabel')}: ${event.upstream_model}`, 'text-gray-400')
-      if (event.request_id) addLine(`${t('admin.accounts.bps.requestIdLabel')}: ${event.request_id}`, 'text-gray-400')
-      break
-
     case 'status':
       if (event.text) {
         addLine(event.text, 'text-cyan-300')
@@ -1060,7 +1030,6 @@ const handleEvent = (event: {
       }
       if (event.success) {
         status.value = 'success'
-        if (usesBPS.value) addLine(t('admin.accounts.bps.testSucceeded'), 'text-green-400')
       } else {
         status.value = 'error'
         errorMessage.value = event.error || t('admin.accounts.testFailed')
@@ -1068,10 +1037,6 @@ const handleEvent = (event: {
       break
 
     case 'error':
-      if (usesBPS.value) {
-        const code = event.upstream_error_code || event.code
-        if (code) addLine(`${t('admin.accounts.bps.errorCode')}: ${code}`, 'text-red-400')
-      }
       status.value = 'error'
       errorMessage.value = event.error || t('common.unknownError')
       if (streamingContent.value) {

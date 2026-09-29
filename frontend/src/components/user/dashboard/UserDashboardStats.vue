@@ -252,7 +252,6 @@ const { t } = useI18n()
 const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Claude',
   openai: 'OpenAI',
-  openai_bps: 'OpenAI BPS',
   gemini: 'Gemini',
   antigravity: 'Antigravity',
   grok: 'Grok',

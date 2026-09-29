@@ -36,7 +36,7 @@ func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) P
 	}
 	result.Compatible = true
 	for _, tested := range manifest.Requires.TestedSub2APIVersions {
-		if normalizeSemver(tested) == normalizeSemver(host.Version) {
+		if normalizePluginHostVersion(tested) == normalizePluginHostVersion(host.Version) {
 			result.Tested = true
 			break
 		}
@@ -65,8 +65,28 @@ func normalizeSemver(version string) string {
 	return v
 }
 
+// normalizePluginHostVersion accepts our four-part release identifier only for
+// host identity. Build metadata preserves the custom revision while range
+// comparisons use the official three-part baseline. Plugin requirement bounds
+// remain strict SemVer, and official tested versions do not match custom builds.
+func normalizePluginHostVersion(version string) string {
+	if v := normalizeSemver(version); v != "" {
+		return v
+	}
+	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(version), "v"), ".")
+	if len(parts) != 4 || parts[3] == "" || (len(parts[3]) > 1 && parts[3][0] == '0') {
+		return ""
+	}
+	for _, digit := range parts[3] {
+		if digit < '0' || digit > '9' {
+			return ""
+		}
+	}
+	return normalizeSemver(strings.Join(parts[:3], ".") + "+custom." + parts[3])
+}
+
 func matchesSemverRange(version, expression string) bool {
-	v := normalizeSemver(version)
+	v := normalizePluginHostVersion(version)
 	if v == "" {
 		return false
 	}

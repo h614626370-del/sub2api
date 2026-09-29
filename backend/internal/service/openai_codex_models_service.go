@@ -187,13 +187,13 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		return nil
 	}
 
-	visible, catalogAccounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
-	if err != nil {
-		return fmt.Errorf("load group configured Codex models: %w", err)
-	}
 	var configuredModels []string
 	if !group.CodexModelsManifestConfig.Enabled {
-		configuredModels = openAIConfiguredCodexModelIDsForGroup(visible, group)
+		var err error
+		configuredModels, err = s.groupConfiguredCodexModelIDs(ctx, group)
+		if err != nil {
+			return fmt.Errorf("load group configured Codex models: %w", err)
+		}
 	}
 	body, changed, err := mergeConfiguredCodexModelsManifest(
 		manifest.Body,
@@ -211,11 +211,6 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		}
 		changed = true
 	}
-	body, bpsChanged, err := applyBPSCatalogForAccounts(body, PlatformOpenAI, catalogAccounts, group, nil, true)
-	if err != nil {
-		return err
-	}
-	changed = changed || bpsChanged
 	if changed {
 		manifest.Body = body
 		manifest.ETag = codexModelsManifestBodyETag(body)
@@ -858,9 +853,6 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 	platformOverride string,
 	modelIDs []string,
 ) ([]byte, error) {
-	if platformOverride == PlatformOpenAIBPS || (platformOverride == "" && group != nil && group.Platform == PlatformOpenAIBPS) {
-		return buildOpenAIBPSCodexModelsManifest(modelIDs)
-	}
 	if s == nil || s.accountRepo == nil || group == nil {
 		return BuildCodexModelsManifest(modelIDs)
 	}
@@ -902,9 +894,6 @@ func buildCodexModelsManifestForAccounts(
 	compositeRoutes []CompositeModelRoute,
 	compositeRoutesAvailable bool,
 ) ([]byte, error) {
-	if effectivePlatform == PlatformOpenAIBPS {
-		return buildOpenAIBPSCodexModelsManifest(modelIDs)
-	}
 	imageInputModels := make(map[string]bool, len(modelIDs))
 	searchToolModels := make(map[string]bool, len(modelIDs))
 	metadataModels := codexCatalogMetadataModels(
@@ -946,12 +935,7 @@ func buildCodexModelsManifestForAccounts(
 			modelMetadata[modelID] = metadata
 		}
 	}
-	body, err := buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
-	if err != nil {
-		return nil, err
-	}
-	body, _, err = applyBPSCatalogForAccounts(body, effectivePlatform, accounts, group, compositeRoutes, compositeRoutesAvailable)
-	return body, err
+	return buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
 }
 
 func buildCodexModelsManifest(
@@ -1226,7 +1210,7 @@ func resolveCodexCompositeModelTarget(
 	claimedPlatforms := make(map[string]struct{})
 	for _, account := range accounts {
 		platform := strings.TrimSpace(account.Platform)
-		if platform == PlatformOpenAIBPS || !isConcreteRequestPlatform(platform) || !codexExplicitModelMappingClaims(account, modelID) {
+		if !isConcreteRequestPlatform(platform) || !codexExplicitModelMappingClaims(account, modelID) {
 			continue
 		}
 		claimedPlatforms[platform] = struct{}{}

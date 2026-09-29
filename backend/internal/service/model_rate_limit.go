@@ -68,9 +68,6 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	}
 
 	modelKey := a.GetMappedModel(requestedModel)
-	if a.OpenAIBPSEnabled() && a.UsesOpenAIBPS(requestedModel) {
-		return []string{"bps:" + modelKey}
-	}
 	if a.Platform == PlatformAntigravity {
 		modelKey = resolveFinalAntigravityModelKey(ctx, a, requestedModel)
 	}

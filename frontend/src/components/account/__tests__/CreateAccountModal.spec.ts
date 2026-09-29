@@ -724,26 +724,3 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 })
-
-describe('OpenAI OAuth BPS mode', () => {
-  it('removes the standalone platform and exposes an opt-in on OpenAI OAuth', async () => {
-    const wrapper = mountModal()
-    expect(wrapper.findAll('button').some(b => b.text() === 'OpenAI BPS')).toBe(false)
-    await selectButtonByText(wrapper, 'OpenAI')
-    expect(wrapper.get<HTMLInputElement>('[data-testid="bps-mode-enabled"]').element.checked).toBe(false)
-    await wrapper.get('[data-testid="bps-mode-enabled"]').setValue(true)
-    expect(wrapper.get<HTMLTextAreaElement>('[data-testid="bps-mode-models"]').element.value).toContain('gpt-6-astra')
-    expect(wrapper.find('#bps-access-token').exists()).toBe(false)
-    wrapper.unmount()
-  })
-  it('resets BPS choices when a new creation form is opened', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    await wrapper.get('[data-testid="bps-mode-enabled"]').setValue(true)
-    await wrapper.setProps({ show: false })
-    await wrapper.setProps({ show: true })
-    await selectButtonByText(wrapper, 'OpenAI')
-    expect(wrapper.get<HTMLInputElement>('[data-testid="bps-mode-enabled"]').element.checked).toBe(false)
-    wrapper.unmount()
-  })
-})

@@ -1,34 +1,19 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <!-- Header with Day Switcher -->
-      <div class="flex items-center justify-end">
-        <div class="flex items-center gap-2">
-          <div class="flex rounded-lg border border-gray-200 dark:border-dark-600">
-            <button
-              v-for="d in DAYS_OPTIONS"
-              :key="d"
-              type="button"
-              class="px-3 py-1.5 text-xs font-medium transition-colors first:rounded-l-lg last:rounded-r-lg"
-              :class="days === d
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'"
-              @click="days = d"
-            >
-              {{ d }}{{ t('payment.admin.daySuffix') }}
-            </button>
-          </div>
-          <button @click="loadDashboard" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')">
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-          </button>
-        </div>
-      </div>
+      <PaymentDateFilter :today="today" :timezone="stats?.timezone" :applied-start="stats?.start_date"
+        :applied-end="stats?.end_date" :loading="loading" @change="changeRange" @refresh="loadDashboard()" />
 
       <!-- Dashboard Content -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <LoadingSpinner />
       </div>
+      <div v-else-if="loadError" role="alert" class="card p-6 text-center">
+        <p class="text-sm text-red-600 dark:text-red-400">{{ loadError }}</p>
+        <button type="button" class="btn btn-secondary mt-4" @click="loadDashboard()">{{ t('payment.admin.dateFilter.retry') }}</button>
+      </div>
       <template v-else-if="stats">
+        <p class="text-xs text-gray-600 dark:text-gray-300">{{ t('payment.admin.dateFilter.statsHint') }}</p>
         <OrderStatsCards :stats="stats" />
         <DailyRevenueChart :data="stats.daily_series || []" :loading="loading" />
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -71,25 +56,31 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { adminPaymentAPI } from '@/api/admin/payment'
+import { adminPaymentAPI, type PaymentDashboardQuery } from '@/api/admin/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import type { CurrencyAmounts, DashboardStats, TopUserPaymentStats } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import Icon from '@/components/icons/Icon.vue'
+import PaymentDateFilter from '@/components/admin/payment/PaymentDateFilter.vue'
 import OrderStatsCards from '@/components/admin/payment/OrderStatsCards.vue'
 import DailyRevenueChart from '@/components/admin/payment/DailyRevenueChart.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const DAYS_OPTIONS = [7, 30, 90] as const
-const days = ref<number>(30)
+const query = ref<PaymentDashboardQuery>({ days: 30 })
 const loading = ref(false)
 const stats = ref<DashboardStats | null>(null)
+const loadError = ref('')
+let requestID = 0
+const today = computed(() => {
+  if (stats.value?.today) return stats.value.today
+  const date = new Date()
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+})
 
 function methodColor(type: string): string {
   const c: Record<string, string> = {
@@ -124,17 +115,27 @@ function formatMoney(currency: string, amount: number): string {
 }
 
 async function loadDashboard() {
+  const currentRequest = ++requestID
   loading.value = true
+  loadError.value = ''
   try {
-    const res = await adminPaymentAPI.getDashboard(days.value)
+    const res = await adminPaymentAPI.getDashboard(query.value)
+    if (currentRequest !== requestID) return
     stats.value = res.data
   } catch (err: unknown) {
-    appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error')))
+    if (currentRequest !== requestID) return
+    loadError.value = extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))
+    appStore.showError(loadError.value)
   } finally {
-    loading.value = false
+    if (currentRequest === requestID) loading.value = false
   }
 }
 
-watch(days, () => loadDashboard())
+function changeRange(range: PaymentDashboardQuery) {
+  query.value = range
+  void loadDashboard()
+}
+
 onMounted(() => loadDashboard())
+onUnmounted(() => { requestID++ })
 </script>

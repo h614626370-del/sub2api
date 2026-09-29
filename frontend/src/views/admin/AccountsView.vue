@@ -336,24 +336,6 @@
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
-          <template #cell-bps="{ row }">
-            <button
-              v-if="canToggleBPS(row)"
-              type="button"
-              role="switch"
-              :aria-checked="row.extra?.openai_bps_enabled === true"
-              :aria-label="t('admin.accounts.bps.modeEnabled')"
-              :disabled="togglingBPS.has(row.id)"
-              :aria-busy="togglingBPS.has(row.id)"
-              :title="t(row.extra?.openai_bps_enabled === true ? 'admin.accounts.bps.enabledHint' : 'admin.accounts.bps.disabledHint')"
-              class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800"
-              :class="row.extra?.openai_bps_enabled === true ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500'"
-              @click="handleToggleBPS(row)"
-            >
-              <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="row.extra?.openai_bps_enabled === true ? 'translate-x-4' : 'translate-x-0'" />
-            </button>
-            <span v-else class="text-gray-400">—</span>
-          </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
@@ -510,10 +492,10 @@
       </TablePageLayout>
       <CustomFeaturesPanel v-else />
     </div>
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" @test="handleTest" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @codex-tickets="openEditCodexTickets" @test="handleTest" />
+    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" @codex-tickets="openEditCodexTickets" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
-    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" @completed="handleAccountTestCompleted" />
+    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <CodexTicketDashboard :show="showCodexTickets" :account="codexTicketAcc" @close="showCodexTickets = false" @updated="handleAccountUpdated" />
@@ -698,7 +680,6 @@ const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
-const togglingBPS = reactive(new Set<number>())
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
@@ -1474,7 +1455,6 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.current_window_cost !== next.current_window_cost ||
     current.active_sessions !== next.active_sessions ||
     current.schedulable !== next.schedulable ||
-    current.extra?.openai_bps_enabled !== next.extra?.openai_bps_enabled ||
     current.status !== next.status ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
@@ -1892,7 +1872,6 @@ const allColumns = computed(() => {
       ? [{ key: 'codex_ticket', label: t('admin.accounts.columns.codexTicket'), sortable: false }]
       : []),
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
-    { key: 'bps', label: 'BPS', sortable: false },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
@@ -2412,22 +2391,7 @@ const handleExportData = async () => {
   }
 }
 const accountExportStepUp = useStepUp()
-const handleAccountTestCompleted = async (accountId: number) => {
-  try {
-    const fresh = await adminAPI.accounts.getById(accountId)
-    if (testingAcc.value?.id === accountId) testingAcc.value = fresh
-    await reload()
-  } catch (error) {
-    console.error('Failed to refresh tested account:', error)
-    appStore.showError(extractApiErrorMessage(error, t('common.error')))
-  }
-}
-const closeTestModal = () => {
-  const account = testingAcc.value
-  showTest.value = false
-  testingAcc.value = null
-  if (account?.platform === 'openai_bps') void handleAccountTestCompleted(account.id)
-}
+const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = async (a: AccountListItem) => {
@@ -2583,35 +2547,6 @@ const handleToggleSchedulable = async (a: Account) => {
     togglingSchedulable.value = null
   }
 }
-const canToggleBPS = (account: Account) =>
-  account.platform === 'openai' && account.type === 'oauth' && account.parent_account_id == null
-
-const handleToggleBPS = async (account: Account) => {
-  if (!canToggleBPS(account) || togglingBPS.has(account.id)) return
-  const enabled = account.extra?.openai_bps_enabled !== true
-  togglingBPS.add(account.id)
-  enterAutoRefreshSilentWindow()
-  try {
-    // List rows can be lightweight: preserve the full, current extra settings.
-    const current = await adminAPI.accounts.getById(account.id)
-    if (!canToggleBPS(current)) {
-      patchAccountInList(current)
-      appStore.showError(t('admin.accounts.bps.toggleFailed'))
-      return
-    }
-    const updated = await adminAPI.accounts.update(account.id, {
-      extra: { ...current.extra, openai_bps_enabled: enabled }
-    })
-    patchAccountInList(updated)
-    appStore.showSuccess(t(updated.extra?.openai_bps_enabled === true ? 'admin.accounts.bps.enabledHint' : 'admin.accounts.bps.disabledHint'))
-  } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.bps.toggleFailed')))
-  } finally {
-    togglingBPS.delete(account.id)
-    enterAutoRefreshSilentWindow()
-  }
-}
-
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
 const handleTempUnschedReset = async (updated: Account) => {
   showTempUnsched.value = false

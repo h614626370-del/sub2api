@@ -231,9 +231,6 @@
         </div>
       </div>
 
-      <OpenAIBPSModeFields v-if="form.platform === 'openai' && form.type === 'oauth' && accountCategory === 'oauth-based'"
-        v-model:enabled="bpsModeEnabled" v-model:models="bpsModeModels" />
-
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
@@ -3099,7 +3096,6 @@
         </div>
       </div>
 
-
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="form.platform === 'openai' && form.type === 'oauth'"
@@ -3598,14 +3594,9 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
-        <button v-if="form.platform === 'openai' && form.type === 'oauth' && accountCategory === 'oauth-based' && bpsModeEnabled" type="submit" form="create-account-form" :disabled="submitting"
-          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
-          {{ t('admin.accounts.bps.saveAndTest') }}
-        </button>
         <button
           type="submit"
           form="create-account-form"
-          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3911,7 +3902,6 @@
 </template>
 
 <script setup lang="ts">
-import OpenAIBPSModeFields from './OpenAIBPSModeFields.vue'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3941,7 +3931,6 @@ import type {
   AdminGroup,
   AccountPlatform,
   AccountType,
-  Account,
   CheckMixedChannelResponse,
   CreateAccountRequest,
   CodexSessionImportMessage,
@@ -4106,7 +4095,6 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
-  test: [account: Account]
   created: []
 }>()
 
@@ -4747,10 +4735,6 @@ const tempUnschedPresets = computed(() => [
   }
 ])
 
-const bpsModeEnabled = ref(false)
-const bpsModeModels = ref('gpt-6-astra\ngpt-5.6-sol')
-const bpsTestAfterSave = ref(false)
-
 const form = reactive({
   name: '',
   notes: '',
@@ -4768,7 +4752,6 @@ const form = reactive({
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
-  if (form.platform === 'openai_bps') return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -5309,10 +5292,8 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     appStore.showSuccess(t('admin.accounts.accountCreated'))
-    const openBPSTest = payload.platform === 'openai' && payload.extra?.openai_bps_enabled === true && bpsTestAfterSave.value
     emit('created')
     handleClose()
-    if (openBPSTest) emit('test', account)
   } catch (error: any) {
     if (error.response?.status === 409 && error.response?.data?.error === 'mixed_channel_warning' && needsMixedChannelCheck(form.platform)) {
       openMixedChannelDialog({
@@ -5332,9 +5313,6 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
-  bpsModeEnabled.value = false
-  bpsModeModels.value = 'gpt-6-astra\ngpt-5.6-sol'
-  bpsTestAfterSave.value = false
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5454,7 +5432,6 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
-  bpsTestAfterSave.value = false
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5466,10 +5443,6 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
-  if (accountCategory.value === 'oauth-based' && form.type === 'oauth') {
-    extra.openai_bps_enabled = bpsModeEnabled.value
-    extra.openai_bps_models = [...new Set(bpsModeModels.value.split('\n').map(s => s.trim()).filter(Boolean))]
-  }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5581,9 +5554,6 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 
 // Helper function to create account with mixed channel warning handling
 const doCreateAccount = async (payload: CreateAccountRequest) => {
-  if (payload.platform === 'openai_bps') {
-    throw new Error('Standalone BPS accounts are no longer supported')
-  }
   const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
     await submitCreateAccount(payload)
   })

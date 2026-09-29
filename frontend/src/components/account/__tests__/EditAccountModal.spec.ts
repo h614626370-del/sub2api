@@ -1738,24 +1738,3 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     wrapper.unmount()
   })
 })
-
-describe('EditAccountModal OpenAI BPS', () => {
-  it('keeps an empty token out of the update and tests the saved account', async () => {
-    const account = { ...buildOpenAIOAuthParentAccount(), extra: { openai_bps_enabled: true, openai_bps_models: ['gpt-6-astra'] }, credentials: { chatgpt_account_id: 'workspace', model_mapping: { 'gpt-6-astra': 'gpt-6-astra' } } }
-    updateAccountMock.mockReset().mockResolvedValue(account)
-    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
-    const wrapper = mountModal(account)
-    expect(wrapper.find('#bps-access-token').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="bps-mode-enabled"]').exists()).toBe(false)
-    await wrapper.get('[data-testid="bps-mode-models"]').setValue(' gpt-6-astra \ngpt-6-astra\ngpt-5.6-sol\n')
-    await wrapper.get('[data-testid="bps-save-and-test"]').trigger('click')
-    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    await vi.waitFor(() => expect(wrapper.emitted('test')).toEqual([[account]]))
-    expect(updateAccountMock.mock.calls[0][1].credentials).not.toHaveProperty('access_token')
-    expect(updateAccountMock.mock.calls[0][1].credentials.chatgpt_account_id).toBe('workspace')
-    expect(updateAccountMock.mock.calls[0][1].extra).toMatchObject({
-      openai_bps_enabled: true, openai_bps_models: ['gpt-6-astra', 'gpt-5.6-sol']
-    })
-    wrapper.unmount()
-  })
-})
