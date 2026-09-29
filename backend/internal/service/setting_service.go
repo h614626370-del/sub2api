@@ -147,6 +147,7 @@ type SettingService struct {
 	codexProbeTemplateMu               sync.Mutex
 	codexProbeTemplateCache            *cachedCodexProbeTemplate
 
+	cyberSessionBlockRuntimeMu    sync.Mutex
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
 
