@@ -69,9 +69,9 @@ func TestOpenAIBPSModelsExplicitCompositeAlias(t *testing.T) {
 	h.CodexModels(c)
 	require.Equal(t, 200, rec.Code)
 	require.Equal(t, "bps-astra", gjson.Get(rec.Body.String(), "models.0.slug").String())
-	require.False(t, gjson.Get(rec.Body.String(), "models.0.supports_parallel_tool_calls").Bool())
+	require.True(t, gjson.Get(rec.Body.String(), "models.0.supports_parallel_tool_calls").Bool())
 	require.False(t, gjson.Get(rec.Body.String(), "models.0.prefer_websockets").Bool())
-	require.Len(t, gjson.Get(rec.Body.String(), "models.0.supported_reasoning_levels").Array(), 4)
+	require.Len(t, gjson.Get(rec.Body.String(), "models.0.supported_reasoning_levels").Array(), 6)
 	group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"missing"}}
 	c, rec = bpsCatalogContext(group, "/v1/models")
 	h.Models(c)

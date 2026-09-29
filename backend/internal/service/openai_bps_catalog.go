@@ -20,10 +20,10 @@ func buildOpenAIBPSCodexModelsManifest(modelIDs []string) ([]byte, error) {
 }
 
 func applyOpenAIBPSModelCapabilities(model map[string]any) {
-	model["default_reasoning_level"] = "medium"
+	model["default_reasoning_level"] = "max"
 	model["multi_agent_reasoning_effort"] = "medium"
-	model["supported_reasoning_levels"] = []configuredCodexReasoningLevel{{"low", "Low"}, {"medium", "Medium"}, {"high", "High"}, {"xhigh", "Extra high"}}
-	model["supports_parallel_tool_calls"] = false
+	model["supported_reasoning_levels"] = []configuredCodexReasoningLevel{{"low", "Low"}, {"medium", "Medium"}, {"high", "High"}, {"xhigh", "Extra high"}, {"max", "Maximum"}, {"ultra", "Ultra"}}
+	model["supports_parallel_tool_calls"] = true
 	model["prefer_websockets"] = false
 	model["supports_reasoning_summary_parameter"] = false
 	model["support_verbosity"] = false

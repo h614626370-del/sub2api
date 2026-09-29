@@ -123,7 +123,7 @@ func (s *OpenAIGatewayService) PrepareOpenAIBPSRouting(c *gin.Context, body []by
 				continue
 			}
 			ref := item.Get("encrypted_content").String()
-			if !strings.HasPrefix(ref, bpsCompactPrefix) {
+			if ref == "" {
 				continue
 			}
 			var reference bpsCompactReference
@@ -131,7 +131,12 @@ func (s *OpenAIGatewayService) PrepareOpenAIBPSRouting(c *gin.Context, body []by
 				return err
 			}
 			if reference.Scope == "" {
-				return bpsExpired()
+				if strings.HasPrefix(ref, bpsCompactPrefix) {
+					return bpsExpired()
+				}
+				// Foreign native compaction requires an explicit session and
+				// account binding; it cannot identify a tenant by itself.
+				return bpsInvalid("BPS native compaction requires an established session")
 			}
 			scope = reference.Scope
 			break
@@ -175,7 +180,7 @@ func (s *OpenAIGatewayService) RestoreOpenAIBPSRouting(c *gin.Context, body []by
 	}
 	scope := s.bpsScope(c, body)
 	for _, item := range gjson.GetBytes(body, "input").Array() {
-		if strings.HasPrefix(item.Get("encrypted_content").String(), bpsCompactPrefix) {
+		if (item.Get("type").String() == "compaction" || item.Get("type").String() == "compaction_summary") && item.Get("encrypted_content").String() != "" {
 			if err := s.PrepareOpenAIBPSRouting(c, body); err != nil {
 				return err
 			}

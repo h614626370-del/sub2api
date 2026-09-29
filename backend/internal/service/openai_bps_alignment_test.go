@@ -159,7 +159,7 @@ func TestOpenAIBPSCompactedTurnLineage(t *testing.T) {
 			s, a := bpsFixture()
 			c, _ := bpsContext(1, "/responses")
 			user := bpsMessage("user", "complete pending work")
-			source := map[string]any{"model": "gpt-6-astra", "input": []any{user}, "tools": []any{bpsFunction("exec")}}
+			source := map[string]any{"model": "gpt-6-astra", "session_id": "lineage", "input": []any{user}, "tools": []any{bpsFunction("exec")}}
 			prepare := func(ctxPath string, src map[string]any) *bpsRequest {
 				t.Helper()
 				cx, _ := bpsContext(1, ctxPath)
@@ -174,7 +174,7 @@ func TestOpenAIBPSCompactedTurnLineage(t *testing.T) {
 			compactRequest := prepare("/responses/compact", source)
 			require.Equal(t, before.TurnID, compactRequest.TurnID)
 			require.Equal(t, 2, compactRequest.AgentIteration)
-			compactResponse, err := s.bpsTransformResponse(c.Request.Context(), a, compactRequest, bpsResponse(bpsText("The work is pending.")))
+			compactResponse, err := s.bpsTransformResponse(c.Request.Context(), a, compactRequest, bpsResponse(bpsNativeCompaction()))
 			require.NoError(t, err)
 			ref := bpsTestValue[[]any](t, compactResponse["output"])[0]
 			input := []any{ref}
@@ -199,7 +199,9 @@ func TestOpenAIBPSCompactedTurnLineage(t *testing.T) {
 			}
 			// Consecutive compactions retain the accumulated iteration baseline.
 			secondCompact := prepare("/responses/compact", source)
-			compactResponse, err = s.bpsTransformResponse(c.Request.Context(), a, secondCompact, bpsResponse(bpsText("Updated summary.")))
+			secondNative := bpsNativeCompaction()
+			secondNative["encrypted_content"] = "opaque-native-compaction-second"
+			compactResponse, err = s.bpsTransformResponse(c.Request.Context(), a, secondCompact, bpsResponse(secondNative))
 			require.NoError(t, err)
 			source["input"] = compactResponse["output"]
 			after = prepare("/responses", source)
@@ -306,6 +308,7 @@ func TestOpenAIBPSForwardToolsCompactStructuredContinuation(t *testing.T) {
 	for _, model := range OpenAIBPSDefaultModels() {
 		t.Run(model, func(t *testing.T) {
 			s, a := bpsFixture()
+			a.Credentials["model_mapping"] = map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-5.6-sol": "gpt-5.6-sol", "gpt-5.6-luna": "gpt-5.6-luna", "gpt-5.6-terra": "gpt-5.6-terra"}
 			tools := []any{bpsFunction("exec"), map[string]any{"type": "custom", "name": "apply_patch"}, map[string]any{"type": "function", "name": "update_plan", "parameters": map[string]any{"type": "object", "properties": map[string]any{"plan": map[string]any{"type": "array"}}, "required": []any{"plan"}}}}
 			source := bpsTestStructuredRequest(bpsTestStructuredFormat(true), false)
 			source["model"], source["input"], source["tools"] = model, []any{bpsMessage("user", "inspect, plan, patch, and finish")}, tools
@@ -351,7 +354,7 @@ func TestOpenAIBPSForwardToolsCompactStructuredContinuation(t *testing.T) {
 			require.Equal(t, turn, bpsTestValue[map[string]any](t, wire["metadata"])["turn_id"])
 			require.Contains(t, bpsJSON(wire), `status\":\"ok`)
 			appendResult(response, "patch applied")
-			compact, wire := invoke("/responses/compact", bpsText("Patch applied. Verify and return the final result."))
+			compact, wire := invoke("/responses/compact", bpsNativeCompaction())
 			require.Equal(t, "4", bpsTestValue[map[string]any](t, wire["metadata"])["agent_iteration"])
 			require.Equal(t, turn, bpsTestValue[map[string]any](t, wire["metadata"])["turn_id"])
 			source["input"] = compact["output"]

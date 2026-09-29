@@ -52,7 +52,7 @@ func (s *bpsMemoryStore) BPSBind(_ context.Context, k string, v []byte) ([]byte,
 	return v, nil
 }
 func bpsFixture() (*OpenAIGatewayService, *Account) {
-	return &OpenAIGatewayService{cache: &bpsMemoryStore{data: map[string][]byte{}}}, &Account{ID: 7, Platform: PlatformOpenAIBPS, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "test-secret", "chatgpt_account_id": "workspace-1", "model_mapping": map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-5.6-sol": "gpt-5.6-sol"}}}
+	return &OpenAIGatewayService{cache: &bpsMemoryStore{data: map[string][]byte{}}}, &Account{ID: 7, Platform: PlatformOpenAIBPS, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "test-secret", "chatgpt_account_id": "workspace-1", "model_mapping": map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-5.6-sol": "gpt-5.6-sol", "gpt-5.6-luna": "gpt-5.6-luna", "gpt-5.6-terra": "gpt-5.6-terra"}}}
 }
 func bpsContext(key int64, path string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
@@ -77,6 +77,9 @@ func bpsResponse(output ...any) map[string]any {
 }
 func bpsText(text string) map[string]any {
 	return map[string]any{"type": "message", "id": "msg_test", "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": text, "annotations": []any{}}}}
+}
+func bpsNativeCompaction() map[string]any {
+	return map[string]any{"type": "compaction", "id": "cmp_test", "status": "completed", "encrypted_content": "opaque-native-compaction"}
 }
 func bpsEvent(typ string, fields map[string]any) string {
 	fields["type"] = typ
@@ -146,7 +149,7 @@ func TestOpenAIBPSProtocolAndHeaders(t *testing.T) {
 	require.Equal(t, "workspace-1", req.Header.Get("chatgpt-account-id"))
 	require.Equal(t, "workspace-1", req.Header.Get("x-openai-account-id"))
 	require.Equal(t, "chatgpt", req.Header.Get("x-basispoints-auth-mode"))
-	for _, bad := range []string{`{"model":"gpt-6-astra","input":"hi","reasoning":{"effort":"max"}}`, `{"model":"gpt-6-astra","input":"hi","previous_response_id":"resp_1"}`, `{"model":"missing","input":"hi"}`, `{"model":"gpt-6-astra","input":[],"tools":[{"type":"function"}]}`} {
+	for _, bad := range []string{`{"model":"gpt-6-astra","input":"hi","reasoning":{"effort":"invalid"}}`, `{"model":"gpt-6-astra","input":"hi","previous_response_id":"resp_1"}`, `{"model":"missing","input":"hi"}`, `{"model":"gpt-6-astra","input":[],"tools":[{"type":"function"}]}`} {
 		_, err = s.prepareOpenAIBPS(c.Request.Context(), c, a, []byte(bad))
 		require.Error(t, err, bad)
 	}
@@ -225,10 +228,10 @@ func TestOpenAIBPSCompactionAndIsolation(t *testing.T) {
 	r, err := s.prepareOpenAIBPS(c.Request.Context(), c, a, body)
 	require.NoError(t, err)
 	require.Empty(t, r.Tools)
-	compact, err := s.bpsTransformResponse(c.Request.Context(), a, r, bpsResponse(bpsText("Real summary containing pending work.")))
+	compact, err := s.bpsTransformResponse(c.Request.Context(), a, r, bpsResponse(bpsNativeCompaction()))
 	require.NoError(t, err)
 	ref := bpsTestValue[[]any](t, compact["output"])[0]
-	require.Contains(t, bpsJSON(ref), bpsCompactPrefix)
+	require.Contains(t, bpsJSON(ref), "opaque-native-compaction")
 	nextBody := []byte(bpsJSON(map[string]any{"model": "gpt-6-astra", "input": []any{ref, bpsMessage("user", "continue")}, "tools": []any{bpsFunction("exec")}}))
 	// A new service instance, same shared store, can continue the conversation.
 	next := &OpenAIGatewayService{cache: s.cache}
@@ -238,8 +241,7 @@ func TestOpenAIBPSCompactionAndIsolation(t *testing.T) {
 	resumed, err := next.prepareOpenAIBPS(c2.Request.Context(), c2, a, nextBody)
 	require.NoError(t, err)
 	require.False(t, resumed.Compact)
-	require.Contains(t, string(resumed.Body), "Real summary")
-	require.NotContains(t, string(resumed.Body), bpsCompactPrefix)
+	require.Contains(t, string(resumed.Body), "opaque-native-compaction")
 	_, err = next.bpsTransformResponse(c2.Request.Context(), a, resumed, bpsResponse(bpsNative("after_compact", "exec", map[string]any{"command": "pwd"})))
 	require.NoError(t, err)
 	other := *a
@@ -309,14 +311,14 @@ func TestOpenAIBPSForward(t *testing.T) {
 	})
 	t.Run("native compaction signal", func(t *testing.T) {
 		s, a := bpsFixture()
-		s.httpUpstream = &bpsHTTPStub{contentType: "application/json", body: bpsJSON(bpsResponse(bpsText("summary")))}
+		s.httpUpstream = &bpsHTTPStub{contentType: "application/json", body: bpsJSON(bpsResponse(bpsNativeCompaction()))}
 		c, rec := bpsContext(1, "/v1/responses")
 		_, err := s.Forward(c.Request.Context(), c, a, bpsRequestBody([]any{bpsMessage("user", "task"), map[string]any{"type": "compaction_trigger"}}, true))
 		require.NoError(t, err)
-		require.Contains(t, rec.Body.String(), bpsCompactPrefix)
+		require.Contains(t, rec.Body.String(), "opaque-native-compaction")
 		require.NotContains(t, rec.Body.String(), `"text":"summary"`)
 		up := bpsTestValue[*bpsHTTPStub](t, s.httpUpstream)
-		require.NotContains(t, string(up.requestBody), "compaction_trigger")
+		require.Contains(t, string(up.requestBody), "compaction_trigger")
 	})
 }
 func TestOpenAIBPSHTTPFailoverBoundary(t *testing.T) {
@@ -339,12 +341,12 @@ func TestOpenAIBPSHTTPFailoverBoundary(t *testing.T) {
 func TestOpenAIBPSCatalogAndPlatform(t *testing.T) {
 	body, err := buildOpenAIBPSCodexModelsManifest(OpenAIBPSDefaultModels())
 	require.NoError(t, err)
-	require.Equal(t, 2, len(gjson.GetBytes(body, "models").Array()))
+	require.Equal(t, 4, len(gjson.GetBytes(body, "models").Array()))
 	for _, m := range gjson.GetBytes(body, "models").Array() {
-		require.False(t, m.Get("supports_parallel_tool_calls").Bool())
-		require.Equal(t, "medium", m.Get("default_reasoning_level").String())
-		require.Equal(t, 4, len(m.Get("supported_reasoning_levels").Array()))
-		require.NotContains(t, m.Get("supported_reasoning_levels").Raw, "max")
+		require.True(t, m.Get("supports_parallel_tool_calls").Bool())
+		require.Equal(t, "max", m.Get("default_reasoning_level").String())
+		require.Equal(t, 6, len(m.Get("supported_reasoning_levels").Array()))
+		require.Contains(t, m.Get("supported_reasoning_levels").Raw, "ultra")
 	}
 	platform, ok := DetectModelPlatform("gpt-6-astra")
 	require.True(t, ok)
@@ -401,8 +403,8 @@ func TestOpenAIBPSCompositeRequiresExplicitRule(t *testing.T) {
 	routes := []CompositeModelRoute{{PublicModel: "bps", UpstreamModel: "gpt-6-astra", TargetPlatform: PlatformOpenAIBPS, Endpoint: CompositeRouteEndpointResponses, MatchType: CompositeRouteMatchExact}}
 	body, err := buildCodexModelsManifestForAccounts(PlatformComposite, []string{"bps"}, []Account{*account}, &Group{Platform: PlatformComposite}, routes, true)
 	require.NoError(t, err)
-	require.False(t, gjson.GetBytes(body, "models.0.supports_parallel_tool_calls").Bool())
-	require.Equal(t, "medium", gjson.GetBytes(body, "models.0.default_reasoning_level").String())
+	require.True(t, gjson.GetBytes(body, "models.0.supports_parallel_tool_calls").Bool())
+	require.Equal(t, "max", gjson.GetBytes(body, "models.0.default_reasoning_level").String())
 }
 
 func TestOpenAIBPSCreateValidatesCredentials(t *testing.T) {
@@ -514,7 +516,7 @@ func TestOpenAIBPSCompactionWithoutSessionHeader(t *testing.T) {
 	r, err := s.prepareOpenAIBPS(c.Request.Context(), c, a, body)
 	require.NoError(t, err)
 	require.NoError(t, s.bpsBind(c.Request.Context(), r.Scope, a))
-	response, err := s.bpsTransformResponse(c.Request.Context(), a, r, bpsResponse(bpsText("real summary")))
+	response, err := s.bpsTransformResponse(c.Request.Context(), a, r, bpsResponse(bpsNativeCompaction()))
 	require.NoError(t, err)
 	nextBody := bpsRequestBody(append(bpsTestValue[[]any](t, response["output"]), bpsMessage("user", "continue")), false)
 	next, _ := bpsContext(9, "/responses")
@@ -524,11 +526,10 @@ func TestOpenAIBPSCompactionWithoutSessionHeader(t *testing.T) {
 	continued, err := fresh.prepareOpenAIBPS(next.Request.Context(), next, a, nextBody)
 	require.NoError(t, err)
 	require.Equal(t, r.Scope, continued.Scope)
-	require.Contains(t, string(continued.Body), "real summary")
-	require.NotContains(t, string(continued.Body), bpsCompactPrefix)
+	require.Contains(t, string(continued.Body), "opaque-native-compaction")
 	stranger, _ := bpsContext(10, "/responses")
 	stranger.Request.Header.Del("session_id")
-	require.ErrorContains(t, fresh.PrepareOpenAIBPSRouting(stranger, nextBody), "expired")
+	require.Error(t, fresh.PrepareOpenAIBPSRouting(stranger, nextBody))
 }
 
 func TestOpenAIBPSPassesUnknownNativeItemsAndEvents(t *testing.T) {
@@ -567,21 +568,22 @@ func TestOpenAIBPSPassesUnknownNativeItemsAndEvents(t *testing.T) {
 func TestOpenAIBPSFailedJSONPreservesUsage(t *testing.T) {
 	s, a := bpsFixture()
 	response := bpsResponse(bpsText("partial"))
-	response["status"] = "incomplete"
+	response["status"] = "failed"
 	s.httpUpstream = &bpsHTTPStub{contentType: "application/json", body: bpsJSON(response)}
 	c, rec := bpsContext(1, "/responses")
 	result, err := s.Forward(c.Request.Context(), c, a, bpsRequestBody("task", false))
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Equal(t, 100, result.Usage.InputTokens)
 	require.Equal(t, 12, result.Usage.OutputTokens)
-	require.Equal(t, 502, rec.Code)
+	require.Equal(t, 200, rec.Code)
+	require.Equal(t, "failed", gjson.Get(rec.Body.String(), "status").String())
 	require.False(t, result.SucceededForScheduling())
 }
 
 func TestOpenAIBPSStrictReasoningAndAuthRecovery(t *testing.T) {
 	s, a := bpsFixture()
 	c, _ := bpsContext(1, "/responses")
-	for _, effort := range []any{false, 7, "max", ""} {
+	for _, effort := range []any{false, 7, "invalid", ""} {
 		body := []byte(bpsJSON(map[string]any{"model": "gpt-6-astra", "input": "task", "reasoning": map[string]any{"effort": effort}}))
 		_, err := s.prepareOpenAIBPS(c.Request.Context(), c, a, body)
 		require.Error(t, err)
@@ -634,7 +636,11 @@ func TestOpenAIBPSConnectivityUsesBPSForBothModels(t *testing.T) {
 	for _, model := range OpenAIBPSDefaultModels() {
 		for _, mode := range []string{"", "compact"} {
 			gateway, account := bpsFixture()
-			upstream := &bpsHTTPStub{contentType: "application/json", body: bpsJSON(bpsResponse(bpsText("OK")))}
+			output := any(bpsText("OK"))
+			if mode == "compact" {
+				output = bpsNativeCompaction()
+			}
+			upstream := &bpsHTTPStub{contentType: "application/json", body: bpsJSON(bpsResponse(output))}
 			gateway.httpUpstream = upstream
 			tester := &AccountTestService{openaiGatewayService: gateway, accountRepo: &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}}
 			c, rec := bpsContext(1, "/admin/test")

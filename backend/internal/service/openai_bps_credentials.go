@@ -13,7 +13,23 @@ import (
 const OpenAIBPSResponsesURL = "https://bps.openai.com/basispoints/api/responses"
 const OpenAIBPSAttachmentsURL = "https://bps.openai.com/basispoints/api/attachments"
 
-func OpenAIBPSDefaultModels() []string { return []string{"gpt-6-astra", "gpt-5.6-sol"} }
+func OpenAIBPSDefaultModels() []string {
+	return []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"}
+}
+func bpsUpstreamModel(model string) string {
+	switch model {
+	case "gpt-6-sol", "gpt-5.6-sol-excel":
+		return "gpt-5.6-sol"
+	case "gpt-6-luna", "gpt-5.6-luna-excel":
+		return "gpt-5.6-luna"
+	case "gpt-6-terra", "gpt-5.6-terra-excel":
+		return "gpt-5.6-terra"
+	case "gpt-6-astra-excel":
+		return "gpt-6-astra"
+	default:
+		return model
+	}
+}
 
 // NormalizeOpenAIBPSCredentials extracts JWT metadata, not proof of authentication.
 // Only the BPS upstream can establish whether the supplied credential is usable.

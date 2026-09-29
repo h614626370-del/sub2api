@@ -46,7 +46,6 @@ type bpsCompactState struct {
 
 const bpsCompactPrefix = "bpscmp_v1_"
 const bpsToolProtocol = `This request comes from an external Responses client. Its tools run in the client, not in Excel. Use only the client tools listed below. To request one, call the native run_officejs tool with its code field containing a JSON-encoded object: {"name":"catalog tool name","arguments":{...}} for a function. For a custom tool set summary to exactly codex2api.custom/CATALOG_NAME and put its exact raw input in code, without JSON wrapping or Markdown fences. The marker must include the exact namespace-qualified catalog name. Include the namespace in the catalog tool name. Populate the native wrapper fields summary, extended_summary, destructive=false and references=[]. For functions the code field is JSON text. For custom tools it is opaque client input; the proxy never evaluates it as JavaScript or OfficeJS. Request exactly one client tool at a time. Do not call workbook or Office tools. The proxy converts the request and the client executes it. After receiving its real result, continue the task. Do not repeat a successful tool call. Tool catalog: `
-const bpsSummaryPrompt = `Summarize the conversation so a successor assistant can continue the user's task after earlier messages are discarded. Preserve the user's requests and constraints, decisions, important paths and code, completed work, actual tool results and errors, pending work and the immediate next step. Incorporate relevant earlier summaries. Return only the summary as plain text. Do not call tools.`
 
 func bpsDecode(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -64,6 +63,32 @@ func bpsMessage(role, text string) map[string]any {
 	return map[string]any{"type": "message", "role": role, "content": []any{map[string]any{"type": "input_text", "text": text}}}
 }
 func bpsJSON(v any) string { data, _ := json.Marshal(v); return string(data) }
+func bpsItem(raw any) map[string]any {
+	item, _ := raw.(map[string]any)
+	return item
+}
+func bpsNormalizeEffort(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "x-high", "extra-high", "extra_high", "max", "persistent":
+		return "xhigh"
+	case "minimal", "none":
+		return "low"
+	default:
+		return value
+	}
+}
+func bpsConfigurationEffort(item map[string]any) string {
+	for _, key := range []string{"reasoning_effort", "effort"} {
+		if value := stringValue(item[key]); value != "" {
+			return value
+		}
+	}
+	if reasoning, ok := item["reasoning"].(map[string]any); ok {
+		return stringValue(reasoning["effort"])
+	}
+	return ""
+}
 
 func bpsCollectTools(raw any, namespace string, result map[string]bpsTool, catalog *[]any, depth int) error {
 	if depth > 8 {
@@ -192,7 +217,7 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 	if !account.IsModelSupported(model) {
 		return nil, bpsInvalid("Model is not allowed by this BPS account")
 	}
-	r := &bpsRequest{APIKeyID: getAPIKeyIDFromContext(c), Source: source, Tools: map[string]bpsTool{}, Scope: s.bpsScope(c, body), Model: account.GetMappedModel(model), Effort: "medium"}
+	r := &bpsRequest{APIKeyID: getAPIKeyIDFromContext(c), Source: source, Tools: map[string]bpsTool{}, Scope: s.bpsScope(c, body), Model: bpsUpstreamModel(account.GetMappedModel(model)), Effort: "medium"}
 	if routing, ok := ctx.Value(bpsRoutingContextKey{}).(bpsRoutingContext); ok {
 		r.Scope = routing.Scope
 	}
@@ -207,6 +232,9 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 		}
 	}
 	rawEffort := source["reasoning_effort"]
+	if rawEffort == nil {
+		rawEffort = source["model_reasoning_effort"]
+	}
 	if raw, exists := source["reasoning"]; exists && raw != nil {
 		reasoning, ok := raw.(map[string]any)
 		if !ok {
@@ -219,17 +247,15 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 	if rawEffort != nil {
 		effort, ok := rawEffort.(string)
 		if !ok || effort == "" {
-			return nil, bpsInvalid("BPS reasoning effort must be low, medium, high or xhigh")
+			return nil, bpsInvalid("Invalid BPS reasoning effort")
 		}
 		r.Effort = effort
 	}
-	if r.Effort == "x-high" {
-		r.Effort = "xhigh"
-	}
+	r.Effort = bpsNormalizeEffort(r.Effort)
 	switch r.Effort {
-	case "low", "medium", "high", "xhigh":
+	case "low", "medium", "high", "xhigh", "ultra":
 	default:
-		return nil, bpsInvalid("BPS reasoning effort must be low, medium, high or xhigh")
+		return nil, bpsInvalid("Invalid BPS reasoning effort")
 	}
 	var input []any
 	switch v := source["input"].(type) {
@@ -239,6 +265,23 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 		input = v
 	default:
 		return nil, bpsInvalid("input must be a string or an array")
+	}
+	for index, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		if item["type"] == "compaction_trigger" && index != len(input)-1 {
+			return nil, bpsInvalid("compaction_trigger must be the final input item")
+		}
+		if item["type"] == "configuration_update" {
+			if value := bpsConfigurationEffort(item); value != "" && rawEffort == nil {
+				r.Effort = bpsNormalizeEffort(value)
+			}
+		}
+	}
+	if r.Effort != "low" && r.Effort != "medium" && r.Effort != "high" && r.Effort != "xhigh" && r.Effort != "ultra" {
+		return nil, bpsInvalid("Invalid BPS reasoning effort")
 	}
 	catalog, err := s.bpsPrepareTools(ctx, account, r, input)
 	if err != nil {
@@ -299,17 +342,41 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 			if ref == "" && r.Compact {
 				continue
 			}
-			if !strings.HasPrefix(ref, bpsCompactPrefix) {
-				return nil, bpsInvalid("BPS cannot replay compaction created by another provider")
+			if strings.HasPrefix(ref, bpsCompactPrefix) {
+				var compact bpsCompactState
+				if e := s.bpsGet(ctx, bpsStateKey(r.Scope, account, "compact", ref), &compact); e != nil {
+					return nil, e
+				}
+				translated = append(translated, bpsMessage("user", "<conversation_summary>\n"+compact.Summary+"\n</conversation_summary>"))
+				lastCompact = compact
+			} else {
+				if ref == "" {
+					return nil, bpsInvalid("BPS compaction is missing encrypted_content")
+				}
+				var compact bpsCompactState
+				if e := s.bpsGet(ctx, bpsStateKey(r.Scope, account, "compact", ref), &compact); e != nil {
+					return nil, e
+				}
+				lastCompact = compact
+				translated = append(translated, item)
 			}
-			var compact bpsCompactState
-			if e := s.bpsGet(ctx, bpsStateKey(r.Scope, account, "compact", ref), &compact); e != nil {
-				return nil, e
-			}
-			translated = append(translated, bpsMessage("user", "<conversation_summary>\n"+compact.Summary+"\n</conversation_summary>"))
-			compactIndex, compactRef, lastCompact = index, ref, compact
-		case "compaction_trigger", "additional_tools":
+			compactIndex, compactRef = index, ref
+		case "compaction_trigger":
+			translated = append(translated, item)
+		case "additional_tools":
 			continue
+		case "configuration_update":
+			for _, key := range []string{"reasoning_effort", "effort"} {
+				if value, ok := item[key].(string); ok {
+					item[key] = bpsNormalizeEffort(value)
+				}
+			}
+			if reasoning, ok := item["reasoning"].(map[string]any); ok {
+				if value, ok := reasoning["effort"].(string); ok {
+					reasoning["effort"] = bpsNormalizeEffort(value)
+				}
+			}
+			translated = append(translated, item)
 		case "item_reference":
 			return nil, bpsInvalid("BPS requires full items instead of item_reference")
 		default:
@@ -343,6 +410,9 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 	protocol := "This is an external Responses client without an Excel workbook. Return assistant text and do not call server-injected Excel or Office tools."
 	if len(r.Tools) > 0 {
 		protocol = bpsToolProtocol + bpsJSON(catalog)
+		if source["parallel_tool_calls"] != false {
+			protocol = strings.ReplaceAll(protocol, "Request exactly one client tool at a time.", "Each client tool call needs its own independent wrapper.")
+		}
 		if r.RequireTool {
 			protocol += " You must call one of the listed tools in this response."
 		}
@@ -350,14 +420,23 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 	if r.Structured != nil {
 		protocol += "\n" + r.Structured.instructions()
 	}
-	prologue = append(prologue, bpsMessage("developer", protocol))
+	if !r.Compact {
+		prologue = append(prologue, bpsMessage("developer", protocol))
+	}
 	translated = append(prologue, translated...)
 	if r.Compact {
-		translated = append(translated, bpsMessage("user", bpsSummaryPrompt))
+		if len(input) == 0 || stringValue(bpsItem(input[len(input)-1])["type"]) != "compaction_trigger" {
+			translated = append(translated, map[string]any{"type": "compaction_trigger"})
+		}
 	}
 	r.TurnID, r.AgentIteration = bpsTurnState(r.Scope, input, compactIndex, compactRef, lastCompact)
 	metadata := map[string]any{"task_id": uuid.NewSHA1(uuid.NameSpaceURL, []byte(r.Scope)).String(), "turn_id": r.TurnID, "agent_iteration": fmt.Sprint(r.AgentIteration)}
 	upstream := map[string]any{"model": r.Model, "model_selection": "explicit", "stream": true, "store": false, "input": translated, "reasoning_effort": r.Effort, "metadata": metadata, "prompt_cache_key": bpsDigest(r.Scope)}
+	if policy, exists := source["context_management"]; exists {
+		upstream["context_management"] = policy
+	} else {
+		upstream["context_management"] = []any{map[string]any{"type": "compaction", "compact_threshold": 200000}}
+	}
 	r.Body, _ = json.Marshal(upstream)
 	return r, nil
 }
@@ -454,6 +533,9 @@ func bpsConvertTool(native map[string]any, r *bpsRequest) (map[string]any, error
 		return client, nil
 	}
 	nativeName := stringValue(native["name"])
+	if status := native["status"]; status != nil && status != "completed" {
+		return invalid("BPS returned an incomplete tool call")
+	}
 	name := nativeName
 	var args map[string]any
 	if value, ok := native["arguments"].(map[string]any); ok {
@@ -577,37 +659,36 @@ func (s *OpenAIGatewayService) bpsTransformResponse(ctx context.Context, account
 		delete(response, "output_text")
 	}
 	if r.Compact {
-		summary := bpsOutputText(response)
-		if strings.TrimSpace(summary) == "" {
-			return nil, &bpsError{502, "bps_compaction_failed", "BPS did not return a conversation summary"}
+		if len(output) != 1 {
+			return nil, &bpsError{502, "bps_compaction_failed", "BPS did not return exactly one compaction item"}
 		}
 		for _, raw := range output {
-			if item, ok := raw.(map[string]any); ok && (item["type"] == "function_call" || item["type"] == "custom_tool_call") {
-				return nil, &bpsError{502, "bps_compaction_failed", "BPS requested a tool instead of returning a summary"}
+			item, _ := raw.(map[string]any)
+			if item["type"] != "compaction" || strings.TrimSpace(stringValue(item["encrypted_content"])) == "" {
+				return nil, &bpsError{502, "bps_compaction_failed", "BPS did not return a native compaction"}
 			}
 		}
-		ref := bpsCompactPrefix + uuid.NewString()
-		if e := s.bpsPut(ctx, bpsStateKey(r.Scope, account, "compact", ref), bpsCompactState{Summary: summary, TurnID: r.TurnID, AgentIteration: r.AgentIteration}); e != nil {
-			return nil, e
-		}
-		if e := s.bpsPut(ctx, bpsCompactReferenceKey(r.APIKeyID, ref), bpsCompactReference{Scope: r.Scope}); e != nil {
-			return nil, e
-		}
-		response["output"] = []any{map[string]any{"type": "compaction", "id": "cmp_" + uuid.NewString(), "status": "completed", "encrypted_content": ref}}
 		delete(response, "output_text")
 	} else {
 		count := 0
+		seenCalls := map[string]bool{}
 		for _, raw := range output {
 			if item, ok := raw.(map[string]any); ok && (item["type"] == "function_call" || item["type"] == "custom_tool_call") {
 				count++
+				id := stringValue(item["call_id"])
+				if id == "" || seenCalls[id] {
+					return nil, &bpsError{502, "bps_invalid_tool_call", "BPS returned missing or repeated tool call IDs"}
+				}
+				seenCalls[id] = true
 			}
 		}
-		if count > 1 {
+		if count > 1 && r.Source["parallel_tool_calls"] == false {
 			return nil, &bpsError{502, "bps_parallel_tools_unsupported", "BPS must return one client tool at a time"}
 		}
-		if r.RequireTool && count == 0 {
+		if r.RequireTool && count == 0 && !bpsHasRefusal(output) {
 			return nil, &bpsError{502, "bps_tool_required", "BPS did not return the required client tool"}
 		}
+		clients := make(map[int]map[string]any)
 		for i, raw := range output {
 			item, ok := raw.(map[string]any)
 			if !ok {
@@ -620,12 +701,33 @@ func (s *OpenAIGatewayService) bpsTransformResponse(ctx context.Context, account
 			if e != nil {
 				return nil, e
 			}
-			if e = s.bpsPut(ctx, bpsStateKey(r.Scope, account, "call", stringValue(item["call_id"])), bpsNativeCall{Native: item, Client: client}); e != nil {
+			clients[i] = client
+		}
+		// Validate all calls before persisting any replay authorization.
+		for i, client := range clients {
+			item := bpsItem(output[i])
+			if e := s.bpsPut(ctx, bpsStateKey(r.Scope, account, "call", stringValue(item["call_id"])), bpsNativeCall{Native: item, Client: client}); e != nil {
 				return nil, e
 			}
 			output[i] = client
 		}
 		response["output"] = output
+	}
+	for _, raw := range output {
+		item := bpsItem(raw)
+		if item["type"] != "compaction" {
+			continue
+		}
+		ref := strings.TrimSpace(stringValue(item["encrypted_content"]))
+		if ref == "" {
+			return nil, &bpsError{502, "bps_compaction_failed", "BPS compaction is missing encrypted_content"}
+		}
+		if e := s.bpsPut(ctx, bpsStateKey(r.Scope, account, "compact", ref), bpsCompactState{TurnID: r.TurnID, AgentIteration: r.AgentIteration}); e != nil {
+			return nil, e
+		}
+		if e := s.bpsPut(ctx, bpsCompactReferenceKey(r.APIKeyID, ref), bpsCompactReference{Scope: r.Scope}); e != nil {
+			return nil, e
+		}
 	}
 	response["model"] = r.Source["model"]
 	return response, nil

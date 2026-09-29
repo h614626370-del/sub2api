@@ -150,7 +150,7 @@ func TestOpenAIBPSStructuredToolsRefusalsAndCompaction(t *testing.T) {
 	r, err := s.prepareOpenAIBPS(c.Request.Context(), c, a, []byte(bpsJSON(bpsTestStructuredRequest(bpsTestStructuredFormat(true), false))))
 	require.NoError(t, err)
 	require.Nil(t, r.Structured)
-	response, err := s.bpsTransformResponse(c.Request.Context(), a, r, bpsResponse(bpsText("A plain summary.")))
+	response, err := s.bpsTransformResponse(c.Request.Context(), a, r, bpsResponse(bpsNativeCompaction()))
 	require.NoError(t, err)
 	require.Equal(t, "compaction", bpsTestValue[map[string]any](t, bpsTestValue[[]any](t, response["output"])[0])["type"])
 }
@@ -165,10 +165,15 @@ func TestOpenAIBPSStructuredInterruptedStreamNeverLeaksText(t *testing.T) {
 		}
 		s.httpUpstream = &bpsHTTPStub{contentType: "text/event-stream", body: raw}
 		result, err := s.Forward(c.Request.Context(), c, a, []byte(bpsJSON(bpsTestStructuredRequest(bpsTestStructuredFormat(true), true))))
-		require.Error(t, err)
+		if terminal == "" {
+			require.Error(t, err)
+		} else {
+			require.NoError(t, err)
+			require.False(t, result.SucceededForScheduling())
+		}
 		require.NotContains(t, rec.Body.String(), "unvalidated partial content")
 		require.NotContains(t, rec.Body.String(), "event: response.completed")
-		require.Contains(t, rec.Body.String(), "response.failed")
+		require.Contains(t, rec.Body.String(), strings.TrimPrefix(terminal, "response."))
 		if terminal != "" {
 			require.Equal(t, 42, result.Usage.InputTokens)
 		}

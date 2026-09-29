@@ -167,7 +167,9 @@ func readBPSEvents(resp *http.Response, maxSize int, consume func(string, map[st
 			return e
 		}
 		event := "response.completed"
-		if response["status"] != "completed" {
+		if response["status"] == "incomplete" {
+			event = "response.incomplete"
+		} else if response["status"] != "completed" {
 			event = "response.failed"
 		}
 		return consume(event, map[string]any{"type": event, "response": response})
@@ -384,8 +386,12 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 	sequence := 0
 	created := false
 	completed := false
+	initialResponseID := ""
 	seenItems := map[string]bool{}
 	pendingTools := map[string]bool{}
+	var compactDone map[string]any
+	compactDoneCount := 0
+	terminalEvent := "response.completed"
 	lastDownstreamWrite := time.Now()
 	keepaliveCount := 0
 	defer func() {
@@ -441,10 +447,40 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		if completed {
 			return nil
 		}
-		if typ == "response.failed" || typ == "response.incomplete" || typ == "error" {
+		if typ == "response.failed" || typ == "response.incomplete" {
 			if v, ok := payload["response"].(map[string]any); ok {
 				result.Usage = bpsReadUsage(v)
+				clean := map[string]any{}
+				for key, value := range v {
+					clean[key] = value
+				}
+				clean["status"] = strings.TrimPrefix(typ, "response.")
+				clean["model"] = r.Source["model"]
+				output, _ := clean["output"].([]any)
+				filtered := make([]any, 0, len(output))
+				for _, raw := range output {
+					item, _ := raw.(map[string]any)
+					if item != nil && item["type"] != "function_call" && item["type"] != "custom_tool_call" {
+						filtered = append(filtered, item)
+					}
+				}
+				clean["output"] = filtered
+				if r.Structured != nil {
+					clean["output"] = []any{}
+					delete(clean, "output_text")
+				}
+				if !r.Stream {
+					c.JSON(http.StatusOK, clean)
+				} else if e := emit(typ, map[string]any{"response": clean}); e != nil {
+					return e
+				}
+				terminalEvent = typ
+				completed = true
+				return nil
 			}
+			return &bpsError{502, "bps_response_failed", "BPS failed to complete the response"}
+		}
+		if typ == "error" {
 			return &bpsError{502, "bps_response_failed", "BPS failed to complete the response"}
 		}
 		if typ == "response.completed" || typ == "response.done" {
@@ -456,6 +492,11 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 			result.ResponseID = stringValue(response["id"])
 			result.UpstreamResponseModel = stringValue(response["model"])
 			output, _ := response["output"].([]any)
+			if r.Compact && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+				if len(output) != 1 || compactDoneCount != 1 || bpsJSON(compactDone) != bpsJSON(output[0]) {
+					return &bpsError{502, "bps_compaction_failed", "BPS compaction events do not match the completed output"}
+				}
+			}
 			for _, raw := range output {
 				item, _ := raw.(map[string]any)
 				if item["type"] == "function_call" || item["type"] == "custom_tool_call" {
@@ -465,9 +506,28 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 			if len(pendingTools) > 0 {
 				return &bpsError{502, "bps_invalid_tool_call", "BPS completed response omitted an original tool item"}
 			}
+			if !r.Compact && len(r.Tools) > 0 {
+				var correctionErr error
+				response, correctionErr = s.bpsCorrectTools(ctx, account, r, response, proxyURL, maxSize, func() error {
+					if !created || !r.Stream {
+						return nil
+					}
+					keepaliveCount++
+					return emit("response.in_progress", map[string]any{"response": map[string]any{"id": c.GetString("bps_response_id"), "object": "response", "status": "in_progress", "model": r.Source["model"]}})
+				})
+				if correctionErr != nil {
+					return correctionErr
+				}
+				result.Usage = bpsReadUsage(response)
+				result.ResponseID = stringValue(response["id"])
+			}
 			transformed, e := s.bpsTransformResponse(ctx, account, r, response)
 			if e != nil {
 				return e
+			}
+			if created && initialResponseID != "" && len(r.Tools) > 0 {
+				transformed["id"] = initialResponseID
+				result.ResponseID = initialResponseID
 			}
 			if !r.Stream {
 				if r.Compact && isOpenAIResponsesCompactPath(c) {
@@ -551,6 +611,13 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 			pendingTools[stringValue(item["id"])+"\x00"+stringValue(item["call_id"])] = true
 		}
 		if r.Compact {
+			if typ == "response.output_item.done" && item["type"] == "compaction" {
+				compactDoneCount++
+				compactDone = item
+			}
+			return nil
+		}
+		if len(r.Tools) > 0 && typ != "response.created" && typ != "response.in_progress" {
 			return nil
 		}
 		if r.Structured != nil && bpsStructuredMessageEvent(typ, item) {
@@ -580,6 +647,9 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		}
 		if typ == "response.created" {
 			created = true
+			if initial, ok := payload["response"].(map[string]any); ok {
+				initialResponseID = stringValue(initial["id"])
+			}
 		}
 		if !bpsSafeStreamingEvent(typ) {
 			if strings.TrimSpace(typ) == "" || strings.ContainsAny(typ, "\r\n") {
@@ -617,7 +687,7 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		result.UpstreamTerminalEvent = "response.failed"
 		return result, err
 	}
-	result.UpstreamTerminalEvent = "response.completed"
+	result.UpstreamTerminalEvent = terminalEvent
 	return result, nil
 }
 
