@@ -27,7 +27,7 @@ func applyOpenAIBPSModelCapabilities(model map[string]any) {
 	model["prefer_websockets"] = false
 	model["supports_reasoning_summary_parameter"] = false
 	model["support_verbosity"] = false
-	model["input_modalities"] = []string{"text"}
+	model["input_modalities"] = []string{"text", "image"}
 	model["supports_image_detail_original"] = false
 	model["supports_search_tool"] = false
 	model["experimental_supported_tools"] = []string{}

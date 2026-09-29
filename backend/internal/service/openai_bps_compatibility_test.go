@@ -132,7 +132,7 @@ func TestBPSCompatibilityCatalogModeAndRoutes(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.False(t, gjson.GetBytes(updated, "models.0.supports_search_tool").Bool())
-	require.Equal(t, `["text"]`, gjson.GetBytes(updated, "models.0.input_modalities").Raw)
+	require.Equal(t, `["text","image"]`, gjson.GetBytes(updated, "models.0.input_modalities").Raw)
 	require.Equal(t, `[]`, gjson.GetBytes(updated, "models.0.experimental_supported_tools").Raw)
 	require.True(t, gjson.GetBytes(updated, "models.1.supports_search_tool").Bool())
 	require.Equal(t, "preserved", gjson.GetBytes(updated, "other").String())

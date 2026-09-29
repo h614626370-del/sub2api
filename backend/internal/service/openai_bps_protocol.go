@@ -316,6 +316,19 @@ func (s *OpenAIGatewayService) prepareOpenAIBPS(ctx context.Context, c *gin.Cont
 			if parts, ok := item["content"].([]any); ok {
 				for _, raw := range parts {
 					if part, ok := raw.(map[string]any); ok && (part["type"] == "input_image" || part["type"] == "input_audio" || part["type"] == "input_file") {
+						if part["type"] == "input_image" {
+							if id := strings.TrimSpace(stringValue(part["file_id"])); id != "" {
+								continue
+							}
+							url := part["image_url"]
+							if nested, ok := url.(map[string]any); ok {
+								url = nested["url"]
+							}
+							if text, ok := url.(string); ok && strings.TrimSpace(text) != "" {
+								continue
+							}
+							return nil, bpsInvalid("BPS image input requires image_url or file_id")
+						}
 						return nil, bpsInvalid("BPS currently supports text input only")
 					}
 				}

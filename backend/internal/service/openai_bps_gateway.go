@@ -288,7 +288,7 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 	}
 	c.Set("bps_upstream_model", r.Model)
 	ctx = WithHTTPUpstreamRedirectsDisabled(ctx)
-	req, err := buildOpenAIBPSRequest(ctx, account, r.Body)
+	_, err = buildOpenAIBPSRequest(ctx, account, r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -297,37 +297,65 @@ func (s *OpenAIGatewayService) forwardOpenAIBPS(ctx context.Context, c *gin.Cont
 		proxyURL = account.Proxy.URL()
 	}
 	SetActualOpenAIUpstreamEndpoint(c, "/basispoints/api/responses")
-	snapshot := OpenAIBPSCredentialSnapshot{AccessToken: strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "), AccountID: req.Header.Get("chatgpt-account-id")}
+	snapshot := OpenAIBPSCredentialSnapshotFromAccount(account)
 	ctx = context.WithValue(ctx, bpsCredentialSnapshotContextKey{}, snapshot)
-	req = req.WithContext(ctx)
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
-	if err != nil {
-		if !bpsHasBinding(ctx) && ctx.Err() == nil {
-			return nil, &UpstreamFailoverError{StatusCode: 502, ClientMessage: "BPS upstream is temporarily unavailable"}
+	var resp *http.Response
+	freshPictures := make(map[string]bool)
+	for attempt := 0; attempt <= 4; attempt++ {
+		var sent bpsPictureSent
+		var pictureBody []byte
+		pictureBody, sent, err = s.prepareOpenAIBPSImages(ctx, account, r.Body, freshPictures)
+		if err != nil {
+			return nil, err
 		}
-		return nil, err
-	}
-	if resp.StatusCode == http.StatusUnauthorized && account.OpenAIBPSEnabled() {
-		fresh, refreshErr := s.bpsOAuthCredentials(ctx, account, snapshot.AccessToken)
-		if refreshErr != nil && account.GetOpenAIRefreshToken() == "" {
-			_ = s.bpsHTTPError(ctx, c, account, resp, r.Model)
-			_ = resp.Body.Close()
-			return nil, &bpsError{401, "bps_reauthorization_required", "BPS authentication failed; reauthorize the OpenAI OAuth account"}
+		req, reqErr := buildOpenAIBPSRequest(ctx, account, pictureBody)
+		if reqErr != nil {
+			return nil, reqErr
 		}
-		if refreshErr == nil && fresh.GetCredential("access_token") != snapshot.AccessToken {
-			_ = resp.Body.Close()
-			account = fresh
-			req, err = buildOpenAIBPSRequest(ctx, account, r.Body)
-			if err != nil {
-				return nil, err
+		resp, err = s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+		if err != nil {
+			if !bpsHasBinding(ctx) && ctx.Err() == nil {
+				return nil, &UpstreamFailoverError{StatusCode: 502, ClientMessage: "BPS upstream is temporarily unavailable"}
 			}
-			snapshot = OpenAIBPSCredentialSnapshotFromAccount(account)
-			ctx = context.WithValue(ctx, bpsCredentialSnapshotContextKey{}, snapshot)
-			resp, err = s.httpUpstream.Do(req.WithContext(ctx), proxyURL, account.ID, account.Concurrency)
-			if err != nil {
-				return nil, err
+			return nil, err
+		}
+		if resp.StatusCode == http.StatusUnauthorized && account.OpenAIBPSEnabled() {
+			next, refreshErr := s.bpsOAuthCredentials(ctx, account, snapshot.AccessToken)
+			if refreshErr != nil && account.GetOpenAIRefreshToken() == "" {
+				_ = s.bpsHTTPError(ctx, c, account, resp, r.Model)
+				_ = resp.Body.Close()
+				return nil, &bpsError{401, "bps_reauthorization_required", "BPS authentication failed; reauthorize the OpenAI OAuth account"}
+			}
+			if refreshErr == nil && next.GetCredential("access_token") != snapshot.AccessToken {
+				_ = resp.Body.Close()
+				account = next
+				snapshot = OpenAIBPSCredentialSnapshotFromAccount(account)
+				ctx = context.WithValue(ctx, bpsCredentialSnapshotContextKey{}, snapshot)
+				req, err = buildOpenAIBPSRequest(ctx, account, pictureBody)
+				if err != nil {
+					return nil, err
+				}
+				resp, err = s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
+		if attempt < 4 && (resp.StatusCode == 400 || resp.StatusCode == 422) {
+			if len(sent.inline) > 0 {
+				_ = resp.Body.Close()
+				s.bpsRefuseInline(account, sent.inline)
+				slog.InfoContext(ctx, "bps_image_retry", "mode", "attachment", "attempt", attempt+1)
+				continue
+			}
+			if len(sent.reused) > 0 {
+				_ = resp.Body.Close()
+				s.bpsForgetPictures(account, sent.reused)
+				slog.InfoContext(ctx, "bps_image_retry", "mode", "renew_attachment", "attempt", attempt+1)
+				continue
+			}
+		}
+		break
 	}
 	c.Set("bps_upstream_status", resp.StatusCode)
 	requestID := strings.ReplaceAll(resp.Header.Get("x-request-id"), snapshot.AccessToken, "[REDACTED]")

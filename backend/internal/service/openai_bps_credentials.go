@@ -11,6 +11,7 @@ import (
 )
 
 const OpenAIBPSResponsesURL = "https://bps.openai.com/basispoints/api/responses"
+const OpenAIBPSAttachmentsURL = "https://bps.openai.com/basispoints/api/attachments"
 
 func OpenAIBPSDefaultModels() []string { return []string{"gpt-6-astra", "gpt-5.6-sol"} }
 

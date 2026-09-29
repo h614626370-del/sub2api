@@ -490,6 +490,8 @@ type OpenAIGatewayService struct {
 	openaiModelTransient           *openAIAccountModelTransientState
 	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
 	openaiProxyStreamFailOpenLogAt atomic.Int64
+	bpsPictureCache                *bpsPictureCache
+	bpsPictureCacheOnce            sync.Once
 
 	openaiWSFallbackUntil               sync.Map // key: int64(accountID), value: time.Time
 	openaiAccountRuntimeBlockUntil      sync.Map // key: int64(accountID), value: time.Time
