@@ -105,6 +105,28 @@ func TestHandleOpenAITransientError_DoesNotBlockParameter400(t *testing.T) {
 	require.False(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.5"))
 }
 
+func TestOpenAIRequestRuntimeBlock_ForwardTicketModelPreservesTransientScope(t *testing.T) {
+	for _, blockedModel := range []string{"upstream-a", "channel-model"} {
+		t.Run(blockedModel, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			account := &Account{
+				ID:       5108,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{"public-alias": "upstream-a"},
+				},
+			}
+			for range 2 {
+				svc.recordOpenAIAccountModelTransientFailure(account, blockedModel, time.Now())
+			}
+			ctx := WithOpenAIForwardModel(context.Background(), "channel-model", false)
+			require.Equal(t, blockedModel == "upstream-a",
+				svc.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, account, "public-alias", false))
+		})
+	}
+}
+
 func TestHandleOpenAITransientError_HardDisableStillBlocksWholeAccount(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 5106, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}

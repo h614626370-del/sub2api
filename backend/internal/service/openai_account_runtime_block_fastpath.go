@@ -564,13 +564,14 @@ func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlockedWithContext(c
 	if s == nil {
 		return false
 	}
+	ticketModel := requestedModel
 	if forwardModel, ok := openAIForwardModelFromContext(ctx); ok {
 		if strings.TrimSpace(forwardModel.model) != "" {
-			requestedModel = forwardModel.model
+			ticketModel = forwardModel.model
 		}
 		requireCompact = forwardModel.useCompactModelMapping
 	}
-	outboundModel := s.openAICodexTicketOutboundModel(account, requestedModel, requireCompact)
+	outboundModel := s.openAICodexTicketOutboundModel(account, ticketModel, requireCompact)
 	if s.openAICodexTicketBlocksAccount(account, outboundModel) {
 		return true
 	}
