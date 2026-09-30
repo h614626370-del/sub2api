@@ -21,6 +21,19 @@ spec.loader.exec_module(release)
 
 
 class ReleaseMatrixTest(unittest.TestCase):
+    def test_reauth_runtime_validates_custom_revision_before_build(self):
+        script = (ROOT / 'tools/reauth-runtime/build.sh').read_text()
+        validation, marker, _ = script.partition('runtime_output=$(mktemp -d)')
+        self.assertTrue(marker, 'runtime validation must run before creating build output')
+        for version, expected in [('2.9.6', 0), ('2.9.6.1', 0), ('2.9.6.2', 0),
+                                  ('2.9.6.10-rc.1', 0), ('2.9.6.1.2', 1), ('../../other', 1)]:
+            for arch in ('amd64', 'arm64'):
+                with self.subTest(version=version, arch=arch):
+                    result = subprocess.run(['bash', '-c', 'VERSION=$1\nARCH=$2\n' + validation,
+                                             'validate-runtime-release', version, arch],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+
     def test_custom_revision_release_archive_names(self):
         self.assertEqual(release.archive_name('2.9.6.1', {'goos': 'linux', 'goarch': 'amd64'}),
                          'sub2api_2.9.6.1_linux_amd64.tar.gz')
