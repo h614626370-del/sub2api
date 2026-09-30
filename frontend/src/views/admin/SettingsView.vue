@@ -7858,6 +7858,31 @@
           </div>
         </div>
 
+        <div class="card" data-testid="bps403-session-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.features.riskControl.bps403Title') }}</h2>
+            <p class="mt-1 text-sm text-gray-500">{{ t('admin.settings.features.riskControl.bps403Hint') }}</p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <label for="bps403-session-block-enabled" class="text-sm font-medium">{{ t('admin.settings.features.riskControl.bps403Block') }}</label>
+              <Toggle id="bps403-session-block-enabled" v-model="form.bps403_session_block_enabled" />
+            </div>
+            <div v-if="form.bps403_session_block_enabled">
+              <label class="input-label" for="bps403-session-ttl">{{ t('admin.settings.features.riskControl.cyberSessionBlockTTL') }}</label>
+              <input id="bps403-session-ttl" v-model.number="form.bps403_session_block_ttl_seconds" type="number" min="1" max="604800" class="input" />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label for="bps403-capture-enabled" class="text-sm font-medium">{{ t('admin.settings.features.riskControl.bps403Capture') }}</label>
+                <p class="mt-1 text-xs text-gray-500">{{ t('admin.settings.features.riskControl.bps403CaptureHint') }}</p>
+              </div>
+              <Toggle id="bps403-capture-enabled" v-model="form.bps403_capture_enabled" />
+            </div>
+            <router-link v-if="form.bps403_capture_enabled" to="/admin/request-captures" class="text-sm text-primary-600 underline">{{ t('admin.settings.features.riskControl.bps403ViewCaptures') }}</router-link>
+          </div>
+        </div>
+
         <!-- Affiliate (邀请返利) feature card -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -10164,7 +10189,10 @@ const form = reactive<SettingsForm>({
   payment_enabled: false,
   risk_control_enabled: false,
   cyber_session_block_enabled: false,
+  bps403_capture_enabled: false,
+  bps403_session_block_enabled: false,
   cyber_session_block_ttl_seconds: 3600,
+  bps403_session_block_ttl_seconds: 3600,
   cyber_session_identity_strict_enabled: false,
   payment_min_amount: 1,
   payment_max_amount: 10000,
@@ -12169,6 +12197,9 @@ async function saveSettings() {
       payment_enabled: form.payment_enabled,
       risk_control_enabled: form.risk_control_enabled,
       cyber_session_block_enabled: form.cyber_session_block_enabled,
+      bps403_session_block_enabled: form.bps403_session_block_enabled,
+      bps403_capture_enabled: form.bps403_capture_enabled,
+      bps403_session_block_ttl_seconds: Number(form.bps403_session_block_ttl_seconds) || 3600,
       cyber_session_block_ttl_seconds:
         Number(form.cyber_session_block_ttl_seconds) || 3600,
       cyber_session_identity_strict_enabled:

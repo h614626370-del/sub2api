@@ -644,8 +644,17 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.CyberSessionBlockEnabled != after.CyberSessionBlockEnabled {
 		changed = append(changed, "cyber_session_block_enabled")
 	}
+	if before.BPS403CaptureEnabled != after.BPS403CaptureEnabled {
+		changed = append(changed, "bps403_capture_enabled")
+	}
+	if before.BPS403SessionBlockEnabled != after.BPS403SessionBlockEnabled {
+		changed = append(changed, "bps403_session_block_enabled")
+	}
 	if before.CyberSessionBlockTTLSeconds != after.CyberSessionBlockTTLSeconds {
 		changed = append(changed, "cyber_session_block_ttl_seconds")
+	}
+	if before.BPS403SessionBlockTTLSeconds != after.BPS403SessionBlockTTLSeconds {
+		changed = append(changed, "bps403_session_block_ttl_seconds")
 	}
 	if before.CyberSessionIdentityStrictEnabled != after.CyberSessionIdentityStrictEnabled {
 		changed = append(changed, "cyber_session_identity_strict_enabled")

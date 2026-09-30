@@ -77,6 +77,7 @@ func ReadRequestBodyWithPreallocLimit(req *http.Request, maxDecodedBytes int64) 
 func readRequestBodyWithPrealloc(req *http.Request, maxDecodedBytes int64, strict bool) (result []byte, resultErr error) {
 	defer func() {
 		if resultErr == nil && req != nil {
+			requestcapture.RememberDeferredBody(req.Context(), result)
 			requestcapture.FromContext(req.Context()).ClientRequest(result, req.Header.Get("Content-Type"), req.Header)
 		}
 	}()

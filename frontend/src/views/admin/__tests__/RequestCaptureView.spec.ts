@@ -14,6 +14,16 @@ const options = { global: { stubs: { AppLayout: { template: '<div><slot /></div>
 beforeEach(() => { vi.clearAllMocks(); mocks.listTasks.mockResolvedValue({ items: [task], stats: {}, has_more: false }); mocks.list.mockResolvedValue({ items: [{ id: 7, email: 'user@test' }], total: 1 }); mocks.createTask.mockResolvedValue(task); mocks.listRecords.mockResolvedValue({ items: [record], has_more: false }); mocks.getRecord.mockResolvedValue(record); mocks.getContent.mockResolvedValue({ text: '<img src=x onerror=alert(1)>', next_offset: 10, has_more: true }) })
 afterEach(() => vi.restoreAllMocks())
 describe('request capture page', () => {
+  it('lists automatic BPS 403 captures without offering manual capture creation', async () => {
+    mocks.listTasks.mockResolvedValue({ items: [{ ...task, target_type: 'bps403', status: 'stopped' }], stats: { manual_enabled: false }, has_more: false })
+    const wrapper = mount(View, options); await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.requestCapture.bps403')
+    await wrapper.findAll('button').find(b => b.text().includes('#7'))!.trigger('click'); await flushPromises()
+    expect(mocks.listRecords).toHaveBeenCalledWith('task', 1, '', true)
+    expect(mocks.createTask).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('validates duration and defaults media capture off', async () => {
     const wrapper = mount(View, options); await flushPromises()
     await wrapper.findAll('select')[1]!.setValue('7')

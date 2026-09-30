@@ -15,7 +15,7 @@
         <span v-if="stats.admission_skipped">{{ t('admin.requestCapture.admissionSkipped') }}: {{ stats.admission_skipped }}</span>
         <strong v-if="stats.storage_error" class="text-red-600">{{ t('admin.requestCapture.storageError') }}</strong>
       </div>
-      <form class="card space-y-4 p-5" @submit.prevent="create">
+      <form v-if="stats?.manual_enabled !== false" class="card space-y-4 p-5" @submit.prevent="create">
         <h2 class="text-lg font-semibold">{{ t('admin.requestCapture.create') }}</h2>
         <div class="grid gap-4 md:grid-cols-4">
           <label class="space-y-1"><span class="input-label">{{ t('admin.requestCapture.targetType') }}</span><select v-model="targetType" class="input"><option v-for="kind in kinds" :key="kind" :value="kind">{{ t('admin.requestCapture.' + kind) }}</option></select></label>

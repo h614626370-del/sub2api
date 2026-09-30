@@ -2,15 +2,17 @@ import { apiClient } from '../client'
 
 export type CaptureTarget = 'user' | 'account' | 'group'
 export interface CaptureTask {
-  id: string; instance_id: string; target_type: CaptureTarget; target_id: number; target_name: string
+  id: string; instance_id: string; target_type: CaptureTarget | 'bps403'; target_id: number; target_name: string
   save_media: boolean; created_at: string; expires_at: string; ended_at?: string
   status: string; reason?: string; requests: number; partial: number; skipped: number; bytes: number
 }
 export interface CapturePart {
+  url?: string
   name: string; stage: string; attempt: number; turn: number; content_type: string
   headers?: Record<string, string>; bytes: number; omitted?: string
 }
 export interface CaptureRecord {
+  api_key_id?: number; session_hash?: string
   id: string; task_id: string; request_id: string; client_request_id?: string; instance_id: string
   user_id: number; group_id: number; routed_group_id?: number; model?: string; path: string
   protocol: string; status: number; is_error: boolean; turn?: number; partial: boolean; reason?: string
@@ -19,6 +21,7 @@ export interface CaptureRecord {
   parts: CapturePart[]; usage?: Record<string, number>
 }
 export interface CaptureStats {
+  manual_enabled?: boolean
   instance_id: string; used_bytes: number; buffer_bytes: number; peak_buffer_bytes: number
   active_requests: number; admission_skipped: number; storage_error: boolean
 }

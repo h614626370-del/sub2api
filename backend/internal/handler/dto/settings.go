@@ -349,7 +349,10 @@ type SystemSettings struct {
 
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled          bool `json:"cyber_session_block_enabled"`
+	BPS403CaptureEnabled              bool `json:"bps403_capture_enabled"`
+	BPS403SessionBlockEnabled         bool `json:"bps403_session_block_enabled"`
 	CyberSessionBlockTTLSeconds       int  `json:"cyber_session_block_ttl_seconds"`
+	BPS403SessionBlockTTLSeconds      int  `json:"bps403_session_block_ttl_seconds"`
 	CyberSessionIdentityStrictEnabled bool `json:"cyber_session_identity_strict_enabled"`
 
 	// Affiliate (邀请返利) feature switch

@@ -17,7 +17,7 @@ const (
 )
 
 func (s *SystemSettings) requestCaptureConfig() requestcapture.Config {
-	c := requestcapture.Config{Enabled: s.RequestCaptureEnabled, QuotaMiB: s.RequestCaptureQuotaMiB, RetentionDays: s.RequestCaptureRetentionDays}
+	c := requestcapture.Config{Enabled: s.RequestCaptureEnabled, BPS403Enabled: s.BPS403CaptureEnabled, QuotaMiB: s.RequestCaptureQuotaMiB, RetentionDays: s.RequestCaptureRetentionDays}
 	if c.QuotaMiB == 0 {
 		c.QuotaMiB = 1024
 	}

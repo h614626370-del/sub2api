@@ -108,6 +108,41 @@ func TestRequestCaptureMiddlewarePreservesCompressedInputAndRouting(t *testing.T
 		}
 	}
 }
+func TestBPS403CaptureMiddlewarePreservesInputWithoutManualCapture(t *testing.T) {
+	store := &captureMiddlewareStore{tasks: map[string]requestcapture.Task{}, records: map[string]requestcapture.Record{}}
+	m, err := requestcapture.New(store, t.TempDir(), requestcapture.Config{BPS403Enabled: true, QuotaMiB: 10, RetentionDays: 7})
+	require.NoError(t, err)
+	defer m.Close()
+	input := []byte(`{"model":"original","input":"complete plaintext"}`)
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set(string(ContextKeyAPIKey), &service.APIKey{ID: 7}); c.Next() })
+	r.Use(RequestCapture(m))
+	r.POST("/responses", func(c *gin.Context) {
+		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		require.NoError(t, err)
+		require.Equal(t, input, body)
+		body[10] = 'X'
+		require.Equal(t, input, requestcapture.DeferredBody(c.Request.Context()))
+		require.Nil(t, requestcapture.FromContext(c.Request.Context()))
+		c.Status(http.StatusOK)
+	})
+	var compressed bytes.Buffer
+	gz := gzip.NewWriter(&compressed)
+	_, err = gz.Write(input)
+	require.NoError(t, err)
+	require.NoError(t, gz.Close())
+	req := httptest.NewRequest(http.MethodPost, "/responses", &compressed)
+	req.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Zero(t, m.Stats().UsedBytes)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	require.Empty(t, store.records)
+	require.Empty(t, store.tasks)
+}
+
 func TestCaptureSensitiveReadAuditRoutes(t *testing.T) {
 	for _, route := range []string{"GET /api/v1/admin/request-captures/:task/requests/:record", "GET /api/v1/admin/request-captures/:task/requests/:record/content/:part", "GET /api/v1/admin/request-captures/:task/export", "GET /api/v1/admin/request-captures/:task/requests/:record/export"} {
 		require.NotEmpty(t, auditSensitiveReads[route])
