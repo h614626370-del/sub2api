@@ -5,7 +5,6 @@ package server_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -60,6 +59,7 @@ func TestAPIContracts(t *testing.T) {
 					"rpm_limit": 0,
 					"status": "active",
 					"allowed_groups": null,
+					"observer_group_ids": null,
 					"created_at": "2025-01-02T03:04:05Z",
 					"updated_at": "2025-01-02T03:04:05Z",
 					"balance_notify_enabled": false,
@@ -880,6 +880,26 @@ func TestAPIContracts(t *testing.T) {
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
+					"excel_bps_image_mode": "relay",
+					"excel_bps_image_base_url": "",
+ "excel_bps_image_max_image_mib": 20,
+ "excel_bps_image_max_images": 20,
+ "excel_bps_image_max_total_mib": 32,
+ "excel_bps_image_storage_mib": 1024,
+ "excel_bps_image_storage_entries": 512,
+ "excel_bps_image_ttl_minutes": 30,
+
+					"excel_bps_image_body_limit_mib": 64,
+					"excel_bps_image_budget_mib": 1024,
+					"excel_bps_image_max_requests": 128,
+					"excel_bps_image_max_images": 20,
+ "request_capture_enabled": false,
+ "request_capture_quota_mib": 1024,
+ "request_capture_retention_days": 7,
+					"excel_bps_image_relay_enabled": false,
+                    "excel_bps_image_limit_policy": "off",
+                    "excel_bps_image_warning_remaining": 8,
+                    "excel_bps_image_compact_reserve": 3,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_antigravity": "gemini-2.5-pro",
 					"fallback_model_gemini": "gemini-2.5-pro",
@@ -899,8 +919,12 @@ func TestAPIContracts(t *testing.T) {
 					"min_claude_code_version": "",
 					"max_claude_code_version": "",
 					"openai_codex_ticket_enabled": false,
+					"openai_codex_ticket_fail_closed": false,
+					"openai_codex_ticket_strategy": "standby",
+                    "openai_codex_ticket_harvest_scope": {"mode":"all","group_ids":[],"account_policy":"schedulable_only"},
 					"openai_codex_ticket_harvest_proxy_url": "",
 					"openai_codex_ticket_harvest_proxy_configured": false,
+					"openai_codex_ticket_models": ["gpt-6-astra", "gpt-5.6-sol"],
 					"min_codex_version": "",
 					"max_codex_version": "",
 					"codex_cli_only_blacklist": "",
@@ -1002,15 +1026,17 @@ func TestAPIContracts(t *testing.T) {
 					"channel_monitor_hide_user_ranking": false,
 					"channel_monitor_default_interval_seconds": 60,
 					"available_channels_enabled": false,
+					"pelican_showcase_enabled": false,
+					"pelican_showcase_config": {"max_items": 20, "auto_cleanup": true, "retention_days": 7},
 					"subscription_enabled": true,
 					"model_plaza_enabled": false,
 					"model_plaza_require_auth": false,
 					"model_plaza_description": "",
 					"plugin_management_enabled": false,
 					"risk_control_enabled": false,
-					"cyber_policy_user_allowlist": "",
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
+					"cyber_session_identity_strict_enabled": false,
 					"affiliate_enabled": false,
 					"wechat_connect_enabled": false,
 					"wechat_connect_app_id": "",
@@ -1028,7 +1054,8 @@ func TestAPIContracts(t *testing.T) {
 					"wechat_connect_redirect_url": "",
 					"wechat_connect_frontend_redirect_url": "/auth/wechat/callback",
 					"wechat_connect_scopes": "snsapi_login",
-					"allow_user_view_error_requests": false
+					"allow_user_view_error_requests": false,
+					"usage_show_long_context_badge": true
 				}
 			}`,
 		},
@@ -1210,6 +1237,26 @@ func TestAPIContracts(t *testing.T) {
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
 					"enable_model_fallback": false,
+					"excel_bps_image_mode": "relay",
+					"excel_bps_image_base_url": "",
+ "excel_bps_image_max_image_mib": 20,
+ "excel_bps_image_max_images": 20,
+ "excel_bps_image_max_total_mib": 32,
+ "excel_bps_image_storage_mib": 1024,
+ "excel_bps_image_storage_entries": 512,
+ "excel_bps_image_ttl_minutes": 30,
+
+					"excel_bps_image_body_limit_mib": 64,
+					"excel_bps_image_budget_mib": 1024,
+					"excel_bps_image_max_requests": 128,
+					"excel_bps_image_max_images": 20,
+ "request_capture_enabled": false,
+ "request_capture_quota_mib": 1024,
+ "request_capture_retention_days": 7,
+					"excel_bps_image_relay_enabled": false,
+                    "excel_bps_image_limit_policy": "off",
+                    "excel_bps_image_warning_remaining": 8,
+                    "excel_bps_image_compact_reserve": 3,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_openai": "gpt-4o",
 					"fallback_model_gemini": "gemini-2.5-pro",
@@ -1235,8 +1282,12 @@ func TestAPIContracts(t *testing.T) {
 					"enable_client_dateline_normalization": true,
 					"antigravity_user_agent_version": "",
 					"openai_codex_ticket_enabled": false,
+					"openai_codex_ticket_fail_closed": false,
+					"openai_codex_ticket_strategy": "standby",
+                    "openai_codex_ticket_harvest_scope": {"mode":"all","group_ids":[],"account_policy":"schedulable_only"},
 					"openai_codex_ticket_harvest_proxy_url": "",
 					"openai_codex_ticket_harvest_proxy_configured": false,
+					"openai_codex_ticket_models": ["gpt-6-astra", "gpt-5.6-sol"],
 					"min_codex_version": "",
 					"max_codex_version": "",
 					"codex_cli_only_blacklist": "",
@@ -1324,15 +1375,17 @@ func TestAPIContracts(t *testing.T) {
 					"channel_monitor_hide_user_ranking": false,
 					"channel_monitor_default_interval_seconds": 60,
 					"available_channels_enabled": false,
+					"pelican_showcase_enabled": false,
+					"pelican_showcase_config": {"max_items": 20, "auto_cleanup": true, "retention_days": 7},
 					"subscription_enabled": true,
 					"model_plaza_enabled": false,
 					"model_plaza_require_auth": false,
 					"model_plaza_description": "",
 					"plugin_management_enabled": false,
 					"risk_control_enabled": false,
-					"cyber_policy_user_allowlist": "",
 					"cyber_session_block_enabled": false,
 					"cyber_session_block_ttl_seconds": 3600,
+					"cyber_session_identity_strict_enabled": false,
 					"affiliate_enabled": false,
 					"wechat_connect_enabled": true,
 					"wechat_connect_app_id": "wx-open-config",
@@ -1386,7 +1439,8 @@ func TestAPIContracts(t *testing.T) {
 					"auth_source_default_dingtalk_grant_on_signup": false,
 					"auth_source_default_dingtalk_grant_on_first_bind": false,
 					"force_email_on_third_party_signup": false,
-					"allow_user_view_error_requests": false
+					"allow_user_view_error_requests": false,
+					"usage_show_long_context_badge": true
 				}
 			}`,
 		},
@@ -1425,24 +1479,7 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status)
-			wantJSON := tt.wantJSON
-			if tt.method == http.MethodGet && tt.path == "/api/v1/admin/settings" {
-				var expected map[string]any
-				require.NoError(t, json.Unmarshal([]byte(wantJSON), &expected))
-				data := expected["data"].(map[string]any)
-				data["openai_astra_group_id"] = 0
-				data["openai_sol_group_id"] = 0
-				data["openai_astra_source_group_ids"] = []int64{}
-				data["openai_sol_source_group_ids"] = []int64{}
-				data["openai_oauth_default_timezone"] = ""
-				data["openai_codex_ticket_allow_without_ticket"] = true
-				data["openai_codex_ticket_prompt_template"] = service.DefaultCodexProbeTemplate()
-				data["openai_codex_ticket_prompt_template_default"] = service.DefaultCodexProbeTemplate()
-				encoded, err := json.Marshal(expected)
-				require.NoError(t, err)
-				wantJSON = string(encoded)
-			}
-			require.JSONEq(t, wantJSON, body)
+			require.JSONEq(t, tt.wantJSON, body)
 		})
 	}
 }
@@ -1987,6 +2024,10 @@ func (s *stubAccountRepo) AutoPauseExpiredAccounts(ctx context.Context, now time
 }
 
 func (s *stubAccountRepo) BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) SetGroupAllowedModels(ctx context.Context, accountID int64, allowed map[int64][]string) error {
 	return errors.New("not implemented")
 }
 
@@ -2678,7 +2719,7 @@ func (r *stubUsageLogRepo) GetAPIKeyUsageTrend(ctx context.Context, startTime, e
 	return nil, errors.New("not implemented")
 }
 
-func (r *stubUsageLogRepo) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int, metric string) ([]usagestats.UserUsageTrendPoint, error) {
+func (r *stubUsageLogRepo) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) ([]usagestats.UserUsageTrendPoint, error) {
 	return nil, errors.New("not implemented")
 }
 

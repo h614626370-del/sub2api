@@ -12,8 +12,9 @@ const (
 
 // Role constants
 const (
-	RoleAdmin = "admin"
-	RoleUser  = "user"
+	RoleAdmin    = "admin"
+	RoleUser     = "user"
+	RoleObserver = "observer"
 )
 
 // Platform constants
@@ -85,7 +86,6 @@ const (
 
 // Group subscription type constants
 const (
-	SubscriptionTypeSpecial      = "special"      // 内部账号池，不向用户开放
 	SubscriptionTypeStandard     = "standard"     // 标准计费模式（按余额扣费）
 	SubscriptionTypeSubscription = "subscription" // 订阅模式（按限额控制）
 )
@@ -191,8 +191,6 @@ var DefaultBedrockModelMapping = map[string]string{
 	"claude-opus-4-1":          "us.anthropic.claude-opus-4-1-20250805-v1:0",
 	"claude-opus-4-20250514":   "us.anthropic.claude-opus-4-20250514-v1:0",
 	// Claude Sonnet
-	// Sonnet 5.5 is available on bedrock-runtime through Global inference only.
-	"claude-sonnet-5-5":          "global.anthropic.claude-sonnet-5-5",
 	"claude-sonnet-5":            "us.anthropic.claude-sonnet-5-v1",
 	"claude-sonnet-4-6-thinking": "us.anthropic.claude-sonnet-4-6",
 	"claude-sonnet-4-6":          "us.anthropic.claude-sonnet-4-6",

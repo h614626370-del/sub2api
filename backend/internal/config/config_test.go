@@ -38,7 +38,7 @@ func TestLoadTimezonePrecedence(t *testing.T) {
 		tzEnv        string
 		want         string
 	}{
-		{name: "default", want: "America/Los_Angeles"},
+		{name: "default", want: "Asia/Shanghai"},
 		{name: "config_file", fileTimezone: "Europe/London", want: "Europe/London"},
 		{name: "timezone_env", fileTimezone: "Europe/London", timezoneEnv: "UTC", want: "UTC"},
 		{name: "tz_env", fileTimezone: "Europe/London", timezoneEnv: "UTC", tzEnv: "America/New_York", want: "America/New_York"},
@@ -1282,7 +1282,7 @@ func TestConfigAddressHelpers(t *testing.T) {
 		t.Fatalf("DatabaseConfig.DSNWithTimezone() should omit password when empty")
 	}
 
-	if !strings.Contains(dbCfg.DSNWithTimezone(""), "TimeZone=America/Los_Angeles") {
+	if !strings.Contains(dbCfg.DSNWithTimezone(""), "TimeZone=Asia/Shanghai") {
 		t.Fatalf("DatabaseConfig.DSNWithTimezone() should use default timezone")
 	}
 	if !strings.Contains(dbCfg.DSNWithTimezone("UTC"), "TimeZone=UTC") {

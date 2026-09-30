@@ -30,11 +30,10 @@ var (
 const (
 	updateCacheKey = "update_check_cache"
 	updateCacheTTL = 1200 // 20 minutes
-
-	officialGitHubRepo = "Wei-Shaw/sub2api"
-	customGitHubRepo   = "h614626370-del/sub2api"
-	officialCacheScope = "official"
-	customCacheScope   = "custom"
+	// Releases are maintained on the owner-controlled production fork. Keep the
+	// updater independent from the upstream repository so production installs
+	// see our release stream and can update to our fork's assets.
+	githubRepo = "ranxi2001/sub2api"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -51,8 +50,8 @@ const (
 
 // UpdateCache defines cache operations for update service
 type UpdateCache interface {
-	GetUpdateInfo(ctx context.Context, scope string) (string, error)
-	SetUpdateInfo(ctx context.Context, scope, data string, ttl time.Duration) error
+	GetUpdateInfo(ctx context.Context) (string, error)
+	SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error
 }
 
 // GitHubReleaseClient 获取 GitHub release 信息的接口
@@ -129,34 +128,24 @@ type RollbackVersion struct {
 
 type GitHubAsset struct {
 	Name               string `json:"name"`
-	APIURL             string `json:"url"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 	Size               int64  `json:"size"`
 }
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
-	return s.checkUpdate(ctx, force, officialGitHubRepo, officialCacheScope)
-}
-
-// CheckCustomUpdate checks the customized repository used for in-place updates.
-func (s *UpdateService) CheckCustomUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
-	return s.checkUpdate(ctx, force, customGitHubRepo, customCacheScope)
-}
-
-func (s *UpdateService) checkUpdate(ctx context.Context, force bool, repo, cacheScope string) (*UpdateInfo, error) {
 	// Try cache first
 	if !force {
-		if cached, err := s.getFromCache(ctx, cacheScope); err == nil && cached != nil {
+		if cached, err := s.getFromCache(ctx); err == nil && cached != nil {
 			return cached, nil
 		}
 	}
 
 	// Fetch from GitHub
-	info, err := s.fetchLatestRelease(ctx, repo)
+	info, err := s.fetchLatestRelease(ctx)
 	if err != nil {
 		// Return cached on error
-		if cached, cacheErr := s.getFromCache(ctx, cacheScope); cacheErr == nil && cached != nil {
+		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
 			cached.Warning = "Using cached data: " + err.Error()
 			return cached, nil
 		}
@@ -170,14 +159,14 @@ func (s *UpdateService) checkUpdate(ctx context.Context, force bool, repo, cache
 	}
 
 	// Cache result
-	s.saveToCache(ctx, cacheScope, info)
+	s.saveToCache(ctx, info)
 	return info, nil
 }
 
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
-	info, err := s.CheckCustomUpdate(ctx, true)
+	info, err := s.CheckUpdate(ctx, true)
 	if err != nil {
 		return err
 	}
@@ -196,13 +185,11 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 	// Find matching archive and checksum for current platform
 	archiveName := s.getArchiveName()
 	var downloadURL string
-	var downloadFileName string
 	var checksumURL string
 
 	for _, asset := range releaseAssets {
 		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
 			downloadURL = asset.DownloadURL
-			downloadFileName = filepath.Base(asset.Name)
 		}
 		if asset.Name == "checksums.txt" {
 			checksumURL = asset.DownloadURL
@@ -211,9 +198,6 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 
 	if downloadURL == "" {
 		return fmt.Errorf("no compatible release found for %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-	if downloadFileName == "" || downloadFileName == "." {
-		return fmt.Errorf("release asset has an invalid file name")
 	}
 
 	// SECURITY: Validate download URL is from trusted domain
@@ -247,7 +231,7 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	// Download archive
-	archivePath := filepath.Join(tempDir, downloadFileName)
+	archivePath := filepath.Join(tempDir, filepath.Base(downloadURL))
 	if err := s.downloadFile(ctx, downloadURL, archivePath); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
@@ -371,7 +355,7 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 	for i, a := range match.Assets {
 		assets[i] = Asset{
 			Name:        a.Name,
-			DownloadURL: releaseAssetDownloadURL(a),
+			DownloadURL: a.BrowserDownloadURL,
 			Size:        a.Size,
 		}
 	}
@@ -382,7 +366,7 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 // fetchRollbackCandidates fetches recent releases and keeps the newest
 // maxRollbackVersions entries strictly older than the current version.
 func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubRelease, error) {
-	releases, err := s.githubClient.FetchRecentReleases(ctx, customGitHubRepo, rollbackFetchPageSize)
+	releases, err := s.githubClient.FetchRecentReleases(ctx, githubRepo, rollbackFetchPageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -418,8 +402,8 @@ func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubR
 	return candidates, nil
 }
 
-func (s *UpdateService) fetchLatestRelease(ctx context.Context, repo string) (*UpdateInfo, error) {
-	release, err := s.githubClient.FetchLatestRelease(ctx, repo)
+func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, error) {
+	release, err := s.githubClient.FetchLatestRelease(ctx, githubRepo)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +414,7 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context, repo string) (*U
 	for i, a := range release.Assets {
 		assets[i] = Asset{
 			Name:        a.Name,
-			DownloadURL: releaseAssetDownloadURL(a),
+			DownloadURL: a.BrowserDownloadURL,
 			Size:        a.Size,
 		}
 	}
@@ -449,13 +433,6 @@ func (s *UpdateService) fetchLatestRelease(ctx context.Context, repo string) (*U
 		Cached:    false,
 		BuildType: s.buildType,
 	}, nil
-}
-
-func releaseAssetDownloadURL(asset GitHubAsset) string {
-	if apiURL := strings.TrimSpace(asset.APIURL); apiURL != "" {
-		return apiURL
-	}
-	return strings.TrimSpace(asset.BrowserDownloadURL)
 }
 
 func (s *UpdateService) downloadFile(ctx context.Context, downloadURL, dest string) error {
@@ -619,8 +596,8 @@ func (s *UpdateService) extractBinary(archivePath, destPath string) error {
 	return out.Close()
 }
 
-func (s *UpdateService) getFromCache(ctx context.Context, scope string) (*UpdateInfo, error) {
-	data, err := s.cache.GetUpdateInfo(ctx, scope)
+func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
+	data, err := s.cache.GetUpdateInfo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -648,7 +625,7 @@ func (s *UpdateService) getFromCache(ctx context.Context, scope string) (*Update
 	}, nil
 }
 
-func (s *UpdateService) saveToCache(ctx context.Context, scope string, info *UpdateInfo) {
+func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 	cacheData := struct {
 		Latest      string       `json:"latest"`
 		ReleaseInfo *ReleaseInfo `json:"release_info"`
@@ -660,7 +637,7 @@ func (s *UpdateService) saveToCache(ctx context.Context, scope string, info *Upd
 	}
 
 	data, _ := json.Marshal(cacheData)
-	_ = s.cache.SetUpdateInfo(ctx, scope, string(data), time.Duration(updateCacheTTL)*time.Second)
+	_ = s.cache.SetUpdateInfo(ctx, string(data), time.Duration(updateCacheTTL)*time.Second)
 }
 
 // compareVersions compares two semantic versions
@@ -668,34 +645,25 @@ func compareVersions(current, latest string) int {
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
 
-	partCount := max(len(currentParts), len(latestParts))
-	for i := 0; i < partCount; i++ {
-		currentPart := 0
-		if i < len(currentParts) {
-			currentPart = currentParts[i]
-		}
-		latestPart := 0
-		if i < len(latestParts) {
-			latestPart = latestParts[i]
-		}
-		if currentPart < latestPart {
+	for i := 0; i < 3; i++ {
+		if currentParts[i] < latestParts[i] {
 			return -1
 		}
-		if currentPart > latestPart {
+		if currentParts[i] > latestParts[i] {
 			return 1
 		}
 	}
 	return 0
 }
 
-func parseVersion(v string) []int {
+func parseVersion(v string) [3]int {
 	v = strings.TrimPrefix(v, "v")
 	if idx := strings.IndexByte(v, '-'); idx != -1 {
 		v = v[:idx]
 	}
 	parts := strings.Split(v, ".")
-	result := make([]int, len(parts))
-	for i := range parts {
+	result := [3]int{0, 0, 0}
+	for i := 0; i < len(parts) && i < 3; i++ {
 		if parsed, err := strconv.Atoi(parts[i]); err == nil {
 			result[i] = parsed
 		}

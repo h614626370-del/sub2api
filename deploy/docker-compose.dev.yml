@@ -48,7 +48,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}
       - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-0}
       - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:-}
-      - TZ=${TZ:-America/Los_Angeles}
+      - TZ=${TZ:-Asia/Shanghai}
       # Local mainland-China development proxy. Containers cannot use
       # 127.0.0.1 for the host proxy, so default to Docker Desktop's host name.
       - HTTP_PROXY=${SUB2API_DEV_HTTP_PROXY:-http://host.docker.internal:7897}
@@ -131,7 +131,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - POSTGRES_DB=${POSTGRES_DB:-sub2api}
       - PGDATA=/var/lib/postgresql/data
-      - TZ=${TZ:-America/Los_Angeles}
+      - TZ=${TZ:-Asia/Shanghai}
     networks:
       - sub2api-network
     healthcheck:
@@ -159,7 +159,7 @@ services:
       - --requirepass
       - ${REDIS_PASSWORD:-}
     environment:
-      - TZ=${TZ:-America/Los_Angeles}
+      - TZ=${TZ:-Asia/Shanghai}
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:
       - sub2api-network

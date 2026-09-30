@@ -4,33 +4,34 @@
       <div
         v-if="show"
         class="modal-overlay"
+        :class="{ 'drawer-overlay': placement === 'right' }"
         :style="zIndexStyle"
         :aria-labelledby="dialogId"
         role="dialog"
         aria-modal="true"
+        @mousedown="handleOverlayMousedown"
+        @mouseup="handleOverlayMouseup"
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses, contentClass]" @click.stop>
+        <div ref="dialogRef" :class="['modal-content', widthClasses, contentClass, { 'drawer-content': placement === 'right', 'modal-fullscreen': fullscreen }]" @click.stop>
           <!-- Header -->
           <div class="modal-header">
-            <slot name="header" :title-id="dialogId">
-              <h3 :id="dialogId" class="modal-title">
-                {{ title }}
-              </h3>
-              <button
-                v-if="showCloseButton"
-                @click="emit('close')"
-                class="-mr-2 rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 focus-visible:ring-offset-2 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300 dark:focus-visible:ring-offset-dark-900"
-                aria-label="Close modal"
-              >
-                <Icon name="x" size="md" />
-              </button>
-            </slot>
+            <h3 :id="dialogId" class="modal-title">
+              {{ title }}
+            </h3>
+            <button
+              v-if="showCloseButton"
+              @click="emit('close')"
+              class="-mr-2 rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 focus-visible:ring-offset-2 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300 dark:focus-visible:ring-offset-dark-900"
+              aria-label="Close modal"
+            >
+              <Icon name="x" size="md" />
+            </button>
           </div>
 
           <!-- Body -->
-          <div ref="modalBodyRef" :class="['modal-body', bodyClass]">
+          <div ref="modalBodyRef" class="modal-body" :class="bodyClass">
             <slot></slot>
           </div>
 
@@ -67,10 +68,13 @@ interface Props {
   show: boolean
   title: string
   width?: DialogWidth
+  placement?: 'center' | 'right'
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
   zIndex?: number
+  fullscreen?: boolean
+  /** Optional per-dialog layout overrides; native defaults stay unchanged. */
   contentClass?: string
   bodyClass?: string
 }
@@ -81,10 +85,12 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   width: 'normal',
+  placement: 'center',
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
-  zIndex: 50
+  zIndex: 50,
+  fullscreen: false
 })
 
 const emit = defineEmits<Emits>()
@@ -108,8 +114,24 @@ const widthClasses = computed(() => {
   return widths[props.width]
 })
 
+// 只有在遮罩上按下、也在遮罩上松开，才算点击空白处。在面板里拖选文字、松手落在遮罩上时，
+// 浏览器同样会把 click 派发给遮罩（按下和松开目标的共同祖先），不能因此关掉对话框。
+let pressStartedOnOverlay = false
+let pressEndedOnOverlay = false
+
+const handleOverlayMousedown = (event: MouseEvent) => {
+  pressStartedOnOverlay = event.target === event.currentTarget
+}
+
+const handleOverlayMouseup = (event: MouseEvent) => {
+  pressEndedOnOverlay = event.target === event.currentTarget
+}
+
 const handleClose = () => {
-  if (props.closeOnClickOutside) {
+  const clickedOverlay = pressStartedOnOverlay && pressEndedOnOverlay
+  pressStartedOnOverlay = false
+  pressEndedOnOverlay = false
+  if (props.closeOnClickOutside && clickedOverlay) {
     emit('close')
   }
 }
@@ -169,3 +191,9 @@ onUnmounted(() => {
   updateScrollLock(false)
 })
 </script>
+
+<style scoped>
+.modal-overlay.drawer-overlay { padding: 0; justify-content: flex-end; align-items: stretch; }
+.modal-content.drawer-content { border-radius: 0; height: 100dvh; max-height: 100dvh; margin: 0; }
+.modal-enter-from .drawer-content, .modal-leave-to .drawer-content { transform: translateX(100%); }
+</style>

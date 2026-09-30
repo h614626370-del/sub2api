@@ -37,6 +37,7 @@ type CodexSessionImportRequest struct {
 	CredentialExtras        map[string]any `json:"credential_extras"`
 	Extra                   map[string]any `json:"extra"`
 	UpdateExisting          *bool          `json:"update_existing"`
+	SkipExisting            bool           `json:"skip_existing"`
 	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
 }
@@ -254,6 +255,13 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		markCodexIdentitySeen(seenIdentity, item.IdentityKeys, entry.Index, item.UserID)
 
 		existing, matchedKey := index.Find(item.IdentityKeys, item.UserID)
+		if existing != nil && req.SkipExisting {
+			result.Skipped++
+			result.Items = append(result.Items, CodexSessionImportItem{
+				Index: entry.Index, Name: accountName, Action: "skipped", AccountID: existing.ID,
+			})
+			continue
+		}
 		if existing != nil && updateExisting {
 			if strings.HasPrefix(matchedKey, "account:") && item.UserID != "" &&
 				codexCredentialString(existing.Credentials, "chatgpt_user_id") == "" {
@@ -538,6 +546,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 			return item, nil
 		}
 		item.AccessToken = firstCodexString(raw,
+			[]string{"session_info", "access_token"},
 			[]string{"tokens", "access_token"},
 			[]string{"tokens", "accessToken"},
 			[]string{"access_token"},
@@ -558,6 +567,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 		)
 		item.Email = firstCodexString(raw, []string{"email"}, []string{"user", "email"})
 		item.AccountID = firstCodexString(raw,
+			[]string{"user_info", "chatgpt_account_id"},
 			[]string{"chatgpt_account_id"},
 			[]string{"chatgptAccountId"},
 			[]string{"account_id"},

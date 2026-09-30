@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -74,11 +75,11 @@ type openAIWSAcquireRequest struct {
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
-	HeadersFactory func(context.Context, http.Header) (http.Header, error)
-	// ObserveHandshake runs once per real dial, including failures and prewarming.
-	ObserveHandshake func(http.Header, int, http.Header)
-	ProxyURL         string
-	PreferredConnID  string
+	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
+	BindHandshake   func(http.Header) *openAIWSTurnBinding
+	CheckBinding    func(context.Context, *openAIWSTurnBinding) error
+	ProxyURL        string
+	PreferredConnID string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
@@ -86,7 +87,6 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
-	targetURL           string
 	betaFeatures        string
 	codexInstallationID string
 	sessionIDHyphen     string
@@ -94,6 +94,7 @@ type openAIWSHandshakeCompatibilityKey struct {
 	threadID            string
 	clientRequestID     string
 	codexWindowID       string
+	proxyURL            string
 }
 
 type openAIWSConnLease struct {
@@ -210,7 +211,7 @@ func (l *openAIWSConnLease) WriteJSONWithContextTimeout(ctx context.Context, val
 	if err != nil {
 		return err
 	}
-	return conn.writeJSONWithTimeout(ctx, value, timeout)
+	return captureWSLeaseWrite(ctx, l.accountID, l.HandshakeHeaders(), value, func() error { return conn.writeJSONWithTimeout(ctx, value, timeout) })
 }
 
 func (l *openAIWSConnLease) WriteJSONContext(ctx context.Context, value any) error {
@@ -218,7 +219,7 @@ func (l *openAIWSConnLease) WriteJSONContext(ctx context.Context, value any) err
 	if err != nil {
 		return err
 	}
-	return conn.writeJSON(value, ctx)
+	return captureWSLeaseWrite(ctx, l.accountID, l.HandshakeHeaders(), value, func() error { return conn.writeJSON(value, ctx) })
 }
 
 func (l *openAIWSConnLease) ReadMessage(timeout time.Duration) ([]byte, error) {
@@ -234,7 +235,7 @@ func (l *openAIWSConnLease) ReadMessageContext(ctx context.Context) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	return conn.readMessage(ctx)
+	return captureWSLeaseRead(ctx, func() ([]byte, error) { return conn.readMessage(ctx) })
 }
 
 func (l *openAIWSConnLease) ReadMessageWithContextTimeout(ctx context.Context, timeout time.Duration) ([]byte, error) {
@@ -242,7 +243,7 @@ func (l *openAIWSConnLease) ReadMessageWithContextTimeout(ctx context.Context, t
 	if err != nil {
 		return nil, err
 	}
-	return conn.readMessageWithContextTimeout(ctx, timeout)
+	return captureWSLeaseRead(ctx, func() ([]byte, error) { return conn.readMessageWithContextTimeout(ctx, timeout) })
 }
 
 func (l *openAIWSConnLease) PingWithTimeout(timeout time.Duration) error {
@@ -286,6 +287,7 @@ type openAIWSConn struct {
 	ws openAIWSClientConn
 
 	handshakeHeaders       http.Header
+	turnBinding            *openAIWSTurnBinding
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
 	routingAffinity        string
 
@@ -1113,8 +1115,19 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
 	}
+	if req.Account != nil {
+		requestcapture.FromContext(ctx).BindAccount(req.Account.ID)
+	}
 	queueWait := &openAIWSAcquireQueueWait{}
 	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
+	if err != nil && req.Account != nil {
+		var dial *openAIWSDialError
+		if errors.As(err, &dial) {
+			requestcapture.FromContext(ctx).SelectionFailed(req.Account.ID, dial.StatusCode, dial.ResponseHeaders, dial.ResponseBody, err)
+		} else {
+			requestcapture.FromContext(ctx).SelectionFailed(req.Account.ID, 0, nil, nil, err)
+		}
+	}
 	if lease != nil && queueWait.rewoken {
 		// 广播重选经 tryAcquire 拿令牌，不像排队分支那样在取得令牌后检查取消，
 		// 这里补上复查：上下文已取消就归还令牌并按取消返回。
@@ -1128,6 +1141,13 @@ func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireReque
 		p.metrics.acquireQueueWaitMs.Add(queueWait.total.Milliseconds())
 	}
 	if lease != nil && lease.conn != nil {
+		if req.CheckBinding != nil {
+			if checkErr := req.CheckBinding(ctx, lease.conn.turnBinding); checkErr != nil {
+				lease.MarkBroken()
+				lease.Release()
+				return nil, checkErr
+			}
+		}
 		now := time.Now()
 		lease.idleBefore = lease.conn.idleDuration(now)
 		lease.ageBefore = lease.conn.age(now)
@@ -2129,11 +2149,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
-	sentHeaders := cloneHeader(headers)
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
-	if req.ObserveHandshake != nil {
-		req.ObserveHandshake(sentHeaders, status, handshakeHeaders)
-	}
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
@@ -2159,8 +2175,13 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
-	pooledConn.handshakeCompatibility = openAIWSAcquireCompatibility(req)
-	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
+	compatibilityRequest := req
+	compatibilityRequest.Headers = headers
+	pooledConn.handshakeCompatibility = openAIWSAcquireCompatibility(compatibilityRequest)
+	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(headers)
+	if req.BindHandshake != nil {
+		pooledConn.turnBinding = req.BindHandshake(headers)
+	}
 	return pooledConn, nil
 }
 
@@ -2320,6 +2341,12 @@ func (p *openAIWSConnPool) dialTimeout() time.Duration {
 	return 10 * time.Second
 }
 
+func openAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
+	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
+	key.proxyURL = stringsTrim(req.ProxyURL)
+	return key
+}
+
 func cloneOpenAIWSAcquireRequest(req openAIWSAcquireRequest) openAIWSAcquireRequest {
 	copied := req
 	copied.Headers = cloneHeader(req.Headers)
@@ -2335,12 +2362,6 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 	}
 	copied := cloneOpenAIWSAcquireRequest(*req)
 	return &copied
-}
-
-func openAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
-	key := normalizeOpenAIWSHandshakeCompatibility(req.Account, req.Headers)
-	key.targetURL = stringsTrim(req.WSURL)
-	return key
 }
 
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {

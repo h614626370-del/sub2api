@@ -152,6 +152,9 @@ type AccountTestService struct {
 	modelMetadataRegistryAt   time.Time
 	pluginManager             *PluginManager
 	openaiGatewayService      *OpenAIGatewayService
+	bpsProbeMu                sync.Mutex
+	bpsProbeAccounts          map[int64]struct{}
+	stateProbeAccounts        sync.Map
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -367,6 +370,17 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
+	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
+		if options.testChannel == "bps" {
+			model := strings.TrimSpace(modelID)
+			if model == "" {
+				model = openai.DefaultTestModel
+			}
+			if !account.IsExcelBPSEnabledForModel(model) || s.openaiGatewayService == nil {
+				return s.sendErrorAndEnd(c, "BPS observation unavailable: BPS must be enabled for this model; native fallback is disabled")
+			}
+		}
+	}
 
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
 	// interactions, but intentionally do not send their placeholder credentials
@@ -544,6 +558,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 
 	// Create Claude Code style payload (same for all account types)
 	payload, err := createTestPayload(testModelID)
+	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
+		payload, err = createPelicanClaudePayload(testModelID, options.prompt)
+	}
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
@@ -784,6 +801,19 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
 
+	// Excel/BPS accounts must use the same gateway path as user Responses
+	// requests. The legacy account-test probe hard-codes ChatGPT Codex and
+	// silently bypasses the account's protocol toggle, producing misleading
+	// quality-test results.
+	if mode == AccountTestModeBPSTools {
+		return s.testExcelBPSToolRoundtrip(c, account, modelID)
+	}
+	// Image models use the image test below, which applies the gateway's BPS
+	// image routing; the text BPS test would send them to /responses.
+	if account.IsExcelBPSEnabled() && s.openaiGatewayService != nil && !isOpenAIImageModel(account.GetMappedModel(strings.TrimSpace(modelID))) {
+		return s.testExcelBPSAccountConnection(c, account, modelID, prompt)
+	}
+
 	// Default to openai.DefaultTestModel for OpenAI testing
 	testModelID := modelID
 	if testModelID == "" {
@@ -836,11 +866,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 
 		// OAuth uses ChatGPT internal API
-		var err error
-		apiURL, err = resolveOpenAIOAuthURL(credentialAccount, chatgptCodexAPIURL, s.validateUpstreamBaseURL)
-		if err != nil {
-			return s.sendErrorAndEnd(c, err.Error())
-		}
+		apiURL = chatgptCodexAPIURL
 	} else if credentialAccount.Type == "apikey" {
 		// API Key - use Platform API
 		authToken = credentialAccount.GetOpenAIProtocolAPIKey()
@@ -878,13 +904,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
-	if isOAuth {
-		addOpenAIAccountTestTimezoneContext(payload)
+	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
+		payload = createPelicanOpenAIPayload(upstreamTestModelID, isOAuth, options.prompt, options.reasoningEffort)
 	}
 	payloadBytes, _ := json.Marshal(payload)
-	if isOAuth {
-		payloadBytes = s.applyOpenAIAccountTestTimezone(ctx, credentialAccount, payloadBytes)
-	}
 
 	// Send test_start event once. A task-invalid Agent Identity response may
 	// restart this probe after registering a replacement task.
@@ -919,7 +942,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Set OAuth-specific headers for ChatGPT internal API
 	if isOAuth {
-		req.Host = req.URL.Host
+		req.Host = "chatgpt.com"
 		req.Header.Set("accept", "text/event-stream")
 		req.Header.Set("OpenAI-Beta", "responses=experimental")
 		canonical := resolveCodexOutboundIdentity("")
@@ -981,6 +1004,85 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Process SSE stream
 	return s.processOpenAIStream(c, resp.Body)
+}
+
+func (s *AccountTestService) testExcelBPSAccountConnection(c *gin.Context, account *Account, modelID, prompt string) error {
+	model := strings.TrimSpace(modelID)
+	if model == "" {
+		model = openai.DefaultTestModel
+	}
+	model = account.GetMappedModel(model)
+	prompt = promptOrDefault(prompt)
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: model})
+
+	body, err := buildExcelBPSAccountTestBody(model, prompt)
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create Excel BPS test payload")
+	}
+
+	probe := httptest.NewRecorder()
+	probeCtx, _ := gin.CreateTestContext(probe)
+	probeCtx.Request = c.Request.Clone(c.Request.Context())
+	if probeCtx.Request.Header == nil {
+		probeCtx.Request.Header = make(http.Header)
+	}
+	// Manual one-shot tests have no client conversation. Give them a scoped
+	// identity so enabling the session proxy does not break the test button.
+	// Explicit identities (including load-test sessions) remain unchanged.
+	if scope, _ := resolveOpenAIWSExecutionScope(probeCtx, body, 0); scope == "" {
+		probeCtx.Request.Header.Set("Session-Id", "account-test-"+uuid.NewString())
+	}
+	result, err := s.openaiGatewayService.Forward(probeCtx.Request.Context(), probeCtx, account, body)
+	if err != nil {
+		// A single-account test has no other account to fail over to.
+		var failover *UpstreamFailoverError
+		if errors.As(err, &failover) && failover.ClientMessage != "" {
+			return s.sendErrorAndEnd(c, failover.ClientMessage)
+		}
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+
+	answer := strings.Builder{}
+	completed := false
+	for _, line := range strings.Split(probe.Body.String(), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) != nil {
+			continue
+		}
+		switch event["type"] {
+		case "response.output_text.delta":
+			if delta, ok := event["delta"].(string); ok {
+				_, _ = answer.WriteString(delta)
+				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
+			}
+		case "response.completed":
+			completed = true
+		}
+	}
+	if result == nil || result.ClientDisconnect {
+		return s.sendErrorAndEnd(c, "Excel BPS test response was interrupted")
+	}
+	if !completed {
+		return s.sendErrorAndEnd(c, "Excel BPS test response ended before completion")
+	}
+	if strings.TrimSpace(answer.String()) == "" {
+		return s.sendErrorAndEnd(c, "Excel BPS returned empty output")
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+func buildExcelBPSAccountTestBody(model, prompt string) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"model": model, "stream": true, "store": false,
+		"input": []any{map[string]any{"type": "message", "role": "user", "content": []any{
+			map[string]any{"type": "input_text", "text": promptOrDefault(prompt)},
+		}}},
+		"reasoning": map[string]any{"effort": "medium"},
+	})
 }
 
 // testGrokAccountConnection routes Grok admin connectivity tests by explicit mode first,
@@ -2126,6 +2228,9 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Flush()
 
 	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	if options, ok := pelicanTestOptionsFromContext(ctx); ok && options.reasoningEffort != "" {
+		payload["reasoning_effort"] = options.reasoningEffort
+	}
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -2201,11 +2306,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if authToken == "" && !credentialAccount.IsOpenAIAgentIdentity() {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
-		var err error
-		apiURL, err = resolveOpenAIOAuthURL(credentialAccount, chatgptCodexAPIURL, s.validateUpstreamBaseURL)
-		if err != nil {
-			return s.sendErrorAndEnd(c, err.Error())
-		}
+		apiURL = chatgptCodexAPIURL
 	case account.Type == AccountTypeAPIKey:
 		authToken = account.GetOpenAIProtocolAPIKey()
 		if authToken == "" {
@@ -2234,14 +2335,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		testModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
-	compactPayload := createOpenAICompactProbePayload(testModelID, isOAuth)
-	if isOAuth {
-		addOpenAICompactTestTimezoneContext(compactPayload)
-	}
-	payloadBytes, _ := json.Marshal(compactPayload)
-	if isOAuth {
-		payloadBytes = s.applyOpenAIAccountTestTimezone(ctx, credentialAccount, payloadBytes)
-	}
+	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID, isOAuth))
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -2278,7 +2372,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	req.Header.Set("Conversation_ID", probeSessionID)
 
 	if isOAuth {
-		req.Host = req.URL.Host
+		req.Host = "chatgpt.com"
 		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
 		// 指纹收敛：探测与真实转发走同一个 /responses 端点，身份也必须同构，
 		// 否则探测流量会以「缺 x-codex-installation-id + 非收敛 session」的
@@ -2804,68 +2898,6 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	return payload
 }
 
-// addOpenAIAccountTestTimezoneContext keeps the admin OAuth probe aligned with
-// the environment metadata used by real Codex requests. The timezone helper
-// then replaces the UTC placeholder with the account's proxy/global timezone.
-func addOpenAIAccountTestTimezoneContext(payload map[string]any) {
-	payload["input"] = []map[string]any{
-		{
-			"role": "user",
-			"internal_chat_message_metadata_passthrough": map[string]any{
-				"content_item_kinds": []string{"user.text", "environments.environment_context"},
-			},
-			"content": []map[string]any{
-				{
-					"type": "input_text",
-					"text": "hi",
-				},
-				{
-					"type": "input_text",
-					"text": fmt.Sprintf("<environment_context><current_date>%s</current_date><timezone>UTC</timezone></environment_context>", time.Now().UTC().Format("2006-01-02")),
-				},
-			},
-		},
-	}
-}
-
-func addOpenAICompactTestTimezoneContext(payload map[string]any) {
-	payload["input"] = []any{
-		map[string]any{
-			"type": "message",
-			"role": "user",
-			"internal_chat_message_metadata_passthrough": map[string]any{
-				"content_item_kinds": []string{"user.text", "environments.environment_context"},
-			},
-			"content": []map[string]any{
-				{
-					"type": "input_text",
-					"text": "Respond with OK.",
-				},
-				{
-					"type": "input_text",
-					"text": fmt.Sprintf("<environment_context><current_date>%s</current_date><timezone>UTC</timezone></environment_context>", time.Now().UTC().Format("2006-01-02")),
-				},
-			},
-		},
-		map[string]any{"type": "compaction_trigger"},
-	}
-}
-
-func (s *AccountTestService) applyOpenAIAccountTestTimezone(ctx context.Context, account *Account, body []byte) []byte {
-	if s == nil || account == nil {
-		return body
-	}
-	if s.openaiGatewayService != nil {
-		return s.openaiGatewayService.applyAccountTimezone(ctx, account, body)
-	}
-	if s.settingService == nil {
-		return body
-	}
-	// Lightweight service construction keeps unit/test-only AccountTestService
-	// instances on the same global-timezone path as the wired gateway service.
-	return (&OpenAIGatewayService{settingService: s.settingService}).applyAccountTimezone(ctx, account, body)
-}
-
 func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
@@ -3216,13 +3248,14 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	applyOpenAIImagesDefaults(parsed)
 
 	upstreamModel := account.GetMappedModel(parsed.Model)
+	if s.openaiGatewayService != nil && account.IsExcelBPSImagesEnabledForModel(parsed.Model) {
+		if handled, err := s.testExcelBPSImages(c, ctx, account, parsed, upstreamModel); handled {
+			return err
+		}
+	}
 	responsesBody, targetURL, err := buildOpenAIImagesOAuthPayload(parsed, upstreamModel)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
-	}
-	targetURL, err = resolveOpenAIOAuthURL(credentialAccount, targetURL, s.validateUpstreamBaseURL)
-	if err != nil {
-		return s.sendErrorAndEnd(c, err.Error())
 	}
 
 	direct := usesCodexDirectImages(upstreamModel)
@@ -3236,7 +3269,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		return s.sendErrorAndEnd(c, "Failed to create request")
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
-	req.Host = req.URL.Host
+	req.Host = "chatgpt.com"
 	if credentialAccount.IsOpenAIAgentIdentity() {
 		authHeaders, authErr := buildAgentIdentityAuthenticationHeaders(ctx, s.accountRepo, s.agentIdentityWS, &s.agentIdentityTaskMu, credentialAccount)
 		if authErr != nil {
@@ -3336,6 +3369,52 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	return nil
 }
 
+// testExcelBPSImages runs the gateway's BPS image route. handled=false means
+// BPS rejected the request format, so the caller tests Codex like user traffic.
+func (s *AccountTestService) testExcelBPSImages(c *gin.Context, ctx context.Context, account *Account, parsed *OpenAIImagesRequest, upstreamModel string) (bool, error) {
+	if excelBPSImagesUnsupportedReason(parsed) != "" {
+		return false, nil
+	}
+	s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Excel BPS /images/generations; image model: %s\n", upstreamModel)})
+	probe := httptest.NewRecorder()
+	probeCtx, _ := gin.CreateTestContext(probe)
+	probeCtx.Request = c.Request.Clone(ctx)
+	_, fallback, err := s.openaiGatewayService.forwardExcelBPSImages(ctx, probeCtx, account, parsed, parsed.Model, upstreamModel, time.Now())
+	if fallback {
+		s.sendEvent(c, TestEvent{Type: "content", Text: "Excel BPS rejected this request format; user requests fall back to Codex, testing Codex\n"})
+		return false, nil
+	}
+	if err != nil {
+		// A single-account test has no other account to fail over to.
+		var upErr *OpenAIImagesUpstreamError
+		if errors.As(err, &upErr) {
+			return true, s.sendErrorAndEnd(c, upErr.clientMessage())
+		}
+		var failover *UpstreamFailoverError
+		if errors.As(err, &failover) && failover.ClientMessage != "" {
+			return true, s.sendErrorAndEnd(c, failover.ClientMessage)
+		}
+		return true, s.sendErrorAndEnd(c, err.Error())
+	}
+	results, err := parseCodexDirectImagesResponse(probe.Body.Bytes())
+	if err != nil {
+		return true, s.sendErrorAndEnd(c, fmt.Sprintf("Failed to parse Excel BPS image response: %s", err.Error()))
+	}
+	for _, item := range results {
+		if item.RevisedPrompt != "" {
+			s.sendEvent(c, TestEvent{Type: "content", Text: item.RevisedPrompt})
+		}
+		mimeType := openAIImageOutputMIMEType(item.OutputFormat)
+		s.sendEvent(c, TestEvent{
+			Type:     "image",
+			ImageURL: "data:" + mimeType + ";base64," + item.Result,
+			MimeType: mimeType,
+		})
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return true, nil
+}
+
 func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 	if event.Type == "test_complete" {
 		if suppress, ok := c.Get(accountTestSuppressCompletionContextKey); ok {
@@ -3366,7 +3445,7 @@ func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID in
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
-	ginCtx.Request = (&http.Request{}).WithContext(ctx)
+	ginCtx.Request = (&http.Request{Header: make(http.Header)}).WithContext(ctx)
 
 	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, "", AccountTestModeDefault)
 

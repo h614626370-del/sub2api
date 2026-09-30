@@ -9,7 +9,6 @@ import type { Toast, ToastType, PublicSettings } from '@/types'
 import { i18n } from '@/i18n'
 import {
   checkUpdates as checkUpdatesAPI,
-  checkCustomUpdates as checkCustomUpdatesAPI,
   type VersionInfo,
   type ReleaseInfo
 } from '@/api/admin/system'
@@ -44,13 +43,6 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
-  const versionWarning = ref<string>('')
-  const customVersionLoaded = ref<boolean>(false)
-  const customVersionLoading = ref<boolean>(false)
-  const customLatestVersion = ref<string>('')
-  const customHasUpdate = ref<boolean>(false)
-  const customReleaseInfo = ref<ReleaseInfo | null>(null)
-  const customVersionWarning = ref<string>('')
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -257,7 +249,6 @@ export const useAppStore = defineStore('app', () => {
         has_update: hasUpdate.value,
         build_type: buildType.value,
         release_info: releaseInfo.value || undefined,
-        warning: versionWarning.value || undefined,
         cached: true
       }
     }
@@ -275,7 +266,6 @@ export const useAppStore = defineStore('app', () => {
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
-      versionWarning.value = data.warning || ''
       versionLoaded.value = true
       return data
     } catch (error) {
@@ -287,61 +277,11 @@ export const useAppStore = defineStore('app', () => {
   }
 
   /**
-   * Fetch version info from the customized repository used for installation.
-   * @param force - Force refresh from API
-   */
-  async function fetchCustomVersion(force = false): Promise<VersionInfo | null> {
-    if (customVersionLoaded.value && !force) {
-      return {
-        current_version: currentVersion.value,
-        latest_version: customLatestVersion.value,
-        has_update: customHasUpdate.value,
-        build_type: buildType.value,
-        release_info: customReleaseInfo.value || undefined,
-        warning: customVersionWarning.value || undefined,
-        cached: true
-      }
-    }
-
-    if (customVersionLoading.value) {
-      return null
-    }
-
-    customVersionLoading.value = true
-    try {
-      const data = await checkCustomUpdatesAPI(force)
-      currentVersion.value = data.current_version
-      customLatestVersion.value = data.latest_version
-      customHasUpdate.value = data.has_update
-      buildType.value = data.build_type || 'source'
-      customReleaseInfo.value = data.release_info || null
-      customVersionWarning.value = data.warning || ''
-      customVersionLoaded.value = true
-      return data
-    } catch (error) {
-      console.error('Failed to fetch custom version:', error)
-      return null
-    } finally {
-      customVersionLoading.value = false
-    }
-  }
-
-  /**
    * Clear version cache (e.g., after update)
    */
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
-    customVersionLoaded.value = false
-    customHasUpdate.value = false
-  }
-
-  /**
-   * Clear only the customized repository cache after update or rollback.
-   */
-  function clearCustomVersionCache(): void {
-    customVersionLoaded.value = false
-    customHasUpdate.value = false
   }
 
   // ==================== Public Settings Management ====================
@@ -440,6 +380,7 @@ export const useAppStore = defineStore('app', () => {
         service_quota_enabled: false,
         affiliate_enabled: false,
         allow_user_view_error_requests: false,
+        usage_show_long_context_badge: true,
       })
     }
 
@@ -522,13 +463,6 @@ export const useAppStore = defineStore('app', () => {
     hasUpdate,
     buildType,
     releaseInfo,
-    versionWarning,
-    customVersionLoaded,
-    customVersionLoading,
-    customLatestVersion,
-    customHasUpdate,
-    customReleaseInfo,
-    customVersionWarning,
 
     // Computed
     hasActiveToasts,
@@ -553,9 +487,7 @@ export const useAppStore = defineStore('app', () => {
 
     // Version actions
     fetchVersion,
-    fetchCustomVersion,
     clearVersionCache,
-    clearCustomVersionCache,
 
     // Public settings actions
     fetchPublicSettings,

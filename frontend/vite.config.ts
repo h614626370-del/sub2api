@@ -77,7 +77,7 @@ function injectPublicSettings(backendUrl: string): Plugin {
   }
 }
 
-export default defineConfig(({ mode, command }) => {
+export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
   const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080'
@@ -86,7 +86,7 @@ export default defineConfig(({ mode, command }) => {
   return {
     plugins: [
       vue(),
-      !(command === 'serve' && env.VITE_DEV_TYPECHECK === 'false') && checker({
+      checker({
         vueTsc: true
       }),
       injectPublicSettings(backendUrl)

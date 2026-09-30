@@ -16,7 +16,7 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    image: ghcr.io/ranxi2001/sub2api:latest
     container_name: sub2api
     restart: unless-stopped
     security_opt:
@@ -120,9 +120,9 @@ services:
       # - Usage statistics "today" boundary
       # - Subscription expiry times
       # - Log timestamps
-      # Common values: America/Los_Angeles, America/New_York, Europe/London, UTC
+      # Common values: Asia/Shanghai, America/New_York, Europe/London, UTC
       # =======================================================================
-      - TZ=${TZ:-America/Los_Angeles}
+      - TZ=${TZ:-Asia/Shanghai}
 
       # =======================================================================
       # Gemini OAuth Configuration (for Gemini accounts)
@@ -258,7 +258,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-sub2api}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - POSTGRES_DB=${POSTGRES_DB:-sub2api}
-      - TZ=${TZ:-America/Los_Angeles}
+      - TZ=${TZ:-Asia/Shanghai}
     networks:
       - sub2api-network
     healthcheck:
@@ -299,7 +299,7 @@ services:
       - --requirepass
       - ${REDIS_PASSWORD:-}
     environment:
-      - TZ=${TZ:-America/Los_Angeles}
+      - TZ=${TZ:-Asia/Shanghai}
       # REDISCLI_AUTH is used by redis-cli for authentication (safer than -a flag)
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:

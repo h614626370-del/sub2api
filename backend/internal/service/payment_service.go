@@ -144,10 +144,6 @@ type RefundResult struct {
 }
 
 type DashboardStats struct {
-	StartDate     string          `json:"start_date"`
-	EndDate       string          `json:"end_date"`
-	Timezone      string          `json:"timezone"`
-	Today         string          `json:"today"`
 	TodayAmount   CurrencyAmounts `json:"today_amount"`
 	TotalAmount   CurrencyAmounts `json:"total_amount"`
 	TodayCount    int             `json:"today_count"`

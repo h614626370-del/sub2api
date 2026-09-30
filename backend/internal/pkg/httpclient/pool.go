@@ -49,10 +49,9 @@ type Options struct {
 	AllowPrivateHosts     bool          // 允许私有地址解析（与 ValidateResolvedIP 一起使用）
 
 	// 可选的连接池参数（不设置则使用默认值）
-	MaxIdleConns        int  // 最大空闲连接总数（默认 100）
-	MaxIdleConnsPerHost int  // 每主机最大空闲连接（默认 10）
-	MaxConnsPerHost     int  // 每主机最大连接数（默认 0 无限制）
-	DisableKeepAlives   bool // 禁止连接复用，每次请求建立新连接
+	MaxIdleConns        int // 最大空闲连接总数（默认 100）
+	MaxIdleConnsPerHost int // 每主机最大空闲连接（默认 10）
+	MaxConnsPerHost     int // 每主机最大连接数（默认 0 无限制）
 }
 
 // sharedClients 存储按配置参数缓存的 http.Client 实例
@@ -82,6 +81,23 @@ func GetClient(opts Options) (*http.Client, error) {
 		return c, nil
 	}
 	return client, nil
+}
+
+// EvictProxyClients 移除为指定代理 URL 缓存的全部客户端
+// 仅用于随进程消失的临时代理（如 Mihomo 单节点检测监听）：每次检测的端口与凭据都不同，
+// 不移除会让缓存随检测次数无限增长。空 URL 直接忽略，不影响直连客户端。
+func EvictProxyClients(proxyURL string) {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return
+	}
+	prefix := proxyURL + "|"
+	sharedClients.Range(func(key, _ any) bool {
+		if k, ok := key.(string); ok && strings.HasPrefix(k, prefix) {
+			sharedClients.Delete(key)
+		}
+		return true
+	})
 }
 
 func buildClient(opts Options) (*http.Client, error) {
@@ -122,7 +138,6 @@ func buildTransport(opts Options) (*http.Transport, error) {
 		MaxConnsPerHost:       opts.MaxConnsPerHost, // 0 表示无限制
 		IdleConnTimeout:       defaultIdleConnTimeout,
 		ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
-		DisableKeepAlives:     opts.DisableKeepAlives,
 	}
 
 	if opts.InsecureSkipVerify {
@@ -146,14 +161,13 @@ func buildTransport(opts Options) (*http.Transport, error) {
 }
 
 func buildClientKey(opts Options) string {
-	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%t|%d|%d|%d",
+	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%d|%d|%d",
 		strings.TrimSpace(opts.ProxyURL),
 		opts.Timeout.String(),
 		opts.ResponseHeaderTimeout.String(),
 		opts.InsecureSkipVerify,
 		opts.ValidateResolvedIP,
 		opts.AllowPrivateHosts,
-		opts.DisableKeepAlives,
 		opts.MaxIdleConns,
 		opts.MaxIdleConnsPerHost,
 		opts.MaxConnsPerHost,

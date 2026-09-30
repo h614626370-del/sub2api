@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 	"unsafe"
 
 	"github.com/gin-gonic/gin"
@@ -59,12 +58,6 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 		targetURL = openaiPlatformAPIURL
 	}
 
-	resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	targetURL, err := s.resolveOpenAIOAuthURL(resolveCtx, account, targetURL)
-	if err != nil {
-		return "", err
-	}
 	parsed, err := url.Parse(strings.TrimSpace(targetURL))
 	if err != nil {
 		return "", fmt.Errorf("invalid target url: %w", err)
@@ -95,23 +88,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	routingModel string,
 	routingServiceTier string,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
-	headers, resolution, _, err := s.buildOpenAIWSHeadersWithTicket(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, routingModel, routingServiceTier)
-	return headers, resolution, err
-}
-
-func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	token string,
-	decision OpenAIWSProtocolDecision,
-	isCodexCLI bool,
-	turnState string,
-	turnMetadata string,
-	promptCacheKey string,
-	routingModel string,
-	routingServiceTier string,
-) (http.Header, openAIWSSessionHeaderResolution, *openAICodexTicket, error) {
 	headers := make(http.Header)
 	if account == nil || !account.IsOpenAIAgentIdentity() {
 		headers.Set("authorization", "Bearer "+token)
@@ -146,7 +122,10 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 	// 实际请求因头差异落进不同的连接池兼容分桶。
 	applyOpenAICodexBetaFeatures(c, account, headers)
 	// OAuth 账号：将 apiKeyID 混入 session 标识符，防止跨用户会话碰撞。
-	if account != nil && account.UsesOpenAICodexProtocol() {
+	harvestSession := s.harvestPinnedSessionForModel(ctx, account, routingModel)
+	if harvestSession != "" {
+		headers.Set("session_id", harvestSession)
+	} else if account != nil && account.UsesOpenAICodexProtocol() {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		if sessionResolution.SessionID != "" {
 			headers.Set("session_id", isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), sessionResolution.SessionID))
@@ -165,19 +144,20 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 	if state := strings.TrimSpace(turnState); state != "" {
 		headers.Set(openAIWSTurnStateHeader, state)
 	}
-	ticket, err := s.applyOpenAICodexTicketWithGeneration(ctx, account, routingModel, headers)
-	if err != nil {
-		return nil, sessionResolution, nil, err
+	if err := s.applyOpenAICodexTicket(ctx, account, routingModel, headers, "websocket"); err != nil {
+		return nil, sessionResolution, err
 	}
 	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
 		headers.Set(openAIWSTurnMetadataHeader, metadata)
 	}
-	applyCodexAccountIdentityHeaders(headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-	applyStagedCodexFingerprintHeaders(c, account, headers)
+	if harvestSession == "" {
+		applyCodexAccountIdentityHeaders(headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		applyStagedCodexFingerprintHeaders(c, account, headers)
+	}
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
-			return nil, sessionResolution, nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
+			return nil, sessionResolution, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 		headers.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 	}
@@ -221,8 +201,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
 		strings.TrimSpace(headers.Get(openAICodexRoutingHintHeader)) != "",
 		"soft_routing_hint",
 	)
+	s.restoreBoundCodexTicketHarvestIdentity(ctx, headers, account)
 
-	return headers, sessionResolution, ticket, nil
+	return headers, sessionResolution, nil
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
@@ -429,12 +410,13 @@ func openAIWSPayloadCodexWindowID(payload []byte) string {
 // normalizeOpenAIWSContextWindowBoundary breaks a Responses continuation chain
 // when Codex moves to a new local context window. WebSocket response.create can
 // still carry the previous window's previous_response_id after new_context,
-// while HTTP starts the new window without that continuation anchor.
+// while HTTP starts the new window without that continuation anchor. The current
+// window must come from the client frame before handshake/identity normalization.
 func normalizeOpenAIWSContextWindowBoundary(
 	payload []byte,
 	previousWindowID string,
+	currentWindowID string,
 ) ([]byte, openAIWSContextWindowBoundary, error) {
-	currentWindowID := openAIWSPayloadCodexWindowID(payload)
 	boundary := openAIWSContextWindowBoundary{WindowID: currentWindowID}
 	if previousWindowID == "" || currentWindowID == "" || currentWindowID == previousWindowID {
 		return payload, boundary, nil
@@ -710,6 +692,55 @@ func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool
 	return true
 }
 
+// openAIWSRawItemsContainNonPortableContext reports context that cannot be
+// safely replayed on a replacement credential.  previous_response_id is an
+// upstream-owned pointer, while encrypted reasoning/compaction content and
+// item_reference values are tied to the credential/session that produced them.
+// Treating those fields as ordinary JSON and silently sending them to another
+// account can turn a recoverable upstream failure into a corrupted or
+// unauthorized continuation.  This guard is intentionally used only for
+// cross-account current-turn retry; same-account continuation keeps its
+// existing, stricter upstream affinity rules.
+func openAIWSRawItemsContainNonPortableContext(items []json.RawMessage) bool {
+	var contains func(any) bool
+	contains = func(value any) bool {
+		switch typed := value.(type) {
+		case map[string]any:
+			if itemType, ok := typed["type"].(string); ok && strings.TrimSpace(itemType) == "item_reference" {
+				return true
+			}
+			if encrypted, ok := typed["encrypted_content"].(string); ok && strings.TrimSpace(encrypted) != "" {
+				return true
+			}
+			for _, child := range typed {
+				if contains(child) {
+					return true
+				}
+			}
+		case []any:
+			for _, child := range typed {
+				if contains(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	for _, item := range items {
+		var decoded any
+		if err := json.Unmarshal(item, &decoded); err != nil {
+			// The caller already validated the request.  If a replay item is
+			// malformed here, fail closed rather than infer portability.
+			return true
+		}
+		if contains(decoded) {
+			return true
+		}
+	}
+	return false
+}
+
 // sanitizeOpenAIWSHistoricalReplayToolCalls 返回的新头数组与 previousItems 共享正文。
 func sanitizeOpenAIWSHistoricalReplayToolCalls(
 	previousItems []json.RawMessage,
@@ -841,6 +872,12 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	originalModel string,
 ) ([]byte, bool, error) {
 	if !fullInputExists {
+		return nil, false, nil
+	}
+	if openAIWSRawItemsContainNonPortableContext(fullInput) {
+		// Do not strip previous_response_id and replay opaque account-bound
+		// material on a replacement account.  The caller will close/fail over
+		// conservatively and the client can reconnect with fresh context.
 		return nil, false, nil
 	}
 	retryPayload, err := setOpenAIWSPayloadInputSequence(payload, fullInput, true)

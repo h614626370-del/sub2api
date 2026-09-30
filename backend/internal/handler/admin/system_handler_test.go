@@ -22,8 +22,6 @@ type systemHandlerUpdateServiceStub struct {
 	updateInfo            *service.UpdateInfo
 	checkErr              error
 	checkForces           []bool
-	customCheckErr        error
-	customCheckForces     []bool
 	performCall           int
 	performCtxErr         error
 	performHasDeadline    bool
@@ -41,11 +39,6 @@ type systemHandlerUpdateServiceStub struct {
 func (s *systemHandlerUpdateServiceStub) CheckUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
 	s.checkForces = append(s.checkForces, force)
 	return s.updateInfo, s.checkErr
-}
-
-func (s *systemHandlerUpdateServiceStub) CheckCustomUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
-	s.customCheckForces = append(s.customCheckForces, force)
-	return s.updateInfo, s.customCheckErr
 }
 
 func (s *systemHandlerUpdateServiceStub) PerformUpdate(ctx context.Context) error {
@@ -107,8 +100,6 @@ func newSystemHandlerTestRouter(t *testing.T, updateSvc *systemHandlerUpdateServ
 	router := gin.New()
 	router.POST("/api/v1/admin/system/update", handler.PerformUpdate)
 	router.POST("/api/v1/admin/system/rollback", handler.Rollback)
-	router.GET("/api/v1/admin/system/check-updates", handler.CheckUpdates)
-	router.GET("/api/v1/admin/system/check-custom-updates", handler.CheckCustomUpdates)
 	router.GET("/api/v1/admin/system/rollback-versions", handler.GetRollbackVersions)
 	return router
 }
@@ -145,7 +136,7 @@ func TestSystemHandlerPerformUpdateAlreadyUpToDateReturnsOK(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, 1, updateSvc.performCall)
-	require.Equal(t, []bool{false}, updateSvc.customCheckForces)
+	require.Equal(t, []bool{false}, updateSvc.checkForces)
 	requireSystemLockStatus(t, repo, service.IdempotencyStatusSucceeded)
 
 	var body systemUpdateResponseEnvelope
@@ -173,31 +164,13 @@ func TestSystemHandlerPerformUpdateFailureStillReturnsInternalError(t *testing.T
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.Equal(t, 1, updateSvc.performCall)
-	require.Empty(t, updateSvc.customCheckForces)
+	require.Empty(t, updateSvc.checkForces)
 	requireSystemLockStatus(t, repo, service.IdempotencyStatusFailedRetryable)
 
 	var body systemUpdateErrorEnvelope
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Equal(t, http.StatusInternalServerError, body.Code)
 	require.Equal(t, "internal error", body.Message)
-}
-
-func TestSystemHandlerChecksOfficialAndCustomSourcesSeparately(t *testing.T) {
-	updateSvc := &systemHandlerUpdateServiceStub{updateInfo: &service.UpdateInfo{CurrentVersion: "0.2.7"}}
-	router := newSystemHandlerTestRouter(t, updateSvc, newMemoryIdempotencyRepoStub())
-
-	officialRec := httptest.NewRecorder()
-	officialReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/check-updates?force=true", nil)
-	router.ServeHTTP(officialRec, officialReq)
-
-	customRec := httptest.NewRecorder()
-	customReq := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/check-custom-updates?force=true", nil)
-	router.ServeHTTP(customRec, customReq)
-
-	require.Equal(t, http.StatusOK, officialRec.Code)
-	require.Equal(t, http.StatusOK, customRec.Code)
-	require.Equal(t, []bool{true}, updateSvc.checkForces)
-	require.Equal(t, []bool{true}, updateSvc.customCheckForces)
 }
 
 // TestSystemHandlerPerformUpdateSurvivesClientDisconnect reproduces #4504:

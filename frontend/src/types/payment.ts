@@ -243,10 +243,6 @@ export interface TopUserPaymentStats {
 }
 
 export interface DashboardStats {
-  start_date?: string
-  end_date?: string
-  timezone?: string
-  today?: string
   today_amount: CurrencyAmounts
   total_amount: CurrencyAmounts
   today_count: number

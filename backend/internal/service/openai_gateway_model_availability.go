@@ -37,14 +37,7 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	queryGroupID := groupID
 	includeGrouped := false
-	route, _ := ctx.Value(openAIAstraRouteKey{}).(openAIAstraRoute)
-	if route.err != nil {
-		return ModelAvailabilityDiagnosis{HasAccountsInPool: true, HasModelSupport: true}
-	}
-	if route.groupID > 0 {
-		// Diagnose the pool that was actually selected, not the billing group.
-		queryGroupID = &route.groupID
-	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		queryGroupID = nil
 		includeGrouped = true
 	}
@@ -66,8 +59,9 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 		// Mirrors the per-candidate filter used during account selection
 		// (openai_account_scheduler.isAccountRequestCompatible): empty
 		// model_mapping accepts everything; otherwise the explicit / wildcard
-		// mapping must match.
-		if accounts[i].IsModelSupported(requestedModel) {
+		// mapping must match, and the account's allowlist for this group (if
+		// any) must admit the model.
+		if accounts[i].IsModelSupportedInGroup(groupID, requestedModel) {
 			diag.HasModelSupport = true
 			return diag
 		}

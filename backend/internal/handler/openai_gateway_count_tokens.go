@@ -96,7 +96,6 @@ func (h *OpenAIGatewayHandler) ResponsesInputTokens(c *gin.Context) {
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	requestStart := time.Now()
-	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIModelRoute(c.Request.Context(), apiKey.GroupID, reqModel, openAICompatibleRequestPlatform(c.Request.Context(), apiKey)))
 	account, err := h.gatewayService.SelectAccountForTokenCount(
 		c.Request.Context(),
 		apiKey.GroupID,
@@ -269,7 +268,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if preferredMappedModel != "" {
 		currentRoutingModel = preferredMappedModel
 	}
-	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIModelRoute(c.Request.Context(), apiKey.GroupID, reqModel, openAICompatibleRequestPlatform(c.Request.Context(), apiKey)))
 	account, err := h.gatewayService.SelectAccountForTokenCount(
 		c.Request.Context(),
 		apiKey.GroupID,

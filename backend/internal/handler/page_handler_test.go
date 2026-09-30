@@ -95,13 +95,6 @@ func TestResolvePageImagePathRejectsSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(base, "images")); err != nil {
 		t.Skipf("symlink not supported: %v", err)
 	}
-	// Remove the directory link itself before TempDir's recursive cleanup.
-	// Windows can otherwise report "directory is not empty" for this fixture.
-	t.Cleanup(func() {
-		if err := os.Remove(filepath.Join(base, "images")); err != nil {
-			t.Errorf("remove test symlink: %v", err)
-		}
-	})
 
 	if got, ok := resolvePageImagePath(pagesDir, base, "images/secret.png"); ok {
 		t.Fatalf("expected symlink escape to be rejected, got %q", got)

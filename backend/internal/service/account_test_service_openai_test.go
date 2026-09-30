@@ -165,38 +165,6 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
 }
 
-func TestAccountTestService_OpenAIOAuthTestAppliesConfiguredTimezone(t *testing.T) {
-	ctx, _ := newTestContext()
-	resp := newJSONResponse(http.StatusOK, "")
-	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
-
-`))
-
-	settingsRepo := &codexPolicyMigrationRepoStub{values: map[string]string{
-		SettingKeyOpenAIOAuthDefaultTimezone: "Asia/Tokyo",
-	}}
-	settings := NewSettingService(settingsRepo, nil)
-	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
-	svc := &AccountTestService{
-		httpUpstream:         upstream,
-		openaiGatewayService: &OpenAIGatewayService{settingService: settings},
-	}
-	account := &Account{
-		ID:          91,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		Credentials: map[string]any{"access_token": "test-token"},
-	}
-
-	require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", ""))
-	require.Len(t, upstream.requests, 1)
-	body, err := io.ReadAll(upstream.requests[0].Body)
-	require.NoError(t, err)
-	require.Equal(t, "environments.environment_context", gjson.GetBytes(body, "input.0.internal_chat_message_metadata_passthrough.content_item_kinds.1").String())
-	require.Contains(t, gjson.GetBytes(body, "input.0.content.1.text").String(), "<timezone>Asia/Tokyo</timezone>")
-}
-
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()

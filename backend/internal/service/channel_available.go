@@ -63,9 +63,6 @@ func (s *ChannelService) ListAvailable(ctx context.Context) ([]AvailableChannel,
 	groupByID := make(map[int64]AvailableGroupRef, len(groups))
 	for i := range groups {
 		g := groups[i]
-		if g.IsSpecialType() {
-			continue
-		}
 		groupByID[g.ID] = AvailableGroupRef{
 			ID:                 g.ID,
 			Name:               g.Name,

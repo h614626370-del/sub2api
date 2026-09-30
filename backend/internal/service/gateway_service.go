@@ -721,9 +721,10 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 
 // ShouldReportAccountScheduleFailure prevents provider- and request-scoped
 // credential failures from being misattributed to the selected account. Legacy
-// and inference failures retain their existing scheduler-health behavior.
+// and inference failures retain their existing scheduler-health behavior,
+// except an Excel BPS 429: it only cools the account's BPS route.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil {
+	if e == nil || e.Reason == ExcelBPSRateLimitedReason {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount
@@ -1438,11 +1439,10 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		// Treat it like an unmapped account: skip its mapping here and let
 		// supplementUnmappedOpenAIModels contribute the default set. Mappings on
 		// the ordinary accounts in the same group still count.
-		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() {
-			continue
-		}
-
 		mapping := acc.GetModelMapping()
+		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() {
+			mapping = nil
+		}
 		for model := range mapping {
 			// Accounts pulled in through mixed scheduling only contribute the
 			// models that belong to the listing platform (e.g. an antigravity
@@ -1450,8 +1450,22 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 			if platform != "" && acc.Platform != platform && !mixedListingModelAllowed(platform, model) {
 				continue
 			}
+			// 账号在本分组里被限制了可用模型时，只公布允许的那部分。
+			if !acc.IsModelAllowedInGroup(groupID, model) {
+				continue
+			}
 			modelSet[model] = struct{}{}
 			hasAnyMapping = true
+		}
+		// 没有映射的账号默认支持全部模型；在本分组被限制时改为公布限制清单里的具体模型名。
+		if len(mapping) == 0 {
+			for _, model := range groupAllowedConcreteModels(&acc, groupID) {
+				if platform != "" && acc.Platform != platform && !mixedListingModelAllowed(platform, model) {
+					continue
+				}
+				modelSet[model] = struct{}{}
+				hasAnyMapping = true
+			}
 		}
 	}
 
@@ -1472,7 +1486,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	sort.Strings(models)
 
 	if platform == PlatformOpenAI {
-		models = supplementUnmappedOpenAIModels(accounts, models)
+		models = supplementUnmappedOpenAIModels(accounts, groupID, models)
 	}
 
 	if s.modelsListCache != nil {

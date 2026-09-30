@@ -4,22 +4,27 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/mihomo"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/setup"
 
 	"github.com/gin-gonic/gin"
 )
 
 // SystemHandler handles system-related operations
 type SystemHandler struct {
-	updateSvc systemUpdateService
-	lockSvc   *service.SystemOperationLockService
+	updateSvc   systemUpdateService
+	lockSvc     *service.SystemOperationLockService
+	kernel      *mihomo.Manager
+	nodeChecker mihomoNodeChecker
 }
 
 // systemUpdateTimeout bounds a full in-place update or rollback: the release
@@ -45,7 +50,6 @@ func systemUpdateContext(ctx context.Context) (context.Context, context.CancelFu
 
 type systemUpdateService interface {
 	CheckUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
-	CheckCustomUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
 	PerformUpdate(ctx context.Context) error
 	Rollback() error
 	ListRollbackVersions(ctx context.Context) ([]service.RollbackVersion, error)
@@ -57,6 +61,7 @@ func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOper
 	return &SystemHandler{
 		updateSvc: updateSvc,
 		lockSvc:   lockSvc,
+		kernel:    mihomo.New(filepath.Join(setup.GetDataDir(), "mihomo-codex")),
 	}
 }
 
@@ -74,18 +79,6 @@ func (h *SystemHandler) GetVersion(c *gin.Context) {
 func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 	force := c.Query("force") == "true"
 	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), force)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
-		return
-	}
-	response.Success(c, info)
-}
-
-// CheckCustomUpdates checks the customized repository used for installation.
-// GET /api/v1/admin/system/check-custom-updates
-func (h *SystemHandler) CheckCustomUpdates(c *gin.Context) {
-	force := c.Query("force") == "true"
-	info, err := h.updateSvc.CheckCustomUpdate(c.Request.Context(), force)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
@@ -114,7 +107,7 @@ func (h *SystemHandler) PerformUpdate(c *gin.Context) {
 
 		if err := h.updateSvc.PerformUpdate(updateCtx); err != nil {
 			if errors.Is(err, service.ErrNoUpdateAvailable) {
-				info, checkErr := h.updateSvc.CheckCustomUpdate(updateCtx, false)
+				info, checkErr := h.updateSvc.CheckUpdate(updateCtx, false)
 				if checkErr != nil {
 					releaseReason = "SYSTEM_UPDATE_FAILED"
 					return nil, checkErr

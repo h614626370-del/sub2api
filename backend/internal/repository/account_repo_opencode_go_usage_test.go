@@ -93,30 +93,6 @@ func openCodeGoSnapshotJSON() string {
 	return string(raw)
 }
 
-func TestLockAndMergeAccountExtraPreservesOpenCodeAndCustomState(t *testing.T) {
-	client, mock := newOllamaCloudUsageRepositoryTestClient(t)
-	account := openCodeGoUsageRepositoryAccount()
-	account.Extra["codex_turn_ticket:model"] = map[string]any{"state": "stale"}
-	account.Extra["account_timezone_detected"] = map[string]any{"timezone": "UTC"}
-	credentials, err := json.Marshal(normalizeJSONMap(account.Credentials))
-	require.NoError(t, err)
-	currentExtra := []byte(`{"codex_turn_ticket:model":{"state":"latest"},"account_timezone_detected":{"timezone":"Asia/Shanghai"}}`)
-	mock.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).
-		WithArgs(account.ID, account.Platform, account.Type, string(credentials), nil).
-		WillReturnRows(sqlmock.NewRows(openCodeGoMergeMockColumns()).
-			AddRow(false, false, true, nil, nil, nil, nil, nil, nil, true, "true", openCodeGoSnapshotJSON(), currentExtra))
-
-	got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, true, got[service.OpenCodeGoUsageAutoRefreshExtraKey])
-	snapshot, ok := got[service.OpenCodeGoUsageSnapshotExtraKey].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, service.OpenCodeGoUsageStatusOK, snapshot["status"])
-	require.Equal(t, map[string]any{"state": "latest"}, got["codex_turn_ticket:model"])
-	require.Equal(t, map[string]any{"timezone": "Asia/Shanghai"}, got["account_timezone_detected"])
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
 func TestLockAndMergeAccountProbeExtraPreservesOpenCodeGoManagedState(t *testing.T) {
 	tests := []struct {
 		name              string

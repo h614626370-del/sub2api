@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,14 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
-
-func TestParseProxyTimezoneRequiresMatchingExitIP(t *testing.T) {
-	zone, err := parseProxyTimezone([]byte(`{"success":true,"ip":"203.0.113.10","timezone":{"id":"Asia/Tokyo"}}`), net.ParseIP("203.0.113.10"))
-	require.NoError(t, err)
-	require.Equal(t, "Asia/Tokyo", zone)
-	_, err = parseProxyTimezone([]byte(`{"success":true,"ip":"203.0.113.11","timezone":{"id":"Asia/Tokyo"}}`), net.ParseIP("203.0.113.10"))
-	require.Error(t, err)
-}
 
 type ProxyProbeServiceSuite struct {
 	suite.Suite
@@ -59,9 +50,7 @@ func (s *ProxyProbeServiceSuite) TestProbeProxy_UnsupportedProxyScheme() {
 }
 
 func (s *ProxyProbeServiceSuite) TestProbeProxy_Success_IPAPI() {
-	var requests []string
 	s.setupProxyServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.RequestURI)
 		// 检查是否是 ip-api 请求
 		if strings.Contains(r.RequestURI, "ip-api.com") {
 			w.Header().Set("Content-Type", "application/json")
@@ -80,9 +69,6 @@ func (s *ProxyProbeServiceSuite) TestProbeProxy_Success_IPAPI() {
 	require.Equal(s.T(), "r", info.Region)
 	require.Equal(s.T(), "cc", info.Country)
 	require.Equal(s.T(), "CC", info.CountryCode)
-	// 完整地理位置查询成功时，不应先调用只返回国家代码的 trace 接口。
-	require.Len(s.T(), requests, 1)
-	require.Contains(s.T(), requests[0], "ip-api.com")
 }
 
 func (s *ProxyProbeServiceSuite) TestProbeProxy_Success_IPifyFallback() {

@@ -280,11 +280,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 		return nil, err
 	}
 	reqCtx := WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI))
-	targetURL, err := s.resolveOpenAIOAuthURL(ctx, account, chatGPTLiveCallsURL)
-	if err != nil {
-		return nil, err
-	}
-	upstreamReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, targetURL, bytes.NewReader(body))
+	upstreamReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, chatGPTLiveCallsURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +294,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 			upstreamReq.Header.Add(key, value)
 		}
 	}
-	upstreamReq.Host = upstreamReq.URL.Host
+	upstreamReq.Host = "chatgpt.com"
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, upstreamReq.Header, account); err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "account_headers", err)
 		return nil, err
@@ -455,22 +451,6 @@ func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *Liv
 		return nil, err
 	}
 	target := strings.TrimRight(chatGPTLiveSidebandBaseURL, "/") + "/" + url.PathEscape(record.CallID)
-	if account.Type == AccountTypeOAuth && (account.IsShadow() || strings.TrimSpace(account.GetCredential("base_url")) != "") {
-		target, err = s.resolveOpenAIOAuthURL(ctx, account, openAICodexBaseURL+"/"+url.PathEscape(record.CallID))
-		if err != nil {
-			return nil, err
-		}
-		parsed, parseErr := url.Parse(target)
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		if parsed.Scheme == "https" {
-			parsed.Scheme = "wss"
-		} else {
-			parsed.Scheme = "ws"
-		}
-		target = parsed.String()
-	}
 	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, target, headers, resolveAccountProxyURL(account))
 	if err != nil {
 		return nil, fmt.Errorf("dial live sideband (status %d): %w", status, err)

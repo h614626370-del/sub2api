@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -64,9 +63,7 @@ var probeURLs = []struct {
 	url    string
 	parser string
 }{
-	// 优先返回完整地理位置；trace 只有 IP 和国家代码，不能抢先截断城市查询。
 	{"http://ip-api.com/json/?lang=zh-CN", "ip-api"},
-	{"https://chatgpt.com/cdn-cgi/trace", "chatgpt-trace"},
 	{"http://api64.ipify.org?format=json", "ipify"},
 }
 
@@ -83,77 +80,6 @@ type proxyProbeService struct {
 	configuredProbeURLs []configuredProbeTarget
 }
 
-// Resolve the observed exit IP explicitly: the geolocation service must not
-// silently substitute another address or the application's own public IP.
-func (s *proxyProbeService) ProbeProxyTimezone(ctx context.Context, proxyURL string) (*service.ProxyExitInfo, error) {
-	if strings.TrimSpace(proxyURL) == "" {
-		return nil, fmt.Errorf("a proxy is required")
-	}
-	info, _, err := s.ProbeProxy(ctx, proxyURL)
-	if err != nil {
-		return nil, err
-	}
-	ip := net.ParseIP(info.IP)
-	if ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
-		return nil, fmt.Errorf("invalid public exit IP")
-	}
-	if info.Timezone != "" && info.Timezone != "Local" {
-		if _, err := time.LoadLocation(info.Timezone); err == nil {
-			return info, nil
-		}
-	}
-	client, err := httpclient.GetClient(httpclient.Options{
-		ProxyURL: proxyURL, Timeout: defaultProxyProbeTimeout,
-		ValidateResolvedIP: s.validateResolvedIP, AllowPrivateHosts: s.allowPrivateHosts,
-		DisableKeepAlives: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://ipwho.is/"+ip.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("timezone lookup failed")
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("timezone lookup returned %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, defaultProxyProbeResponseMaxBytes+1))
-	if err != nil || int64(len(body)) > defaultProxyProbeResponseMaxBytes {
-		return nil, fmt.Errorf("invalid timezone lookup response")
-	}
-	zone, err := parseProxyTimezone(body, ip)
-	if err != nil {
-		return nil, err
-	}
-	info.Timezone = zone
-	return info, nil
-}
-
-func parseProxyTimezone(body []byte, expectedIP net.IP) (string, error) {
-	var result struct {
-		Success  bool   `json:"success"`
-		IP       string `json:"ip"`
-		Timezone struct {
-			ID string `json:"id"`
-		} `json:"timezone"`
-	}
-	if json.Unmarshal(body, &result) != nil || !result.Success || !expectedIP.Equal(net.ParseIP(result.IP)) {
-		return "", fmt.Errorf("timezone lookup did not match the proxy exit IP")
-	}
-	if result.Timezone.ID == "" || result.Timezone.ID == "Local" {
-		return "", fmt.Errorf("timezone lookup returned no IANA timezone")
-	}
-	if _, err := time.LoadLocation(result.Timezone.ID); err != nil {
-		return "", fmt.Errorf("invalid IANA timezone")
-	}
-	return result.Timezone.ID, nil
-}
-
 func (s *proxyProbeService) ProbeProxy(ctx context.Context, proxyURL string) (*service.ProxyExitInfo, int64, error) {
 	client, err := httpclient.GetClient(httpclient.Options{
 		ProxyURL:           proxyURL,
@@ -161,7 +87,6 @@ func (s *proxyProbeService) ProbeProxy(ctx context.Context, proxyURL string) (*s
 		InsecureSkipVerify: s.insecureSkipVerify,
 		ValidateResolvedIP: s.validateResolvedIP,
 		AllowPrivateHosts:  s.allowPrivateHosts,
-		DisableKeepAlives:  true,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create proxy client: %w", err)
@@ -243,7 +168,6 @@ func (s *proxyProbeService) parseIPAPI(body []byte, latencyMs int64) (*service.P
 		RegionName  string `json:"regionName"`
 		Country     string `json:"country"`
 		CountryCode string `json:"countryCode"`
-		Timezone    string `json:"timezone"`
 	}
 
 	if err := json.Unmarshal(body, &ipInfo); err != nil {
@@ -270,7 +194,6 @@ func (s *proxyProbeService) parseIPAPI(body []byte, latencyMs int64) (*service.P
 		Region:      region,
 		Country:     ipInfo.Country,
 		CountryCode: ipInfo.CountryCode,
-		Timezone:    ipInfo.Timezone,
 	}, latencyMs, nil
 }
 

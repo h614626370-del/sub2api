@@ -1817,6 +1817,17 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
 
+	if direct && account.IsExcelBPSImagesEnabledForModel(requestModel) {
+		if reason := excelBPSImagesUnsupportedReason(parsed); reason != "" {
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Images request stays on Codex: account_id=%d bps_unsupported=%s", account.ID, reason)
+		} else {
+			result, fallback, err := s.forwardExcelBPSImages(upstreamCtx, c, account, parsed, requestModel, upstreamModel, startTime)
+			if !fallback {
+				return result, err
+			}
+		}
+	}
+
 	token, _, err := s.GetAccessToken(upstreamCtx, account)
 	if err != nil {
 		return nil, err
@@ -1839,10 +1850,6 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 	// 复用 Codex 认证、影子账号及指纹头；仅切换已构造请求的端点和响应协议。
-	targetURL, err = s.resolveOpenAIOAuthURL(ctx, account, targetURL)
-	if err != nil {
-		return nil, err
-	}
 	upstreamReq.URL, err = url.Parse(targetURL)
 	if err != nil {
 		return nil, err

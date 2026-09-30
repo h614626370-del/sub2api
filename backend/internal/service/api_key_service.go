@@ -448,9 +448,6 @@ func (s *APIKeyService) incrementAPIKeyErrorCount(ctx context.Context, userID in
 // 对于订阅类型分组：检查用户是否有有效订阅
 // 对于标准类型分组：使用原有的 AllowedGroups 和 IsExclusive 逻辑
 func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group *Group) bool {
-	if group.IsSpecialType() {
-		return false
-	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		_, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
@@ -1058,9 +1055,6 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 
 // canUserBindGroupInternal 内部方法，检查用户是否可以绑定分组（使用预加载的订阅数据）
 func (s *APIKeyService) canUserBindGroupInternal(user *User, group *Group, subscribedGroupIDs map[int64]bool) bool {
-	if group.IsSpecialType() {
-		return false
-	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		return subscribedGroupIDs[group.ID]
@@ -1112,6 +1106,18 @@ func (s *APIKeyService) GetUserGroupRates(ctx context.Context, userID int64) (ma
 		return nil, fmt.Errorf("get user group rates: %w", err)
 	}
 	return rates, nil
+}
+
+// GetUserGroupDeniedModels 获取用户在各分组被禁用的模型，返回 map[groupID]models。
+func (s *APIKeyService) GetUserGroupDeniedModels(ctx context.Context, userID int64) (map[int64][]string, error) {
+	if s.userGroupRateRepo == nil {
+		return nil, nil
+	}
+	denied, err := s.userGroupRateRepo.GetDeniedModelsByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user group denied models: %w", err)
+	}
+	return denied, nil
 }
 
 // CheckAPIKeyQuotaAndExpiry checks if the API key is valid for use (not expired, quota not exhausted)
