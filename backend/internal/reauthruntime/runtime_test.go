@@ -79,13 +79,15 @@ func TestPrepareVerifiesDigestBeforeExecutingAndReusesCache(t *testing.T) {
 				digest = strings.Repeat("0", 64)
 			}
 			requests := 0
-			m := New(root, "1.2.3", "http://127.0.0.1:4040", strings.Repeat("x", 64))
+			m := New(root, "2.9.6.1", "http://127.0.0.1:4040", strings.Repeat("x", 64))
 			m.client = &http.Client{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {
 				requests++
+				require.Contains(t, req.URL.Path, "/h614626370-del/sub2api/releases/")
+				require.Contains(t, req.URL.Path, "v2.9.6.1")
 				require.NotContains(t, req.URL.String(), m.token)
 				body := data
 				if strings.Contains(req.URL.Path, "/releases/tags/") {
-					body, _ = json.Marshal(map[string]any{"assets": []map[string]string{{"name": "sub2api-reauth_1.2.3_linux_" + runtime.GOARCH + ".tar.gz", "digest": "sha256:" + digest}}})
+					body, _ = json.Marshal(map[string]any{"assets": []map[string]string{{"name": "sub2api-reauth_2.9.6.1_linux_" + runtime.GOARCH + ".tar.gz", "digest": "sha256:" + digest}}})
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{}}, nil
 			})}

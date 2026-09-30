@@ -21,6 +21,22 @@ spec.loader.exec_module(release)
 
 
 class ReleaseMatrixTest(unittest.TestCase):
+    def test_custom_revision_release_archive_names(self):
+        self.assertEqual(release.archive_name('2.9.6.1', {'goos': 'linux', 'goarch': 'amd64'}),
+                         'sub2api_2.9.6.1_linux_amd64.tar.gz')
+        self.assertEqual(release.archive_name('2.9.6.1', {'goos': 'windows', 'goarch': 'amd64'}),
+                         'sub2api_2.9.6.1_windows_amd64.zip')
+        with self.assertRaises(ValueError):
+            release.archive_name('2.9.6.1.2', {'goos': 'linux', 'goarch': 'amd64'})
+
+    def test_custom_revision_publication_plan(self):
+        with patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs'}), patch.object(subprocess, 'check_output', return_value='a' * 40):
+            release.plan(argparse.Namespace(ref='v2.9.6.1', dry_run=False, simple=False))
+        output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
+        self.assertEqual(output['version'], '2.9.6.1')
+        self.assertEqual(output['prerelease'], 'false')
+        self.assertEqual(len(json.loads(output['matrix'])['include']), 5)
+
     def setUp(self):
         self.previous = Path.cwd()
         self.temp = tempfile.TemporaryDirectory()
