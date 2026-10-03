@@ -645,34 +645,25 @@ func compareVersions(current, latest string) int {
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
 
-	partCount := max(len(currentParts), len(latestParts))
-	for i := 0; i < partCount; i++ {
-		currentPart := 0
-		if i < len(currentParts) {
-			currentPart = currentParts[i]
-		}
-		latestPart := 0
-		if i < len(latestParts) {
-			latestPart = latestParts[i]
-		}
-		if currentPart < latestPart {
+	for i := 0; i < 3; i++ {
+		if currentParts[i] < latestParts[i] {
 			return -1
 		}
-		if currentPart > latestPart {
+		if currentParts[i] > latestParts[i] {
 			return 1
 		}
 	}
 	return 0
 }
 
-func parseVersion(v string) []int {
+func parseVersion(v string) [3]int {
 	v = strings.TrimPrefix(v, "v")
 	if idx := strings.IndexByte(v, '-'); idx != -1 {
 		v = v[:idx]
 	}
 	parts := strings.Split(v, ".")
-	result := make([]int, len(parts))
-	for i := range parts {
+	result := [3]int{0, 0, 0}
+	for i := 0; i < len(parts) && i < 3; i++ {
 		if parsed, err := strconv.Atoi(parts[i]); err == nil {
 			result[i] = parsed
 		}

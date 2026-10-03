@@ -173,10 +173,7 @@ type SystemSettings struct {
 	DefaultBalance                    float64
 	RiskControlEnabled                bool
 	CyberSessionBlockEnabled          bool
-	BPS403CaptureEnabled              bool
-	BPS403SessionBlockEnabled         bool
 	CyberSessionBlockTTLSeconds       int
-	BPS403SessionBlockTTLSeconds      int
 	CyberSessionIdentityStrictEnabled bool
 	AffiliateEnabled                  bool
 	AffiliateRebateRate               float64

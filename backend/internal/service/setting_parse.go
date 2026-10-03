@@ -224,10 +224,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 		SettingKeyCyberSessionBlockEnabled:          "false",
-		SettingKeyBPS403CaptureEnabled:              "false",
-		SettingKeyBPS403SessionBlockEnabled:         "false",
 		SettingKeyCyberSessionBlockTTLSeconds:       "3600",
-		SettingKeyBPS403SessionBlockTTLSeconds:      "3600",
 		SettingKeyCyberSessionIdentityStrictEnabled: "false",
 
 		// Claude Code version check (default: empty = disabled)
@@ -877,12 +874,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 	result.CyberSessionBlockEnabled = settings[SettingKeyCyberSessionBlockEnabled] == "true"
-	result.BPS403SessionBlockEnabled = settings[SettingKeyBPS403SessionBlockEnabled] == "true"
-	result.BPS403CaptureEnabled = settings[SettingKeyBPS403CaptureEnabled] == "true"
-	result.BPS403SessionBlockTTLSeconds = 3600
-	if n, err := strconv.Atoi(settings[SettingKeyBPS403SessionBlockTTLSeconds]); err == nil && n > 0 && n <= BPS403SessionMaxTTLSeconds {
-		result.BPS403SessionBlockTTLSeconds = n
-	}
 	if v, err := strconv.Atoi(strings.TrimSpace(settings[SettingKeyCyberSessionBlockTTLSeconds])); err == nil && v > 0 {
 		result.CyberSessionBlockTTLSeconds = v
 	} else {

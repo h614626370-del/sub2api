@@ -734,23 +734,26 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it("saves independent BPS 403 switches and session TTL", async () => {
+  it("does not expose or save retired BPS 403 settings", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      bps403_session_block_enabled: true,
+      bps403_capture_enabled: true,
+      bps403_session_block_ttl_seconds: 120,
+    });
     const wrapper = mountView();
     await flushPromises();
-    const card = wrapper.get('[data-testid="bps403-session-settings"]');
-    expect(card.find('#bps403-session-ttl').exists()).toBe(false);
-    await card.get('#bps403-session-block-enabled').setValue(true);
-    await card.get('#bps403-session-ttl').setValue('120');
-    await card.get('#bps403-capture-enabled').setValue(true);
-    expect(card.get('router-link').attributes('to')).toBe('/admin/request-captures');
-    await wrapper.find('form').trigger('submit.prevent');
+    expect(wrapper.find('[data-testid="bps403-session-settings"]').exists()).toBe(false);
+    expect(wrapper.find("#bps403-session-block-enabled").exists()).toBe(false);
+    expect(wrapper.find("#bps403-capture-enabled").exists()).toBe(false);
+    await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
-      bps403_session_block_enabled: true,
-      bps403_session_block_ttl_seconds: 120,
-      bps403_capture_enabled: true,
-      request_capture_enabled: false,
-    });
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    const payload = updateSettings.mock.calls[0]?.[0];
+    expect(payload).not.toHaveProperty("bps403_session_block_enabled");
+    expect(payload).not.toHaveProperty("bps403_capture_enabled");
+    expect(payload).not.toHaveProperty("bps403_session_block_ttl_seconds");
+    expect(payload).toHaveProperty("request_capture_enabled", false);
     wrapper.unmount();
   });
 

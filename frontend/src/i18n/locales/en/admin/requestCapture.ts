@@ -1,5 +1,4 @@
 export default { requestCapture: {
-  "bps403": "Automatic BPS 403 capture",
   "title": "Request capture",
   "description": "Capture a user, upstream account or ingress group and retain only failed requests for traffic comparison.",
   "enabled": "Enable request capture",

@@ -2,7 +2,7 @@
 set -euo pipefail
 : "${VERSION:?set VERSION}"
 : "${ARCH:?set ARCH}"
-[[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[A-Za-z0-9.-]+)?$ ]]
+[[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
 [[ $ARCH == amd64 || $ARCH == arm64 ]]
 runtime_output=$(mktemp -d)
 trap 'rm -rf "$runtime_output"' EXIT

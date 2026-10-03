@@ -164,12 +164,13 @@ jobs:
           TARGET_OS: ${{ matrix.goos }}
           TARGET_ARCH: ${{ matrix.goarch }}
         run: python "$RUNNER_TEMP/release-tools/release_matrix.py" config build --goos "$TARGET_OS" --goarch "$TARGET_ARCH" --output "$RUNNER_TEMP/goreleaser.matrix.yaml"
-      - name: Verify session capture and custom update behavior on Linux
+      - name: Verify request capture and retained customizations on Linux
         if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }}
         working-directory: backend
         run: |
           go test ./internal/requestcapture ./internal/pkg/httputil ./internal/reauthruntime ./internal/service/basispoints
-          go test -tags unit ./internal/service ./internal/handler ./internal/handler/admin ./internal/server ./internal/server/middleware -run 'BPS403|CyberSession|ExcelBPS|RequestCapture|UpdateService|CompareCustomRelease|APIContracts|RuntimeProxyChainRealTwoRefusalsOnlySendOnePOST|RuntimeProxyFallbackRealRefusedConnection' -count=1
+          go test ./migrations
+          go test -tags unit ./internal/service ./internal/handler ./internal/handler/admin ./internal/server ./internal/server/middleware -run 'CyberSession|ExcelBPS|RequestCapture|UpdateService|CompareReleaseVersions|RetiredBPS403|APIContracts|RuntimeProxyChainRealTwoRefusalsOnlySendOnePOST|RuntimeProxyFallbackRealRefusedConnection' -count=1
           cd ..
           python -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'
       - name: Build and archive without publishing

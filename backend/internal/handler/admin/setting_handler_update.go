@@ -379,10 +379,7 @@ type UpdateSettingsRequest struct {
 
 	// cyber 会话屏蔽开关 + TTL
 	CyberSessionBlockEnabled          *bool `json:"cyber_session_block_enabled"`
-	BPS403CaptureEnabled              *bool `json:"bps403_capture_enabled"`
-	BPS403SessionBlockEnabled         *bool `json:"bps403_session_block_enabled"`
 	CyberSessionBlockTTLSeconds       *int  `json:"cyber_session_block_ttl_seconds"`
-	BPS403SessionBlockTTLSeconds      *int  `json:"bps403_session_block_ttl_seconds"`
 	CyberSessionIdentityStrictEnabled *bool `json:"cyber_session_identity_strict_enabled"`
 
 	// OpenAI fast/flex policy (optional, only updated when provided)
@@ -1593,10 +1590,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	// cyber 会话屏蔽 TTL 校验：提供时必须 > 0
-	if req.BPS403SessionBlockTTLSeconds != nil && (*req.BPS403SessionBlockTTLSeconds < 1 || *req.BPS403SessionBlockTTLSeconds > service.BPS403SessionMaxTTLSeconds) {
-		response.BadRequest(c, "bps403_session_block_ttl_seconds must be between 1 and 604800")
-		return
-	}
 	if req.CyberSessionBlockTTLSeconds != nil && *req.CyberSessionBlockTTLSeconds <= 0 {
 		response.BadRequest(c, "cyber_session_block_ttl_seconds must be > 0")
 		return
@@ -2285,29 +2278,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.CyberSessionBlockEnabled
 		}(),
-		BPS403CaptureEnabled: func() bool {
-			if req.BPS403CaptureEnabled != nil {
-				return *req.BPS403CaptureEnabled
-			}
-			return previousSettings.BPS403CaptureEnabled
-		}(),
-		BPS403SessionBlockEnabled: func() bool {
-			if req.BPS403SessionBlockEnabled != nil {
-				return *req.BPS403SessionBlockEnabled
-			}
-			return previousSettings.BPS403SessionBlockEnabled
-		}(),
 		CyberSessionBlockTTLSeconds: func() int {
 			if req.CyberSessionBlockTTLSeconds != nil {
 				return *req.CyberSessionBlockTTLSeconds
 			}
 			return previousSettings.CyberSessionBlockTTLSeconds
-		}(),
-		BPS403SessionBlockTTLSeconds: func() int {
-			if req.BPS403SessionBlockTTLSeconds != nil {
-				return *req.BPS403SessionBlockTTLSeconds
-			}
-			return previousSettings.BPS403SessionBlockTTLSeconds
 		}(),
 		CyberSessionIdentityStrictEnabled: func() bool {
 			if req.CyberSessionIdentityStrictEnabled != nil {
@@ -2735,10 +2710,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		RiskControlEnabled:                updatedSettings.RiskControlEnabled,
 		CyberSessionBlockEnabled:          updatedSettings.CyberSessionBlockEnabled,
-		BPS403CaptureEnabled:              updatedSettings.BPS403CaptureEnabled,
-		BPS403SessionBlockEnabled:         updatedSettings.BPS403SessionBlockEnabled,
 		CyberSessionBlockTTLSeconds:       updatedSettings.CyberSessionBlockTTLSeconds,
-		BPS403SessionBlockTTLSeconds:      updatedSettings.BPS403SessionBlockTTLSeconds,
 		CyberSessionIdentityStrictEnabled: updatedSettings.CyberSessionIdentityStrictEnabled,
 		AccountSchedulingThresholds:       updatedSettings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:        updatedSettings.AllowUserViewErrorRequests,

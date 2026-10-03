@@ -2615,18 +2615,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	cyberSessionBlockEnabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context())
 	cyberSessionIdentityStrict := cyberSessionBlockEnabled && h.gatewayService.CyberSessionIdentityStrictEnabled(c.Request.Context())
 	cyberIdentityBinding := &openAIWSCyberIdentityBinding{}
-	firstIdentityDecision := cyberIdentityBinding.resolve(apiKey.ID, c, firstMessage, cyberSessionBlockEnabled || h.gatewayService.BPS403SessionBlockEnabled(c.Request.Context()), cyberSessionIdentityStrict)
+	firstIdentityDecision := cyberIdentityBinding.resolve(apiKey.ID, c, firstMessage, cyberSessionBlockEnabled, cyberSessionIdentityStrict)
 	observeOpenAICyberSessionIdentity(firstIdentityDecision.observed, firstIdentityDecision.reject, firstIdentityDecision.identitySwap)
 	if firstIdentityDecision.reject {
 		metadata := cyberIdentityRejectionMetadata(firstIdentityDecision)
 		writeCyberSessionIdentityRejectedWSError(c.Request.Context(), wsConn, metadata)
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid or conflicting session identity")
 		h.enqueueCyberSessionIdentityRejectedOpsEntry(c, apiKey, reqModel, metadata)
-		return
-	}
-	if h.gatewayService.FindBPS403SessionBlockedForIdentity(c.Request.Context(), firstIdentityDecision.effective) != "" {
-		writeBPS403SessionBlockedWSError(c.Request.Context(), wsConn)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "session blocked after BPS 403")
 		return
 	}
 	if cyberBlockKey := h.gatewayService.FindCyberSessionBlockedForIdentity(c.Request.Context(), firstIdentityDecision.effective); cyberBlockKey != "" {
@@ -3049,17 +3044,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				cyberEnabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context())
 				cyberStrict := cyberEnabled && h.gatewayService.CyberSessionIdentityStrictEnabled(c.Request.Context())
-				identityDecision := cyberIdentityBinding.resolve(apiKey.ID, c, payload, cyberEnabled || h.gatewayService.BPS403SessionBlockEnabled(c.Request.Context()), cyberStrict)
+				identityDecision := cyberIdentityBinding.resolve(apiKey.ID, c, payload, cyberEnabled, cyberStrict)
 				observeOpenAICyberSessionIdentity(identityDecision.observed, identityDecision.reject, identityDecision.identitySwap)
 				if identityDecision.reject {
 					metadata := cyberIdentityRejectionMetadata(identityDecision)
 					writeCyberSessionIdentityRejectedWSError(c.Request.Context(), wsConn, metadata)
 					h.enqueueCyberSessionIdentityRejectedOpsEntry(c, apiKey, model, metadata)
 					return newOpenAIWSLocalAdmissionCloseError("invalid or conflicting session identity")
-				}
-				if h.gatewayService.FindBPS403SessionBlockedForIdentity(c.Request.Context(), identityDecision.effective) != "" {
-					writeBPS403SessionBlockedWSError(c.Request.Context(), wsConn)
-					return newOpenAIWSLocalAdmissionCloseError(service.BPS403SessionBlockedMessage)
 				}
 				if cyberBlockKey := h.gatewayService.FindCyberSessionBlockedForIdentity(c.Request.Context(), identityDecision.effective); cyberBlockKey != "" {
 					writeCyberSessionBlockedWSError(c.Request.Context(), wsConn)
@@ -4421,18 +4412,15 @@ const (
 	cyberBlockFormatAnthropic
 )
 
-// rejectIfCyberSessionBlocked resolves the request identity before account
-// selection and checks the independent BPS 403 and cyber block stores. The
-// default-off strict identity gate remains controlled by the cyber settings.
+// rejectIfCyberSessionBlocked resolves and observes the request identity before
+// account selection. When the default-off strict gate is enabled, untrusted
+// identities are rejected before routing. Exact session blocks are then checked
+// only while the main cyber session block switch is enabled.
 func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKey *service.APIKey, body []byte, model string, format cyberSessionBlockFormat) bool {
 	if h == nil || h.gatewayService == nil || apiKey == nil {
 		return false
 	}
 	identity := service.ResolveCyberSessionIdentity(apiKey.ID, c, body)
-	service.RememberBPS403RequestBody(c, body)
-	if h.rejectIfBPS403SessionBlocked(c, identity, format) {
-		return true
-	}
 	enabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context())
 	strictRejected := enabled && h.gatewayService.CyberSessionIdentityStrictEnabled(c.Request.Context()) && !identity.Resolved()
 	observeOpenAICyberSessionIdentity(identity, strictRejected, false)

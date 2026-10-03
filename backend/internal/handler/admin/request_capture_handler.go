@@ -24,7 +24,7 @@ func NewRequestCaptureHandler(manager *requestcapture.Manager, users service.Use
 	return &RequestCaptureHandler{manager, users, accounts, groups}
 }
 func (h *RequestCaptureHandler) Gate(c *gin.Context) {
-	if h.Manager == nil || (!h.Manager.Config().Enabled && !h.Manager.Config().BPS403Enabled) {
+	if h.Manager == nil || !h.Manager.Config().Enabled {
 		response.Error(c, http.StatusNotFound, "Request capture is disabled")
 		c.Abort()
 		return

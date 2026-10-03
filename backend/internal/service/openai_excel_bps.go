@@ -169,7 +169,6 @@ func newExcelBPSRequestTo(ctx context.Context, targetURL, accept string, body []
 // BPS deliberately bypasses Codex ticket/cookie injection and OAuth plugins:
 // only the selected account's bearer and ChatGPT account ID belong on this host.
 func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Context, account *Account, body []byte, start time.Time) (forwardResult *OpenAIForwardResult, forwardErr error) {
-	RememberBPS403RequestBody(c, body)
 	var compactUsage OpenAIUsage
 	var compactID string
 	originalImagePolicyModel := gjson.GetBytes(body, "model").String()
@@ -533,7 +532,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			logger.LegacyPrintf("service.openai_excel_bps", "retrying invalid encrypted reasoning once: account_id=%d", account.ID)
 			c.Set("excel_bps_upstream_attempt", c.GetInt("excel_bps_upstream_attempt")+1)
 			// Do not re-enter proxy acquisition or transport retries after sending.
-			resp, err = s.doBPS403ObservedRequest(c, account, retryReq, proxyURL)
+			resp, err = s.httpUpstream.Do(retryReq, proxyURL, account.ID, account.Concurrency)
 			SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(sent).Milliseconds())
 			if err != nil {
 				if isExcelBPSClientCancellation(c, err) {
@@ -626,7 +625,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if err != nil {
 			return nil, err
 		}
-		repairResp, err := s.doBPS403ObservedRequest(c, account, repairReq, proxyURL)
+		repairResp, err := s.httpUpstream.Do(repairReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			if repairCtx.Err() != nil {
 				return nil, repairCtx.Err()
@@ -661,7 +660,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if err != nil {
 			return nil, err
 		}
-		repaired, err := s.doBPS403ObservedRequest(c, account, retry, proxyURL)
+		repaired, err := s.httpUpstream.Do(retry, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			return nil, fmt.Errorf("excel BPS tool correction transport failed")
 		}

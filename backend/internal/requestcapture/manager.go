@@ -196,18 +196,14 @@ func (m *Manager) ApplyConfig(c Config) {
 	m.mu.Lock()
 	m.config = c
 	m.enabled.Store(c.Enabled)
-	for _, t := range m.tasks {
-		enabled := c.Enabled
-		if t.task.TargetType == "bps403" {
-			enabled = c.BPS403Enabled
-		}
-		reason := ""
-		if !enabled {
-			reason = "feature_disabled"
-		} else if m.used.Load() >= c.QuotaMiB<<20 {
-			reason = "quota_exceeded"
-		}
-		if reason != "" {
+	reason := ""
+	if !c.Enabled {
+		reason = "feature_disabled"
+	} else if m.used.Load() >= c.QuotaMiB<<20 {
+		reason = "quota_exceeded"
+	}
+	if reason != "" {
+		for _, t := range m.tasks {
 			m.stopLocked(t, reason)
 		}
 	}
@@ -425,7 +421,6 @@ func (m *Manager) Close() {
 }
 
 type Stats struct {
-	ManualEnabled    bool   `json:"manual_enabled"`
 	InstanceID       string `json:"instance_id"`
 	UsedBytes        int64  `json:"used_bytes"`
 	BufferBytes      int64  `json:"buffer_bytes"`
@@ -439,7 +434,7 @@ func (m *Manager) Stats() Stats {
 	m.mu.Lock()
 	n := len(m.sessions)
 	m.mu.Unlock()
-	return Stats{m.Config().Enabled, m.instance, m.used.Load(), m.buffer.Load(), m.peak.Load(), n, m.admissionSkipped.Load(), m.unhealthy.Load()}
+	return Stats{m.instance, m.used.Load(), m.buffer.Load(), m.peak.Load(), n, m.admissionSkipped.Load(), m.unhealthy.Load()}
 }
 
 func (m *Manager) run() {

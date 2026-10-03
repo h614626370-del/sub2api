@@ -521,11 +521,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// cyber 会话屏蔽开关 + TTL
 	updates[SettingKeyCyberSessionBlockEnabled] = strconv.FormatBool(settings.CyberSessionBlockEnabled)
-	updates[SettingKeyBPS403SessionBlockEnabled] = strconv.FormatBool(settings.BPS403SessionBlockEnabled)
-	updates[SettingKeyBPS403CaptureEnabled] = strconv.FormatBool(settings.BPS403CaptureEnabled)
-	if settings.BPS403SessionBlockTTLSeconds > 0 && settings.BPS403SessionBlockTTLSeconds <= BPS403SessionMaxTTLSeconds {
-		updates[SettingKeyBPS403SessionBlockTTLSeconds] = strconv.Itoa(settings.BPS403SessionBlockTTLSeconds)
-	}
 	if settings.CyberSessionBlockTTLSeconds > 0 {
 		updates[SettingKeyCyberSessionBlockTTLSeconds] = strconv.Itoa(settings.CyberSessionBlockTTLSeconds)
 	}
@@ -950,8 +945,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	// 使用最长 60 秒的旧开关快照。
 	s.cyberSessionBlockRuntimeSF.Forget("cyber_session_block_runtime")
 	s.cyberSessionBlockRuntimeCache.Store(&cachedCyberSessionBlockRuntime{expiresAt: 0})
-	s.bps403RuntimeSF.Forget("bps403_runtime")
-	s.bps403RuntimeCache.Store(&bps403Runtime{})
 	if s.requestCapture != nil {
 		s.requestCapture.ApplyConfig(settings.requestCaptureConfig())
 	}

@@ -25,7 +25,6 @@ var (
 
 type Config struct {
 	Enabled       bool
-	BPS403Enabled bool
 	QuotaMiB      int64
 	RetentionDays int
 }
@@ -66,8 +65,6 @@ type CreateTask struct {
 }
 
 type Meta struct {
-	APIKeyID        int64  `json:"api_key_id,omitempty"`
-	SessionHash     string `json:"session_hash,omitempty"`
 	RequestID       string `json:"request_id"`
 	ClientRequestID string `json:"client_request_id,omitempty"`
 	UserID          int64  `json:"user_id"`

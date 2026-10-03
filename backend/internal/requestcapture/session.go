@@ -1027,9 +1027,6 @@ func (m *Manager) finishTarget(s *Session, t *runtimeTask) {
 	m.mu.Lock()
 	t.refs--
 	t.dirty = true
-	if t.task.TargetType == "bps403" && t.refs == 0 {
-		m.stopLocked(t, "captured")
-	}
 	m.mu.Unlock()
 }
 

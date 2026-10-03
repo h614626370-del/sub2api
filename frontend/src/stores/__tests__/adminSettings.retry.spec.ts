@@ -51,14 +51,14 @@ describe('admin settings fetch retry', () => {
 })
 
 describe('request capture setting', () => {
-  it('shows capture navigation when only BPS 403 capture is enabled', async () => {
+  it('ignores the retired BPS 403 capture switch', async () => {
     mocks.getSettings.mockResolvedValueOnce({ request_capture_enabled: false, bps403_capture_enabled: true })
     const store = useAdminSettingsStore()
     await store.fetch()
-    expect(store.requestCaptureEnabled).toBe(true)
-    mocks.getSettings.mockResolvedValueOnce({ request_capture_enabled: false, bps403_capture_enabled: false })
-    await store.fetch(true)
     expect(store.requestCaptureEnabled).toBe(false)
+    mocks.getSettings.mockResolvedValueOnce({ request_capture_enabled: true, bps403_capture_enabled: false })
+    await store.fetch(true)
+    expect(store.requestCaptureEnabled).toBe(true)
   })
   it('stays hidden until settings explicitly enable it', async () => {
     const store = useAdminSettingsStore(); expect(store.requestCaptureEnabled).toBe(false)

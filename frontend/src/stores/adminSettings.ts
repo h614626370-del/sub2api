@@ -69,7 +69,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
         adminAPI.settings.getSettings(),
         adminAPI.payment.getConfig()
       ])
-      requestCaptureEnabled.value = settings.request_capture_enabled === true || settings.bps403_capture_enabled === true
+      requestCaptureEnabled.value = settings.request_capture_enabled === true
       opsMonitoringEnabled.value = settings.ops_monitoring_enabled ?? true
       writeCachedBool('ops_monitoring_enabled_cached', opsMonitoringEnabled.value)
 

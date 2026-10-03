@@ -21,12 +21,13 @@ spec.loader.exec_module(release)
 
 
 class ReleaseMatrixTest(unittest.TestCase):
-    def test_reauth_runtime_validates_custom_revision_before_build(self):
+    def test_reauth_runtime_requires_three_component_version_before_build(self):
         script = (ROOT / 'tools/reauth-runtime/build.sh').read_text()
         validation, marker, _ = script.partition('runtime_output=$(mktemp -d)')
         self.assertTrue(marker, 'runtime validation must run before creating build output')
-        for version, expected in [('2.9.6', 0), ('2.9.6.1', 0), ('2.9.6.2', 0),
-                                  ('2.9.6.10-rc.1', 0), ('2.9.6.1.2', 1), ('../../other', 1)]:
+        for version, expected in [('2.9.6', 0), ('2.9.7-rc.1', 0), ('2.9.6.1', 1),
+                                  ('2.9.6.2', 1), ('2.9.6.10-rc.1', 1),
+                                  ('2.9.6.1.2', 1), ('../../other', 1)]:
             for arch in ('amd64', 'arm64'):
                 with self.subTest(version=version, arch=arch):
                     result = subprocess.run(['bash', '-c', 'VERSION=$1\nARCH=$2\n' + validation,
@@ -34,21 +35,30 @@ class ReleaseMatrixTest(unittest.TestCase):
                                             capture_output=True, text=True)
                     self.assertEqual(result.returncode, expected, result.stderr)
 
-    def test_custom_revision_release_archive_names(self):
-        self.assertEqual(release.archive_name('2.9.6.1', {'goos': 'linux', 'goarch': 'amd64'}),
-                         'sub2api_2.9.6.1_linux_amd64.tar.gz')
-        self.assertEqual(release.archive_name('2.9.6.1', {'goos': 'windows', 'goarch': 'amd64'}),
-                         'sub2api_2.9.6.1_windows_amd64.zip')
-        with self.assertRaises(ValueError):
-            release.archive_name('2.9.6.1.2', {'goos': 'linux', 'goarch': 'amd64'})
+    def test_release_archive_names_require_three_component_version(self):
+        for goos, suffix in [('linux', 'tar.gz'), ('windows', 'zip')]:
+            target = {'goos': goos, 'goarch': 'amd64'}
+            self.assertEqual(release.archive_name('2.9.6', target),
+                             f'sub2api_2.9.6_{goos}_amd64.{suffix}')
+            for version in ('2.9.6.1', '2.9.6.10-rc.1', '2.9.6.1.2'):
+                with self.subTest(goos=goos, version=version), self.assertRaises(ValueError):
+                    release.archive_name(version, target)
 
-    def test_custom_revision_publication_plan(self):
+    def test_three_component_publication_plan(self):
         with patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs'}), patch.object(subprocess, 'check_output', return_value='a' * 40):
-            release.plan(argparse.Namespace(ref='v2.9.6.1', dry_run=False, simple=False))
+            release.plan(argparse.Namespace(ref='v2.9.6', dry_run=False, simple=False))
         output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
-        self.assertEqual(output['version'], '2.9.6.1')
+        self.assertEqual(output['version'], '2.9.6')
         self.assertEqual(output['prerelease'], 'false')
         self.assertEqual(len(json.loads(output['matrix'])['include']), 5)
+
+    def test_four_component_publication_plan_is_rejected(self):
+        for version in ('v2.9.6.1', 'v2.9.6.10-rc.1'):
+            with self.subTest(version=version), patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs'}), \
+                    patch.object(subprocess, 'check_output', return_value='a' * 40):
+                with self.assertRaises(ValueError):
+                    release.plan(argparse.Namespace(ref=version, dry_run=False, simple=False))
+        self.assertFalse(Path('outputs').exists())
 
     def setUp(self):
         self.previous = Path.cwd()

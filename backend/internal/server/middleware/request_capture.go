@@ -22,9 +22,6 @@ func RequestCapture(manager *requestcapture.Manager) gin.HandlerFunc {
 			return
 		}
 		group := int64(0)
-		if manager.Config().BPS403Enabled {
-			c.Request = c.Request.WithContext(requestcapture.WithDeferredBody(c.Request.Context()))
-		}
 		if key.GroupID != nil {
 			group = *key.GroupID
 		}
