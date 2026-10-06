@@ -106,6 +106,13 @@ func TestH614626370TransitionUpgrade(t *testing.T) {
 
 			require.NoError(t, ApplyMigrations(ctx, db))
 			require.Equal(t, before, transitionBusinessSnapshot(t, db), "business data changed")
+			var nonDefaultKeys, nonDefaultOrders int
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT count(*) FROM api_keys WHERE concurrency_limit <> 0`).Scan(&nonDefaultKeys))
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT count(*) FROM payment_orders WHERE bonus_amount <> 0`).Scan(&nonDefaultOrders))
+			require.Zero(t, nonDefaultKeys, "new concurrency limits must preserve unrestricted keys")
+			require.Zero(t, nonDefaultOrders, "historical orders must not acquire a bonus")
 			var preservesLedger bool
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT jsonb_object_agg(filename, checksum) @> $1::jsonb FROM schema_migrations`, oldLedger).Scan(&preservesLedger))
@@ -155,9 +162,9 @@ func transitionBusinessSnapshot(t *testing.T, db *sql.DB) map[string]string {
 	queries := map[string]string{
 		"users":         `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'observer_group_ids' ORDER BY id), '[]')::text FROM users t`,
 		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only' ORDER BY id), '[]')::text FROM groups t`,
-		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM api_keys t`,
+		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'concurrency_limit' ORDER BY id), '[]')::text FROM api_keys t`,
 		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM user_subscriptions t`,
-		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM payment_orders t`,
+		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount' ORDER BY id), '[]')::text FROM payment_orders t`,
 		"usage":         `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM usage_logs t`,
 		"credentials":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'extra'-'updated_at'-'group_rate_multiplier' ORDER BY id), '[]')::text FROM accounts t`,
 		"memberships":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'allowed_models' ORDER BY account_id,group_id), '[]')::text FROM account_groups t`,
