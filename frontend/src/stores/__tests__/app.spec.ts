@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { useAppStore } from '@/stores/app'
 import { getPublicSettings } from '@/api/auth'
 import type { PublicSettings } from '@/types'
+import { checkUpdates, checkUpstreamUpdates, type VersionInfo } from '@/api/admin/system'
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -69,6 +70,7 @@ function createPublicSettings(overrides: Partial<PublicSettings> = {}): PublicSe
 // Mock API 模块
 vi.mock('@/api/admin/system', () => ({
   checkUpdates: vi.fn(),
+  checkUpstreamUpdates: vi.fn(),
 }))
 
 vi.mock('@/api/auth', () => ({
@@ -81,6 +83,8 @@ describe('useAppStore', () => {
     vi.useFakeTimers()
     localStorage.clear()
     vi.mocked(getPublicSettings).mockReset()
+    vi.mocked(checkUpdates).mockReset()
+    vi.mocked(checkUpstreamUpdates).mockReset()
     // 清除 window.__APP_CONFIG__
     delete (window as any).__APP_CONFIG__
   })
@@ -88,6 +92,61 @@ describe('useAppStore', () => {
   afterEach(() => {
     vi.useRealTimers()
     localStorage.clear()
+  })
+
+  describe('independent repository updates', () => {
+    const custom: VersionInfo = {
+      current_version: '2.10.0', latest_version: '2.10.0.1',
+      has_update: true, cached: false, build_type: 'release'
+    }
+    const upstream: VersionInfo = { ...custom, latest_version: '2.11.0' }
+
+    it('caches each source separately and forces both independently', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue(custom)
+      vi.mocked(checkUpstreamUpdates).mockResolvedValue(upstream)
+      const store = useAppStore()
+      await Promise.all([store.fetchVersion(), store.fetchUpstreamVersion()])
+      await Promise.all([store.fetchVersion(), store.fetchUpstreamVersion()])
+      expect(checkUpdates).toHaveBeenCalledTimes(1)
+      expect(checkUpstreamUpdates).toHaveBeenCalledTimes(1)
+      expect(store.latestVersion).toBe('2.10.0.1')
+      expect(store.upstreamVersionInfo?.latest_version).toBe('2.11.0')
+      await Promise.all([store.fetchVersion(true), store.fetchUpstreamVersion(true)])
+      expect(checkUpdates).toHaveBeenLastCalledWith(true)
+      expect(checkUpstreamUpdates).toHaveBeenLastCalledWith(true)
+      expect(checkUpdates).toHaveBeenCalledTimes(2)
+      expect(checkUpstreamUpdates).toHaveBeenCalledTimes(2)
+      store.clearVersionCache()
+      expect(store.versionLoaded).toBe(false)
+      expect(store.upstreamVersionInfo).toBeNull()
+    })
+
+    it('upstream failure preserves custom state and recovers on forced refresh', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue(custom)
+      vi.mocked(checkUpstreamUpdates).mockRejectedValueOnce(new Error('upstream unavailable'))
+      const store = useAppStore()
+      await Promise.all([store.fetchVersion(), store.fetchUpstreamVersion()])
+      expect(store.latestVersion).toBe('2.10.0.1')
+      expect(store.hasUpdate).toBe(true)
+      expect(store.versionWarning).toBe('')
+      expect(store.upstreamVersionInfo).toBeNull()
+      expect(store.upstreamVersionWarning).toBe('upstream unavailable')
+      expect(store.upstreamVersionLoading).toBe(false)
+      vi.mocked(checkUpstreamUpdates).mockResolvedValue(upstream)
+      await store.fetchUpstreamVersion(true)
+      expect(store.upstreamVersionWarning).toBe('')
+      expect(store.upstreamVersionInfo?.latest_version).toBe('2.11.0')
+    })
+
+    it('preserves backend warnings without replacing the other repository', async () => {
+      vi.mocked(checkUpdates).mockResolvedValue({ ...custom, warning: 'cached custom data' })
+      vi.mocked(checkUpstreamUpdates).mockResolvedValue(upstream)
+      const store = useAppStore()
+      await Promise.all([store.fetchVersion(), store.fetchUpstreamVersion()])
+      expect(store.versionWarning).toBe('cached custom data')
+      expect((await store.fetchVersion())?.warning).toBe('cached custom data')
+      expect(store.upstreamVersionWarning).toBe('')
+    })
   })
 
   // --- Toast 消息管理 ---

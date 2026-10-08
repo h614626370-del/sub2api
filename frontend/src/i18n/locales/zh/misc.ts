@@ -19,6 +19,12 @@ export default {
 
   // Version Badge
   version: {
+    repositories: '版本更新',
+    upstreamRepository: '上游仓库',
+    customRepository: '自有仓库',
+    reminderOnly: '仅提醒',
+    installSource: '更新来源',
+    checkUnavailable: '暂时无法确认最新版本',
     currentVersion: '当前版本',
     latestVersion: '最新版本',
     upToDate: '已是最新版本',

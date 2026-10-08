@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -68,12 +69,21 @@ type openAIImagesFailoverHTTPUpstream struct {
 	service.HTTPUpstream
 	mu         sync.Mutex
 	accountIDs []int64
+	directOnly bool
+	paths      []string
+	policies   []bool
 }
 
-func (u *openAIImagesFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+func (u *openAIImagesFailoverHTTPUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
+	u.paths = append(u.paths, req.URL.Path)
+	u.policies = append(u.policies, imagepolicy.DirectOnly(req.Context()))
 	u.mu.Unlock()
+	if u.directOnly {
+		return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{},
+			Body: io.NopCloser(bytes.NewBufferString(`{"error":{"message":"endpoint unavailable"}}`))}, nil
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header: http.Header{
@@ -93,6 +103,15 @@ func (u *openAIImagesFailoverHTTPUpstream) calls() []int64 {
 }
 
 func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted(t *testing.T) {
+	testImagesFailover(t, false)
+}
+
+func TestOpenAIGatewayHandlerImages_DirectOnlyPolicySurvivesAccountSwitch(t *testing.T) {
+	testImagesFailover(t, true)
+}
+
+func testImagesFailover(t *testing.T, directOnly bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	groupID := int64(3130)
 	accounts := []service.Account{
@@ -120,7 +139,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 		},
 	}
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
-	upstream := &openAIImagesFailoverHTTPUpstream{}
+	upstream := &openAIImagesFailoverHTTPUpstream{directOnly: directOnly}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
@@ -164,8 +183,14 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	handler.maxAccountSwitches = 10
 
 	body := []byte(`{"model":"gpt-image-1","prompt":"draw a cat","quality":"high","size":"1536x1024"}`)
+	if directOnly {
+		body = []byte(`{"model":"gpt-image-2","prompt":"draw a cat","quality":"high","size":"1536x1024"}`)
+	}
 	core, observedLogs := observer.New(zap.DebugLevel)
 	requestCtx := logger.IntoContext(context.Background(), zap.New(core))
+	if directOnly {
+		requestCtx = imagepolicy.WithDirectOnly(requestCtx)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body)).WithContext(requestCtx)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -197,6 +222,13 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	require.Equal(t, []int64{1, 2}, upstream.calls())
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	if directOnly {
+		require.Equal(t, "image_direct_required", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+		require.Contains(t, gjson.GetBytes(rec.Body.Bytes(), "error.message").String(), "Responses fallback is disabled")
+		require.Equal(t, []string{"/backend-api/codex/images/generations", "/backend-api/codex/images/generations"}, upstream.paths)
+		require.Equal(t, []bool{true, true}, upstream.policies)
+		return
+	}
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 
 	rawEvents, ok := c.Get(service.OpsUpstreamErrorsKey)

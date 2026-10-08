@@ -22,6 +22,9 @@ type systemHandlerUpdateServiceStub struct {
 	updateInfo            *service.UpdateInfo
 	checkErr              error
 	checkForces           []bool
+	upstreamInfo          *service.UpdateInfo
+	upstreamErr           error
+	upstreamForces        []bool
 	performCall           int
 	performCtxErr         error
 	performHasDeadline    bool
@@ -39,6 +42,11 @@ type systemHandlerUpdateServiceStub struct {
 func (s *systemHandlerUpdateServiceStub) CheckUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
 	s.checkForces = append(s.checkForces, force)
 	return s.updateInfo, s.checkErr
+}
+
+func (s *systemHandlerUpdateServiceStub) CheckUpstreamUpdate(_ context.Context, force bool) (*service.UpdateInfo, error) {
+	s.upstreamForces = append(s.upstreamForces, force)
+	return s.upstreamInfo, s.upstreamErr
 }
 
 func (s *systemHandlerUpdateServiceStub) PerformUpdate(ctx context.Context) error {
@@ -101,7 +109,35 @@ func newSystemHandlerTestRouter(t *testing.T, updateSvc *systemHandlerUpdateServ
 	router.POST("/api/v1/admin/system/update", handler.PerformUpdate)
 	router.POST("/api/v1/admin/system/rollback", handler.Rollback)
 	router.GET("/api/v1/admin/system/rollback-versions", handler.GetRollbackVersions)
+	router.GET("/api/v1/admin/system/check-updates", handler.CheckUpdates)
+	router.GET("/api/v1/admin/system/check-upstream-updates", handler.CheckUpstreamUpdates)
 	return router
+}
+
+func TestSystemHandlerChecksRepositoriesIndependently(t *testing.T) {
+	svc := &systemHandlerUpdateServiceStub{
+		updateInfo:   &service.UpdateInfo{LatestVersion: "2.10.0.1"},
+		upstreamInfo: &service.UpdateInfo{LatestVersion: "2.11.0"},
+	}
+	router := newSystemHandlerTestRouter(t, svc, newMemoryIdempotencyRepoStub())
+	for _, tc := range []struct{ path, version string }{
+		{"/check-updates?force=true", "2.10.0.1"},
+		{"/check-upstream-updates?force=true", "2.11.0"},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/system"+tc.path, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var body systemUpdateResponseEnvelope
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		require.Equal(t, tc.version, body.Data.LatestVersion)
+	}
+	require.Equal(t, []bool{true}, svc.checkForces)
+	require.Equal(t, []bool{true}, svc.upstreamForces)
+	require.Zero(t, svc.performCall)
+	svc.upstreamErr = errors.New("unavailable")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/check-upstream-updates", nil))
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func requireSystemLockStatus(t *testing.T, repo *memoryIdempotencyRepoStub, wantStatus string) {

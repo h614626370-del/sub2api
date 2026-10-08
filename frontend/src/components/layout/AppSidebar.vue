@@ -856,6 +856,9 @@ const adminNavItems = computed((): NavItem[] => {
       { path: '/admin/request-captures', label: t('admin.requestCapture.title'), icon: RequestCaptureIcon, featureFlag: () => adminSettingsStore.requestCaptureEnabled },
       { path: '/admin/harvest-flow', label: t('nav.harvestFlow'), icon: FlowIcon },
     ] },
+    { path: '/admin/my-operations', label: t('imageMaster.operations'), icon: AccountOpsIcon, expandOnly: true, children: [
+      { path: '/admin/image-master', label: t('imageMaster.title'), icon: GalleryIcon },
+    ] },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },

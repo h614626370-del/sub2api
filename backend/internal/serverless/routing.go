@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -22,19 +23,30 @@ import (
 const forwardHeader = "X-Sub2api-Route"
 
 type ticket struct {
-	Node  string `json:"node"`
-	Boot  string `json:"boot"`
-	IP    string `json:"ip"`
-	At    int64  `json:"at"`
-	Nonce string `json:"nonce"`
-	Sig   string `json:"sig"`
+	ImagesDirectOnly bool   `json:"images_direct_only,omitempty"`
+	Node             string `json:"node"`
+	Boot             string `json:"boot"`
+	IP               string `json:"ip"`
+	At               int64  `json:"at"`
+	Nonce            string `json:"nonce"`
+	Sig              string `json:"sig"`
 }
 
 func failure(c *gin.Context, message string) {
 	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "serverless_unavailable", "message": message}})
 }
 func (m *Manager) proof(t ticket, r *http.Request) string {
-	return m.mac("forward", t.Node, t.Boot, t.IP, strconv.FormatInt(t.At, 10), t.Nonce, r.Method, r.URL.RequestURI(), r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"), r.Header.Get("X-Goog-Api-Key"))
+	return m.mac(ticketProofParts(t, r)...)
+}
+
+func ticketProofParts(t ticket, r *http.Request) []string {
+	domain := "forward"
+	if t.ImagesDirectOnly {
+		// Domain separation makes older nodes reject, not silently ignore,
+		// the policy. Unmarked requests keep the original signature format.
+		domain = "forward-images-direct-v1"
+	}
+	return []string{domain, t.Node, t.Boot, t.IP, strconv.FormatInt(t.At, 10), t.Nonce, r.Method, r.URL.RequestURI(), r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"), r.Header.Get("X-Goog-Api-Key")}
 }
 
 // Ingress validates forwarding before existing IP ACL / session middleware.
@@ -52,7 +64,8 @@ func (m *Manager) Ingress() gin.HandlerFunc {
 			c.AbortWithStatus(403)
 			return
 		}
-		if _, err := netip.ParseAddr(t.IP); err != nil || !m.verify(t.Sig, "forward", t.Node, t.Boot, t.IP, strconv.FormatInt(t.At, 10), t.Nonce, c.Request.Method, c.Request.URL.RequestURI(), c.GetHeader("Authorization"), c.GetHeader("X-Api-Key"), c.GetHeader("X-Goog-Api-Key")) {
+		if _, err := netip.ParseAddr(t.IP); err != nil || !m.verify(t.Sig, ticketProofParts(t, c.Request)...) ||
+			(t.ImagesDirectOnly && !imagepolicy.IsImageEndpoint(c.Request.URL.Path)) {
 			c.AbortWithStatus(403)
 			return
 		}
@@ -72,6 +85,9 @@ func (m *Manager) Ingress() gin.HandlerFunc {
 			return
 		}
 		c.Set("serverless_verified_ip", t.IP)
+		if t.ImagesDirectOnly {
+			c.Request = c.Request.WithContext(imagepolicy.WithDirectOnly(c.Request.Context()))
+		}
 		c.Request.Header.Del(forwardHeader)
 		c.Next()
 	}
@@ -255,7 +271,8 @@ func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
 			r.Out.Header.Set("X-Forwarded-For", clientIP)
 			r.Out.Header.Set("X-Real-IP", clientIP)
 			// Target ignores untrusted IP headers in favour of this signed identity.
-			t := ticket{Node: p.ID, Boot: p.Boot, IP: clientIP, At: time.Now().Unix(), Nonce: randomID()}
+			t := ticket{Node: p.ID, Boot: p.Boot, IP: clientIP, At: time.Now().Unix(), Nonce: randomID(),
+				ImagesDirectOnly: imagepolicy.DirectOnly(r.In.Context())}
 			t.Sig = m.proof(t, r.Out)
 			encoded, _ := json.Marshal(t)
 			r.Out.Header.Set(forwardHeader, string(encoded))

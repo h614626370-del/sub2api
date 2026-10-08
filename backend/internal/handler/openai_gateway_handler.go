@@ -3927,6 +3927,11 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 }
 
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIImagesDirectRequiredReason {
+		h.handleStreamingAwareErrorWithCode(c, http.StatusBadGateway, "upstream_error",
+			string(service.OpenAIImagesDirectRequiredReason), failoverErr.ClientMessage, streamStarted, false)
+		return
+	}
 	if failoverErr == nil {
 		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
 		return

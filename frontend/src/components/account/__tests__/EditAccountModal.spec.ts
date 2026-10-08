@@ -332,6 +332,94 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it.each(['oauth', 'apikey', 'setup-token'])('round-trips independent cache input billing without BPS for %s', async (type) => {
+    const account = { ...buildAccount(), type, extra: { unrelated: 'preserve' } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const selector = '[data-testid="openai-cache-creation-as-input"]'
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+    const fields = wrapper.get('#edit-account-form').element.children
+    expect(fields[0]?.querySelector('[data-tour="edit-account-form-name"]')).not.toBeNull()
+    expect(fields[1]?.querySelector(selector)).not.toBeNull()
+    await wrapper.get(selector).trigger('click')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const savedExtra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(savedExtra.openai_cache_creation_as_input).toBe(true)
+    expect(savedExtra.openai_excel_bps).toBeUndefined()
+    expect(savedExtra.unrelated).toBe('preserve')
+
+    await wrapper.setProps({ account: { ...account, extra: savedExtra } })
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('true')
+    await wrapper.get(selector).trigger('click')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const clearedExtra = updateAccountMock.mock.calls[1]?.[1]?.extra
+    expect(clearedExtra.openai_cache_creation_as_input).toBeUndefined()
+    expect(clearedExtra.unrelated).toBe('preserve')
+  })
+
+  it('retains independent cache input billing when BPS is disabled', async () => {
+    const account = { ...buildAccount(), type: 'oauth', extra: {
+      openai_excel_bps: true, openai_excel_bps_cache_creation_as_input: true, openai_cache_creation_as_input: true
+    } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="openai-cache-creation-as-input"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_cache_creation_as_input).toBe(true)
+    expect(extra.openai_excel_bps).toBeUndefined()
+    expect(extra.openai_excel_bps_cache_creation_as_input).toBeUndefined()
+  })
+
+  it('resets independent cache input billing between accounts and hides it for other platforms', async () => {
+    const account = { ...buildAccount(), extra: { openai_cache_creation_as_input: true } }
+    const wrapper = mountModal(account)
+    const selector = '[data-testid="openai-cache-creation-as-input"]'
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('true')
+    await wrapper.setProps({ account: { ...buildAccount(), id: 2 } })
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+    await wrapper.setProps({ account: { ...account, platform: 'anthropic' } })
+    expect(wrapper.find(selector).exists()).toBe(false)
+    await wrapper.setProps({ account: { ...buildAccount(), id: 3, extra: { openai_cache_creation_as_input: 'true' } } })
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+  })
+
+  it('does not clear the legacy BPS billing switch when independent billing is turned off', async () => {
+    const account = { ...buildAccount(), type: 'oauth', extra: {
+      openai_excel_bps: true, openai_excel_bps_cache_creation_as_input: true, openai_cache_creation_as_input: true
+    } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="openai-cache-creation-as-input"]').trigger('click')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_cache_creation_as_input).toBeUndefined()
+    expect(extra.openai_excel_bps_cache_creation_as_input).toBe(true)
+    expect(extra.openai_excel_bps).toBe(true)
+  })
+
+  it('saves independent billing on a shadow account without enabling BPS', async () => {
+    const account = buildOpenAISparkShadowAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="openai-cache-creation-as-input"]').trigger('click')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.openai_cache_creation_as_input).toBe(true)
+    expect(extra.openai_excel_bps).toBeUndefined()
+  })
+
   it('round-trips OAuth alias scope and lets an operator restore a whitelist', async () => {
     const account = { ...buildAccount(), type: 'oauth', credentials: { model_mapping_mode: 'aliases', model_mapping: { 'gpt-5.4': 'gpt-5.6-sol' } } }
     const wrapper = mountModal(account); await flushPromises()

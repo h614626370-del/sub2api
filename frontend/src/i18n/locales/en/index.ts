@@ -1,3 +1,4 @@
+import imageMaster from './imageMaster'
 import priorityScheduling from './priorityScheduling'
 import qualityOps from './qualityOps'
 import accountOps from './accountOps'
@@ -18,6 +19,7 @@ import requestTiming from './requestTiming'
 import autoConfig from './autoConfig'
 
 export default {
+  imageMaster,
   autoConfig,
   priorityScheduling,
   qualityOps,

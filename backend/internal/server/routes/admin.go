@@ -108,6 +108,7 @@ func RegisterAdminRoutes(
 
 		// 运维监控（Ops）
 		registerOpsRoutes(admin, h)
+		registerImageMasterRoutes(admin, h.ImageMaster, stepUpAuth)
 
 		// 系统管理
 		registerSystemRoutes(admin, h)
@@ -735,6 +736,7 @@ func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		system.POST("/mihomo/nodes/:name/test", h.Admin.System.TestMihomoNode)
 		system.POST("/mihomo/nodes/:name/quality-check", h.Admin.System.CheckMihomoNodeQuality)
 		system.GET("/check-updates", h.Admin.System.CheckUpdates)
+		system.GET("/check-upstream-updates", h.Admin.System.CheckUpstreamUpdates)
 		system.GET("/rollback-versions", h.Admin.System.GetRollbackVersions)
 		system.POST("/update", h.Admin.System.PerformUpdate)
 		system.POST("/rollback", h.Admin.System.Rollback)

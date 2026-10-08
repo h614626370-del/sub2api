@@ -40,9 +40,17 @@ export async function checkUpdates(force = false): Promise<VersionInfo> {
   return data
 }
 
+export async function checkUpstreamUpdates(force = false): Promise<VersionInfo> {
+  const { data } = await apiClient.get<VersionInfo>('/admin/system/check-upstream-updates', {
+    params: force ? { force: 'true' } : undefined
+  })
+  return data
+}
+
 export interface UpdateResult {
   message: string
   need_restart: boolean
+  already_up_to_date?: boolean
 }
 
 export interface RollbackVersionInfo {
@@ -104,6 +112,7 @@ export async function restartService(): Promise<{ message: string }> {
 export const systemAPI = {
   getVersion,
   checkUpdates,
+  checkUpstreamUpdates,
   performUpdate,
   getRollbackVersions,
   rollback,

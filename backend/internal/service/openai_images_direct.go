@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -14,6 +15,17 @@ import (
 )
 
 type openAIImagesForceResponsesContextKey struct{}
+
+const OpenAIImagesDirectRequiredReason GatewayFailureReason = imagepolicy.DirectRequiredCode
+
+func openAIImagesDirectRequiredError() *UpstreamFailoverError {
+	return &UpstreamFailoverError{
+		StatusCode: http.StatusBadGateway, ClientStatusCode: http.StatusBadGateway,
+		Reason:        OpenAIImagesDirectRequiredReason,
+		ClientMessage: "No available account supports the required direct Images API; Responses fallback is disabled",
+		ResponseBody:  []byte(`{"error":{"code":"image_direct_required","message":"Direct Images API required; Responses fallback is disabled"}}`),
+	}
+}
 
 func withOpenAIImagesForceResponses(ctx context.Context) context.Context {
 	return context.WithValue(ctx, openAIImagesForceResponsesContextKey{}, true)

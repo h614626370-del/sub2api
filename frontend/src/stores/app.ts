@@ -9,6 +9,7 @@ import type { Toast, ToastType, PublicSettings } from '@/types'
 import { i18n } from '@/i18n'
 import {
   checkUpdates as checkUpdatesAPI,
+  checkUpstreamUpdates as checkUpstreamUpdatesAPI,
   type VersionInfo,
   type ReleaseInfo
 } from '@/api/admin/system'
@@ -43,6 +44,10 @@ export const useAppStore = defineStore('app', () => {
   const hasUpdate = ref<boolean>(false)
   const buildType = ref<string>('source')
   const releaseInfo = ref<ReleaseInfo | null>(null)
+  const versionWarning = ref('')
+  const upstreamVersionInfo = ref<VersionInfo | null>(null)
+  const upstreamVersionLoading = ref(false)
+  const upstreamVersionWarning = ref('')
 
   // Auto-incrementing ID for toasts
   let toastIdCounter = 0
@@ -249,6 +254,7 @@ export const useAppStore = defineStore('app', () => {
         has_update: hasUpdate.value,
         build_type: buildType.value,
         release_info: releaseInfo.value || undefined,
+        warning: versionWarning.value || undefined,
         cached: true
       }
     }
@@ -266,9 +272,11 @@ export const useAppStore = defineStore('app', () => {
       hasUpdate.value = data.has_update
       buildType.value = data.build_type || 'source'
       releaseInfo.value = data.release_info || null
+      versionWarning.value = data.warning || ''
       versionLoaded.value = true
       return data
     } catch (error) {
+      versionWarning.value = error instanceof Error ? error.message : i18n.global.t('version.checkUnavailable')
       console.error('Failed to fetch version:', error)
       return null
     } finally {
@@ -276,12 +284,30 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function fetchUpstreamVersion(force = false): Promise<VersionInfo | null> {
+    if (upstreamVersionInfo.value && !force) return upstreamVersionInfo.value
+    if (upstreamVersionLoading.value) return null
+    upstreamVersionLoading.value = true
+    try {
+      const data = await checkUpstreamUpdatesAPI(force)
+      upstreamVersionInfo.value = data
+      upstreamVersionWarning.value = data.warning || ''
+      return data
+    } catch (error) {
+      upstreamVersionWarning.value = error instanceof Error ? error.message : i18n.global.t('version.checkUnavailable')
+      return null
+    } finally {
+      upstreamVersionLoading.value = false
+    }
+  }
+
   /**
-   * Clear version cache (e.g., after update)
+   * Clear both repository caches after update or rollback.
    */
   function clearVersionCache(): void {
     versionLoaded.value = false
     hasUpdate.value = false
+    upstreamVersionInfo.value = null
   }
 
   // ==================== Public Settings Management ====================
@@ -463,6 +489,10 @@ export const useAppStore = defineStore('app', () => {
     hasUpdate,
     buildType,
     releaseInfo,
+    versionWarning,
+    upstreamVersionInfo,
+    upstreamVersionLoading,
+    upstreamVersionWarning,
 
     // Computed
     hasActiveToasts,
@@ -487,6 +517,7 @@ export const useAppStore = defineStore('app', () => {
 
     // Version actions
     fetchVersion,
+    fetchUpstreamVersion,
     clearVersionCache,
 
     // Public settings actions

@@ -50,6 +50,7 @@ func systemUpdateContext(ctx context.Context) (context.Context, context.CancelFu
 
 type systemUpdateService interface {
 	CheckUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
+	CheckUpstreamUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
 	PerformUpdate(ctx context.Context) error
 	Rollback() error
 	ListRollbackVersions(ctx context.Context) ([]service.RollbackVersion, error)
@@ -79,6 +80,17 @@ func (h *SystemHandler) GetVersion(c *gin.Context) {
 func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 	force := c.Query("force") == "true"
 	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), force)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, info)
+}
+
+// CheckUpstreamUpdates reports the upstream release without changing the install source.
+// GET /api/v1/admin/system/check-upstream-updates
+func (h *SystemHandler) CheckUpstreamUpdates(c *gin.Context) {
+	info, err := h.updateSvc.CheckUpstreamUpdate(c.Request.Context(), c.Query("force") == "true")
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return

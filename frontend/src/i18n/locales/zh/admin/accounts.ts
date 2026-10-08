@@ -787,6 +787,7 @@ export default {
         excelBPSOmitUnsupportedTools: '保持 BPS，省略不支持的托管工具',
         excelBPSOmitUnsupportedToolsDesc: '默认关闭：请求声明实时联网搜索（external_web_access=true）、高搜索上下文或图片生成时走原生 Codex 通道，即使 tool_choice=auto 且本轮尚未调用。开启后保持 BPS，省略适配层不支持的托管工具，并向模型说明能力不可用；搜索和图片生成不会因此获得支持，客户端函数工具不受影响。强制工具选择返回 400；tool_choice=none 不触发工具回退。回退原因记录在响应头及 excel_bps.native_fallback 诊断日志中。',
         excelBPSCacheCreationAsInput: '创建缓存按普通输入计费',
+        cacheCreationAsInput: '创建缓存按普通输入计费（无需 BPS）',
         excelBPSMihomo: 'BPS 会话代理（谨慎开启）',
         excelBPSProxySource: '出口来源',
         excelBPSProxySourceMihomo: 'Mihomo 代理池',

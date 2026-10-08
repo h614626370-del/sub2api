@@ -15,6 +15,31 @@
         <label class="input-label">{{ t('common.name') }}</label>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
       </div>
+      <div v-if="account.platform === 'openai'" class="flex items-center justify-between gap-4">
+        <label id="openai-cache-creation-as-input-label" for="openai-cache-creation-as-input" class="input-label mb-0">
+          {{ t('admin.accounts.openai.cacheCreationAsInput') }}
+        </label>
+        <button
+          id="openai-cache-creation-as-input"
+          type="button"
+          role="switch"
+          data-testid="openai-cache-creation-as-input"
+          aria-labelledby="openai-cache-creation-as-input-label"
+          :aria-checked="openAICacheCreationAsInput"
+          @click="openAICacheCreationAsInput = !openAICacheCreationAsInput"
+          :class="[
+            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+            openAICacheCreationAsInput ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+          ]"
+        >
+          <span
+            :class="[
+              'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+              openAICacheCreationAsInput ? 'translate-x-5' : 'translate-x-0'
+            ]"
+          />
+        </button>
+      </div>
       <div>
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
         <textarea
@@ -3981,6 +4006,7 @@ const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
+const openAICacheCreationAsInput = ref(false)
 // OpenAI 订阅档位（Plus / Pro 20x / Pro 5x / Business Standard / Business Premium / Free）手动覆盖值,
 // 存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
@@ -4461,6 +4487,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedScheduling.value = false
   allowOverages.value = false
 	const extra = newAccount.extra as Record<string, unknown> | undefined
+  openAICacheCreationAsInput.value = newAccount.platform === 'openai' && extra?.openai_cache_creation_as_input === true
 	mixedScheduling.value = extra?.mixed_scheduling === true
 	allowOverages.value = extra?.allow_overages === true
 	upstreamRequestIdHeader.value = readUpstreamRequestIdHeader(extra)
@@ -6270,6 +6297,18 @@ const handleSubmit = async () => {
         }
       }
 
+      updatePayload.extra = newExtra
+    }
+
+    if (props.account.platform === 'openai') {
+      const newExtra = {
+        ...((updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {})
+      }
+      if (openAICacheCreationAsInput.value) {
+        newExtra.openai_cache_creation_as_input = true
+      } else {
+        delete newExtra.openai_cache_creation_as_input
+      }
       updatePayload.extra = newExtra
     }
 

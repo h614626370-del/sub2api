@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -1797,15 +1798,25 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		requestModel = "gpt-image-2"
 	}
 	if err := validateOpenAIImagesModel(requestModel); err != nil {
+		if imagepolicy.DirectOnly(ctx) {
+			return nil, openAIImagesDirectRequiredError()
+		}
 		return nil, err
 	}
 	upstreamModel := account.GetMappedModel(requestModel)
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
+		if imagepolicy.DirectOnly(ctx) {
+			SetOpsUpstreamModel(c, upstreamModel)
+			return nil, openAIImagesDirectRequiredError()
+		}
 		return nil, err
 	}
 	direct := usesCodexDirectImages(upstreamModel) && !isOpenAIImagesForceResponses(ctx)
 	beginUpstreamResponseModelObservation(c)
 	SetOpsUpstreamModel(c, upstreamModel)
+	if imagepolicy.DirectOnly(ctx) && !direct {
+		return nil, openAIImagesDirectRequiredError()
+	}
 	logger.LegacyPrintf(
 		"service.openai_gateway",
 		"[OpenAI] Images request routing request_model=%s endpoint=%s account_type=%s uploads=%d",
@@ -1893,6 +1904,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
 		if direct && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+			if imagepolicy.DirectOnly(ctx) {
+				setOpsUpstreamError(c, resp.StatusCode, "Direct Images API unavailable; Responses fallback is disabled", "")
+				return nil, openAIImagesDirectRequiredError()
+			}
 			return s.forwardOpenAIImagesOAuth(withOpenAIImagesForceResponses(ctx), c, account, parsed, channelMappedModel)
 		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {

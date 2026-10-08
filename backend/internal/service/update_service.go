@@ -33,7 +33,8 @@ const (
 	// Releases are maintained on the owner-controlled production fork. Keep the
 	// updater independent from the upstream repository so production installs
 	// see our release stream and can update to our fork's assets.
-	githubRepo = "h614626370-del/sub2api"
+	githubRepo         = "h614626370-del/sub2api"
+	upstreamGitHubRepo = "ranxi2001/sub2api"
 
 	// Security: allowed download domains for updates
 	allowedDownloadHost = "github.com"
@@ -50,8 +51,8 @@ const (
 
 // UpdateCache defines cache operations for update service
 type UpdateCache interface {
-	GetUpdateInfo(ctx context.Context) (string, error)
-	SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error
+	GetUpdateInfo(ctx context.Context, repo string) (string, error)
+	SetUpdateInfo(ctx context.Context, repo, data string, ttl time.Duration) error
 }
 
 // GitHubReleaseClient 获取 GitHub release 信息的接口
@@ -134,18 +135,27 @@ type GitHubAsset struct {
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	return s.checkUpdate(ctx, force, githubRepo)
+}
+
+// CheckUpstreamUpdate is informational only; installation and rollback use githubRepo.
+func (s *UpdateService) CheckUpstreamUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
+	return s.checkUpdate(ctx, force, upstreamGitHubRepo)
+}
+
+func (s *UpdateService) checkUpdate(ctx context.Context, force bool, repo string) (*UpdateInfo, error) {
 	// Try cache first
 	if !force {
-		if cached, err := s.getFromCache(ctx); err == nil && cached != nil {
+		if cached, err := s.getFromCache(ctx, repo); err == nil && cached != nil {
 			return cached, nil
 		}
 	}
 
 	// Fetch from GitHub
-	info, err := s.fetchLatestRelease(ctx)
+	info, err := s.fetchLatestRelease(ctx, repo)
 	if err != nil {
 		// Return cached on error
-		if cached, cacheErr := s.getFromCache(ctx); cacheErr == nil && cached != nil {
+		if cached, cacheErr := s.getFromCache(ctx, repo); cacheErr == nil && cached != nil {
 			cached.Warning = "Using cached data: " + err.Error()
 			return cached, nil
 		}
@@ -159,7 +169,7 @@ func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInf
 	}
 
 	// Cache result
-	s.saveToCache(ctx, info)
+	s.saveToCache(ctx, repo, info)
 	return info, nil
 }
 
@@ -171,6 +181,9 @@ func (s *UpdateService) PerformUpdate(ctx context.Context) error {
 		return err
 	}
 
+	if info.Warning != "" {
+		return fmt.Errorf("could not verify the latest custom release: %s", info.Warning)
+	}
 	if !info.HasUpdate {
 		return ErrNoUpdateAvailable
 	}
@@ -402,10 +415,13 @@ func (s *UpdateService) fetchRollbackCandidates(ctx context.Context) ([]*GitHubR
 	return candidates, nil
 }
 
-func (s *UpdateService) fetchLatestRelease(ctx context.Context) (*UpdateInfo, error) {
-	release, err := s.githubClient.FetchLatestRelease(ctx, githubRepo)
+func (s *UpdateService) fetchLatestRelease(ctx context.Context, repo string) (*UpdateInfo, error) {
+	release, err := s.githubClient.FetchLatestRelease(ctx, repo)
 	if err != nil {
 		return nil, err
+	}
+	if release == nil || release.Draft || release.Prerelease || strings.TrimSpace(release.TagName) == "" {
+		return nil, fmt.Errorf("no stable release available for %s", repo)
 	}
 
 	latestVersion := strings.TrimPrefix(release.TagName, "v")
@@ -596,8 +612,8 @@ func (s *UpdateService) extractBinary(archivePath, destPath string) error {
 	return out.Close()
 }
 
-func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
-	data, err := s.cache.GetUpdateInfo(ctx)
+func (s *UpdateService) getFromCache(ctx context.Context, repo string) (*UpdateInfo, error) {
+	data, err := s.cache.GetUpdateInfo(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -625,7 +641,7 @@ func (s *UpdateService) getFromCache(ctx context.Context) (*UpdateInfo, error) {
 	}, nil
 }
 
-func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
+func (s *UpdateService) saveToCache(ctx context.Context, repo string, info *UpdateInfo) {
 	cacheData := struct {
 		Latest      string       `json:"latest"`
 		ReleaseInfo *ReleaseInfo `json:"release_info"`
@@ -637,15 +653,15 @@ func (s *UpdateService) saveToCache(ctx context.Context, info *UpdateInfo) {
 	}
 
 	data, _ := json.Marshal(cacheData)
-	_ = s.cache.SetUpdateInfo(ctx, string(data), time.Duration(updateCacheTTL)*time.Second)
+	_ = s.cache.SetUpdateInfo(ctx, repo, string(data), time.Duration(updateCacheTTL)*time.Second)
 }
 
-// compareVersions compares two semantic versions
+// compareVersions treats a missing custom revision as zero (1.2.3 == 1.2.3.0).
 func compareVersions(current, latest string) int {
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
 
-	for i := 0; i < 3; i++ {
+	for i := range currentParts {
 		if currentParts[i] < latestParts[i] {
 			return -1
 		}
@@ -656,14 +672,14 @@ func compareVersions(current, latest string) int {
 	return 0
 }
 
-func parseVersion(v string) [3]int {
-	v = strings.TrimPrefix(v, "v")
+func parseVersion(v string) [4]int {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	if idx := strings.IndexByte(v, '-'); idx != -1 {
 		v = v[:idx]
 	}
 	parts := strings.Split(v, ".")
-	result := [3]int{0, 0, 0}
-	for i := 0; i < len(parts) && i < 3; i++ {
+	result := [4]int{}
+	for i := 0; i < len(parts) && i < len(result); i++ {
 		if parsed, err := strconv.Atoi(parts[i]); err == nil {
 			result[i] = parsed
 		}

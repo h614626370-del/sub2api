@@ -12,7 +12,7 @@ vi.mock('../client', () => ({
   },
 }))
 
-import { getRollbackVersions, rollback, type RollbackVersionInfo } from '@/api/admin/system'
+import { checkUpdates, checkUpstreamUpdates, performUpdate, getRollbackVersions, rollback, type RollbackVersionInfo } from '@/api/admin/system'
 
 describe('admin system rollback API', () => {
   beforeEach(() => {
@@ -34,6 +34,25 @@ describe('admin system rollback API', () => {
 
     expect(get).toHaveBeenCalledWith('/admin/system/rollback-versions')
     expect(result.versions).toEqual(versions)
+  })
+
+  it('checks both fixed repositories independently without changing the install endpoint', async () => {
+    get.mockResolvedValue({ data: {} })
+    post.mockResolvedValue({ data: { need_restart: true } })
+    await checkUpdates(true)
+    await checkUpstreamUpdates(true)
+    await checkUpstreamUpdates()
+    await performUpdate()
+    expect(get).toHaveBeenNthCalledWith(1, '/admin/system/check-updates', { params: { force: 'true' } })
+    expect(get).toHaveBeenNthCalledWith(2, '/admin/system/check-upstream-updates', { params: { force: 'true' } })
+    expect(get).toHaveBeenNthCalledWith(3, '/admin/system/check-upstream-updates', { params: undefined })
+    expect(post).toHaveBeenCalledWith('/admin/system/update', undefined, { timeout: 15 * 60 * 1000 })
+  })
+
+  it('preserves all four version components on rollback', async () => {
+    post.mockResolvedValue({ data: { need_restart: true } })
+    await rollback('2.10.0.10')
+    expect(post).toHaveBeenCalledWith('/admin/system/rollback', { version: '2.10.0.10' }, { timeout: 15 * 60 * 1000 })
   })
 
   it('rollback posts the target version in the request body', async () => {

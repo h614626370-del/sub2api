@@ -18,10 +18,10 @@ func NewUpdateCache(rdb *redis.Client) service.UpdateCache {
 	return &updateCache{rdb: rdb}
 }
 
-func (c *updateCache) GetUpdateInfo(ctx context.Context) (string, error) {
-	return c.rdb.Get(ctx, updateCacheKey).Result()
+func (c *updateCache) GetUpdateInfo(ctx context.Context, repo string) (string, error) {
+	return c.rdb.Get(ctx, updateCacheKey+":"+repo).Result()
 }
 
-func (c *updateCache) SetUpdateInfo(ctx context.Context, data string, ttl time.Duration) error {
-	return c.rdb.Set(ctx, updateCacheKey, data, ttl).Err()
+func (c *updateCache) SetUpdateInfo(ctx context.Context, repo, data string, ttl time.Duration) error {
+	return c.rdb.Set(ctx, updateCacheKey+":"+repo, data, ttl).Err()
 }

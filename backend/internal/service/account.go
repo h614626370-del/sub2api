@@ -2309,6 +2309,15 @@ func (a *Account) ExcelBPSProxySource() string {
 	return ExcelBPSProxySourceMihomo
 }
 
+// IsOpenAICacheCreationAsInputEnabled controls local billing independently of the upstream protocol.
+func (a *Account) IsOpenAICacheCreationAsInputEnabled() bool {
+	if a == nil || a.Platform != PlatformOpenAI {
+		return false
+	}
+	enabled, _ := a.Extra["openai_cache_creation_as_input"].(bool)
+	return enabled
+}
+
 // IsExcelBPSCacheCreationAsInputEnabled controls local billing and downstream usage.
 // The setting has no effect unless this account uses the Excel/BPS protocol.
 func (a *Account) IsExcelBPSCacheCreationAsInputEnabled() bool {

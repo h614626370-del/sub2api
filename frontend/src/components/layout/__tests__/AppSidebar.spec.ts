@@ -9,6 +9,20 @@ const componentSource = readFileSync(componentPath, 'utf8')
 const stylePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../style.css')
 const styleSource = readFileSync(stylePath, 'utf8')
 
+describe('AppSidebar image controller', () => {
+  it('places My Operations after Smart Operations and before Plugins', () => {
+    const smart = componentSource.indexOf("path: '/admin/smart-ops'")
+    const own = componentSource.indexOf("path: '/admin/my-operations'")
+    const image = componentSource.indexOf("path: '/admin/image-master'")
+    const plugins = componentSource.indexOf("path: '/admin/plugins'")
+    expect(own).toBeGreaterThan(smart)
+    expect(image).toBeGreaterThan(own)
+    expect(plugins).toBeGreaterThan(image)
+    expect(componentSource).toContain("label: t('imageMaster.operations')")
+    expect(componentSource).toContain("label: t('imageMaster.title')")
+  })
+})
+
 describe('AppSidebar custom SVG styles', () => {
   it('does not override uploaded SVG fill or stroke colors', () => {
     expect(componentSource).toContain('.sidebar-svg-icon {')

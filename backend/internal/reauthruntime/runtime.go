@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-var releaseVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$`)
+var releaseVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?$`)
 
 const maxArchive = 256 << 20
 const maxExtracted = 768 << 20

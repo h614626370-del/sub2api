@@ -3,14 +3,17 @@ package server
 import (
 	"context"
 	"log"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/imagemaster"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
 
 	"github.com/gin-gonic/gin"
@@ -91,6 +94,14 @@ func SetupRouter(
 	}
 
 	// 注册路由
+	if handlers.ImageMaster == nil {
+		manager, err := imagemaster.New(filepath.Join(setup.GetDataDir(), "image-master"))
+		if err != nil {
+			log.Printf("Image master unavailable: could not load its local state")
+		} else {
+			handlers.ImageMaster = manager
+		}
+	}
 	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
 
 	return r

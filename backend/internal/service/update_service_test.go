@@ -12,18 +12,21 @@ import (
 )
 
 type updateServiceCacheStub struct {
-	data string
+	data map[string]string
 }
 
-func (s *updateServiceCacheStub) GetUpdateInfo(context.Context) (string, error) {
-	if s.data == "" {
+func (s *updateServiceCacheStub) GetUpdateInfo(_ context.Context, repo string) (string, error) {
+	if s.data[repo] == "" {
 		return "", errors.New("cache miss")
 	}
-	return s.data, nil
+	return s.data[repo], nil
 }
 
-func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _ time.Duration) error {
-	s.data = data
+func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, repo, data string, _ time.Duration) error {
+	if s.data == nil {
+		s.data = make(map[string]string)
+	}
+	s.data[repo] = data
 	return nil
 }
 
@@ -32,14 +35,26 @@ type updateServiceGitHubClientStub struct {
 	recentReleases []*GitHubRelease
 	recentErr      error
 	latestRepo     string
+	recentRepo     string
+	releasesByRepo map[string]*GitHubRelease
+	errorsByRepo   map[string]error
+	latestCalls    []string
 }
 
 func (s *updateServiceGitHubClientStub) FetchLatestRelease(_ context.Context, repo string) (*GitHubRelease, error) {
 	s.latestRepo = repo
+	s.latestCalls = append(s.latestCalls, repo)
+	if err := s.errorsByRepo[repo]; err != nil {
+		return nil, err
+	}
+	if s.releasesByRepo != nil {
+		return s.releasesByRepo[repo], nil
+	}
 	return s.release, nil
 }
 
-func (s *updateServiceGitHubClientStub) FetchRecentReleases(context.Context, string, int) ([]*GitHubRelease, error) {
+func (s *updateServiceGitHubClientStub) FetchRecentReleases(_ context.Context, repo string, _ int) ([]*GitHubRelease, error) {
+	s.recentRepo = repo
 	return s.recentReleases, s.recentErr
 }
 

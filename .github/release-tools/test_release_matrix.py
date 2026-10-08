@@ -21,19 +21,19 @@ spec.loader.exec_module(release)
 
 
 class ReleaseMatrixTest(unittest.TestCase):
-    def test_release_versions_use_three_components(self):
-        for version in ('2.9.7', '2.9.8-rc.1'):
+    def test_release_versions_support_custom_revision(self):
+        for version in ('2.9.7', '2.9.8-rc.1', '2.9.7.1', '2.9.7.10-rc.1'):
             self.assertEqual(release.archive_name(version, {'goos': 'linux', 'goarch': 'amd64'}),
                              f'sub2api_{version}_linux_amd64.tar.gz')
-        for version in ('2.9.7.1', '2.9.7.10-rc.1', '2.9.7.1.2'):
+        for version in ('2.9.7.1.2', '2.9.7.x', '../2.9.7.1', '2.9.7.1/path'):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 release.archive_name(version, {'goos': 'linux', 'goarch': 'amd64'})
 
-    def test_reauth_runtime_rejects_four_component_versions(self):
+    def test_reauth_runtime_supports_custom_revision(self):
         script = (ROOT / 'tools/reauth-runtime/build.sh').read_text()
         validation, marker, _ = script.partition('runtime_output=$(mktemp -d)')
         self.assertTrue(marker)
-        for version, expected in (('2.9.7', 0), ('2.9.8-rc.1', 0), ('2.9.7.1', 1), ('2.9.7.1.2', 1)):
+        for version, expected in (('2.9.7', 0), ('2.9.8-rc.1', 0), ('2.9.7.1', 0), ('2.9.7.10-rc.1', 0), ('2.9.7.1.2', 1), ('../2.9.7.1', 1)):
             with self.subTest(version=version):
                 result = subprocess.run(['bash', '-c', 'VERSION=$1\nARCH=amd64\n' + validation,
                                          'validate-runtime-release', version], capture_output=True, text=True)
@@ -50,11 +50,11 @@ class ReleaseMatrixTest(unittest.TestCase):
         Path('backend/cmd/server').mkdir(parents=True)
         release.VERSION_FILE.write_text('9.8.7\n')
 
-    def fixture_artifacts(self, simple=False):
+    def fixture_artifacts(self, simple=False, version='9.8.7'):
         directory = Path('release-input')
         directory.mkdir()
         for target in release.targets(simple):
-            name = release.archive_name('9.8.7', target)
+            name = release.archive_name(version, target)
             archive = directory / name
             if target['goos'] == 'linux':
                 with tarfile.open(archive, 'w:gz') as out:
@@ -64,10 +64,20 @@ class ReleaseMatrixTest(unittest.TestCase):
                     out.addfile(info, io.BytesIO(b'fixture'))
             else:
                 archive.write_bytes(b'fixture archive')
-            metadata = {'version': '9.8.7', 'sha': 'a' * 40, 'target': target,
+            metadata = {'version': version, 'sha': 'a' * 40, 'target': target,
                         'archive': name, 'sha256': release.sha256(archive)}
             (directory / f"manifest-{target['goos']}-{target['goarch']}.json").write_text(json.dumps(metadata))
-        return argparse.Namespace(input='release-input', version='9.8.7', sha='a' * 40, simple=simple, output='contexts')
+        return argparse.Namespace(input='release-input', version=version, sha='a' * 40, simple=simple, output='contexts')
+
+    def test_four_part_release_plan_and_artifacts(self):
+        with patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs'}), patch.object(subprocess, 'check_output', return_value='a' * 40 + '\n'):
+            release.plan(argparse.Namespace(ref='v9.8.7.10', dry_run=False, simple=False))
+        output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
+        self.assertEqual(output['version'], '9.8.7.10')
+        self.assertEqual(output['tag'], 'v9.8.7.10')
+        self.assertEqual(output['prerelease'], 'false')
+        self.assertEqual(release.VERSION_FILE.read_text(), '9.8.7.10\n')
+        release.verify(self.fixture_artifacts(version='9.8.7.10'))
 
     def test_full_and_simple_matrix_match_existing_targets(self):
         full = release.targets()
@@ -188,11 +198,12 @@ class ReleaseMatrixTest(unittest.TestCase):
                 log_path = Path(f'docker-{simple}.log').resolve()
                 env = {**os.environ, 'PATH': str(fake_bin.resolve()) + os.pathsep + os.environ['PATH'],
                        'DOCKER_LOG': str(log_path), 'RUNNER_TEMP': self.temp.name,
-                       'RELEASE_VERSION': '9.8.7', 'RELEASE_SHA': 'a' * 40, 'GITHUB_REPOSITORY': 'ExampleOwner/sub2api',
+                       'RELEASE_VERSION': '9.8.7.10', 'RELEASE_SHA': 'a' * 40, 'GITHUB_REPOSITORY': 'ExampleOwner/sub2api',
                        'DRY_RUN': 'false', 'SIMPLE_RELEASE': str(simple).lower(), 'DOCKERHUB_USERNAME': 'fixturehub'}
                 subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, check=True)
                 log = log_path.read_text()
                 self.assertIn('--push', log)
+                self.assertIn('ghcr.io/exampleowner/sub2api:9.8.7.10', log)
                 self.assertEqual(log.count('buildx build'), 1 if simple else 2)
                 if simple:
                     self.assertNotIn('fixturehub', log)

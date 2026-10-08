@@ -19,6 +19,12 @@ export default {
 
   // Version Badge
   version: {
+    repositories: 'Version Updates',
+    upstreamRepository: 'Upstream Repository',
+    customRepository: 'Custom Repository',
+    reminderOnly: 'Notification only',
+    installSource: 'Install source',
+    checkUnavailable: 'Unable to verify the latest version',
     currentVersion: 'Current Version',
     latestVersion: 'Latest Version',
     upToDate: "You're running the latest version.",
