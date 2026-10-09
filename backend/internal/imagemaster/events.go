@@ -108,6 +108,14 @@ func (e *eventWriter) emit(kind string, fields map[string]any) error {
 }
 
 func (e *eventWriter) replay(snapshot map[string]any) error {
+	status, ok := snapshot["status"].(string)
+	if !ok || (status != "completed" && status != "failed" && status != "incomplete") {
+		return fail(502, "invalid_gateway_response")
+	}
+	output, ok := snapshot["output"].([]any)
+	if !ok {
+		return fail(502, "invalid_gateway_response")
+	}
 	start := cloneObject(snapshot)
 	start["status"], start["output"], start["error"], start["usage"] = "in_progress", []any{}, nil, nil
 	start["incomplete_details"] = nil
@@ -118,8 +126,11 @@ func (e *eventWriter) replay(snapshot map[string]any) error {
 	if err := e.emit("response.in_progress", map[string]any{"response": start}); err != nil {
 		return err
 	}
-	for i, value := range snapshot["output"].([]any) {
-		item := value.(map[string]any)
+	for i, value := range output {
+		item, ok := value.(map[string]any)
+		if !ok {
+			return fail(502, "invalid_gateway_response")
+		}
 		added := cloneObject(item)
 		added["status"] = "in_progress"
 		switch item["type"] {
@@ -143,7 +154,8 @@ func (e *eventWriter) replay(snapshot map[string]any) error {
 				}
 				fields := map[string]any{"item_id": item["id"], "output_index": i, "content_index": j}
 				empty := cloneObject(part)
-				switch part["type"] {
+				partType, _ := part["type"].(string)
+				switch partType {
 				case "output_text":
 					empty["text"], empty["annotations"] = "", []any{}
 				case "refusal":
@@ -154,14 +166,14 @@ func (e *eventWriter) replay(snapshot map[string]any) error {
 				if err := e.emit("response.content_part.added", event); err != nil {
 					return err
 				}
-				if part["type"] == "output_text" || part["type"] == "refusal" {
+				if partType == "output_text" || partType == "refusal" {
 					field := "text"
 					if part["type"] == "refusal" {
 						field = "refusal"
 					}
 					event = cloneObject(fields)
 					event["delta"] = part[field]
-					if err := e.emit("response."+part["type"].(string)+".delta", event); err != nil {
+					if err := e.emit("response."+partType+".delta", event); err != nil {
 						return err
 					}
 					if annotations, ok := part["annotations"].([]any); ok {
@@ -175,7 +187,7 @@ func (e *eventWriter) replay(snapshot map[string]any) error {
 					}
 					event = cloneObject(fields)
 					event[field] = part[field]
-					if err := e.emit("response."+part["type"].(string)+".done", event); err != nil {
+					if err := e.emit("response."+partType+".done", event); err != nil {
 						return err
 					}
 				}
@@ -227,5 +239,5 @@ func (e *eventWriter) replay(snapshot map[string]any) error {
 			return err
 		}
 	}
-	return e.emit("response."+snapshot["status"].(string), map[string]any{"response": snapshot})
+	return e.emit("response."+status, map[string]any{"response": snapshot})
 }

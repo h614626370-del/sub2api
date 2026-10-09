@@ -252,7 +252,9 @@ func (m *Manager) serve(w http.ResponseWriter, req *http.Request, raw []byte, wh
 			return
 		}
 	}
-	outcome, code = completed.snapshot["status"].(string), ""
+	if status, ok := completed.snapshot["status"].(string); ok {
+		outcome, code = status, ""
+	}
 }
 
 type readCloser struct{ *bytes.Reader }

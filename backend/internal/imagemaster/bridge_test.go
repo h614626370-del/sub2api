@@ -126,12 +126,27 @@ func TestImageMasterResponsesRewriteAndEvents(t *testing.T) {
 	}
 }
 
+func firstImageTool(t *testing.T, input map[string]any) map[string]any {
+	t.Helper()
+	return objectAt(t, input, "tools", 0)
+}
+
+func objectAt(t *testing.T, input map[string]any, field string, index int) map[string]any {
+	t.Helper()
+	items, ok := input[field].([]any)
+	require.True(t, ok)
+	require.Greater(t, len(items), index)
+	item, ok := items[index].(map[string]any)
+	require.True(t, ok)
+	return item
+}
+
 func TestImageMasterDirectEditsAndMask(t *testing.T) {
 	m := testManager(t)
 	raw := editRequest(t, testImage(t), testImage(t))
 	var input map[string]any
 	require.NoError(t, json.Unmarshal(raw, &input))
-	input["tools"].([]any)[0].(map[string]any)["input_image_mask"] = map[string]any{"image_url": testImage(t)}
+	firstImageTool(t, input)["input_image_mask"] = map[string]any{"image_url": testImage(t)}
 	raw, _ = json.Marshal(input)
 	w := serve(t, m, raw, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/v1/images/edits", r.URL.Path)
@@ -157,12 +172,12 @@ func TestImageMasterUnsupportedInputsNeverDispatch(t *testing.T) {
 	base := editRequest(t, testImage(t))
 	for _, change := range []func(map[string]any){
 		func(v map[string]any) { v["previous_response_id"] = "resp_prior" },
-		func(v map[string]any) { v["tools"].([]any)[0].(map[string]any)["n"] = 2 },
-		func(v map[string]any) { v["tools"].([]any)[0].(map[string]any)["model"] = "text-model" },
+		func(v map[string]any) { firstImageTool(t, v)["n"] = 2 },
+		func(v map[string]any) { firstImageTool(t, v)["model"] = "text-model" },
 		func(v map[string]any) { v["stream"] = "true" },
 		func(v map[string]any) { v["background"] = true },
 		func(v map[string]any) { v["instructions"] = 123 },
-		func(v map[string]any) { v["input"].([]any)[0].(map[string]any)["role"] = "assistant" },
+		func(v map[string]any) { objectAt(t, v, "input", 0)["role"] = "assistant" },
 	} {
 		var v map[string]any
 		require.NoError(t, json.Unmarshal(base, &v))

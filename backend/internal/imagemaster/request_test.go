@@ -67,8 +67,8 @@ func TestImageMasterUnsupportedTextRequestsNeverDispatch(t *testing.T) {
 		"message history": func(v, _ map[string]any) {
 			v["input"] = []any{map[string]any{"role": "user", "id": "msg_old", "content": "draw"}}
 		},
-		"multiple tools": func(v, _ map[string]any) {
-			v["tools"] = append(v["tools"].([]any), map[string]any{"type": "web_search"})
+		"multiple tools": func(v, tool map[string]any) {
+			v["tools"] = []any{tool, map[string]any{"type": "web_search"}}
 		},
 		"multiple turns": func(v, _ map[string]any) {
 			v["input"] = []any{map[string]any{"role": "user", "content": "one"}, map[string]any{"role": "user", "content": "two"}}
@@ -91,7 +91,7 @@ func TestImageMasterUnsupportedTextRequestsNeverDispatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var v map[string]any
 			require.NoError(t, json.Unmarshal(textRequest(false), &v))
-			change(v, v["tools"].([]any)[0].(map[string]any))
+			change(v, firstImageTool(t, v))
 			raw, err := json.Marshal(v)
 			require.NoError(t, err)
 			w := serve(t, m, raw, func(http.ResponseWriter, *http.Request) { t.Error("must not dispatch") })
@@ -109,8 +109,8 @@ func TestImageMasterRejectsUnsafeImageOptions(t *testing.T) {
 	} {
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(editRequest(t, testImage(t)), &body))
-		image := body["input"].([]any)[0].(map[string]any)["content"].([]any)[1].(map[string]any)
-		change(image, body["tools"].([]any)[0].(map[string]any))
+		image := objectAt(t, objectAt(t, body, "input", 0), "content", 1)
+		change(image, firstImageTool(t, body))
 		raw, err := json.Marshal(body)
 		require.NoError(t, err)
 		_, err = Prepare(raw)
