@@ -40,7 +40,24 @@ export interface ImageMasterStatus {
 }
 
 const root = '/admin/image-master'
+export interface ShadowConfig {
+  enabled: boolean
+  group_id: number
+  api_key_id: number
+}
+export interface ShadowResult { outcome: string; code?: string; status: number; images: number; duration_ms: number }
+export interface ShadowRecord {
+  id: string; request_id: string; started_at: number; user_id: number; source_group_id: number
+  group_id: number; api_key_id: number; requested_model: string; model: string; route: string
+  original: ShadowResult; test: ShadowResult
+}
+export interface ShadowStatus {
+  config: ShadowConfig; items: ShadowRecord[]; active: number
+  large_skipped: number; storage_error: boolean
+}
 export const imageMasterAPI = {
+  async shadow() { return (await apiClient.get<ShadowStatus>(`${root}/shadow`)).data },
+  async saveShadow(config: ShadowConfig) { return (await apiClient.put<ShadowConfig>(`${root}/shadow/settings`, config)).data },
   async status() { return (await apiClient.get<ImageMasterStatus>(root)).data },
   async save(config: ImageMasterConfig) { return (await apiClient.put<ImageMasterConfig>(`${root}/settings`, config)).data },
   async cancel(id: string) { await apiClient.post(`${root}/requests/${encodeURIComponent(id)}/cancel`) },

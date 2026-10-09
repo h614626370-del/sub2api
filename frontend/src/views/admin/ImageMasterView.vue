@@ -6,7 +6,7 @@
         <div class="actions">
           <span class="text-xs text-gray-500">{{ t('imageMaster.currentInstance') }}</span>
           <span v-if="remote" class="state" :class="remote.config.enabled ? 'good' : 'muted'">
-            {{ t(remote.config.enabled ? 'imageMaster.running' : 'imageMaster.disabled') }}
+            {{ t('imageMaster.primaryState', { state: t(remote.config.enabled ? 'imageMaster.running' : 'imageMaster.disabled') }) }}
           </span>
           <button class="tool" :title="t('imageMaster.refresh')" :aria-label="t('imageMaster.refresh')" :disabled="loading || busy" @click="load">
             <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />
@@ -17,12 +17,13 @@
       <p v-if="remote?.storage_error" role="alert" class="alert">{{ t('imageMaster.storageError') }}</p>
       <p v-if="notice" role="status" class="notice">{{ notice }}</p>
       <nav class="tabs" role="tablist" :aria-label="t('imageMaster.title')">
-        <button v-for="name in (['monitor', 'settings'] as const)" :key="name" role="tab" :aria-selected="tab === name" :class="{ selected: tab === name }" @click="tab = name">
+        <button v-for="name in (['monitor', 'settings', 'shadow'] as const)" :key="name" role="tab" :aria-selected="tab === name" :class="{ selected: tab === name }" @click="tab = name">
           <Icon :name="name === 'monitor' ? 'monitorPulse' : 'cog'" size="sm" />{{ t(`imageMaster.${name}`) }}
         </button>
       </nav>
       <p v-if="!remote && loading" role="status" class="empty">{{ t('imageMaster.loading') }}</p>
       <template v-if="remote">
+        <ImageShadowPanel v-if="tab === 'shadow'" />
         <section v-show="tab === 'monitor'" role="tabpanel">
           <div class="metrics">
             <div><span>{{ t('imageMaster.active') }}</span><strong>{{ remote.active }}</strong></div>
@@ -120,13 +121,14 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ImageShadowPanel from './ImageShadowPanel.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import { useStepUp, isStepUpCancelled } from '@/composables/useStepUp'
 import { imageMasterAPI, type ImageMasterConfig, type ImageMasterRecord, type ImageMasterStatus } from '@/api/admin/imageMaster'
 
 const { t } = useI18n()
 const stepUp = useStepUp()
-const tab = ref<'monitor' | 'settings'>('monitor')
+const tab = ref<'monitor' | 'settings' | 'shadow'>('monitor')
 const remote = ref<ImageMasterStatus | null>(null), draft = ref<ImageMasterConfig | null>(null)
 const loading = ref(false), busy = ref(false), autoRefresh = ref(true)
 const error = ref(''), notice = ref(''), search = ref(''), statusFilter = ref(''), routeFilter = ref('')

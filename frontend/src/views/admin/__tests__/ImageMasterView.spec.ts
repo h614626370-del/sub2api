@@ -4,6 +4,7 @@ import ImageMasterView from '../ImageMasterView.vue'
 import { imageMasterAPI, type ImageMasterStatus } from '@/api/admin/imageMaster'
 
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
+vi.mock('../ImageShadowPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/components/common/BaseDialog.vue', () => ({ default: { props: ['show', 'title'], template: '<section v-if="show" role="dialog"><h2>{{ title }}</h2><slot /><slot name="footer" /></section>' } }))
 vi.mock('@/components/auth/TotpStepUpDialog.vue', () => ({ default: { template: '<span />' } }))
 vi.mock('@/composables/useStepUp', () => ({
@@ -44,11 +45,11 @@ async function create() {
 async function settings() { await wrapper.findAll('[role="tab"]')[1].trigger('click') }
 
 describe('ImageMasterView', () => {
-  it('shows requests and only the two integrated tabs', async () => {
+  it('shows requests and the three integrated tabs', async () => {
     await create()
     expect(wrapper.text()).toContain('imageMaster.operations')
     expect(wrapper.text()).toContain('gpt-image-2')
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(2)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(3)
     await settings()
     expect(wrapper.find('input[type="url"]').exists()).toBe(false)
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)

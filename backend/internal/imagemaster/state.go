@@ -21,22 +21,26 @@ const maxRecords = 10000
 const maxRawBytes = 256 << 20
 
 type Config struct {
-	Enabled           bool `json:"enabled"`
-	TimeoutSeconds    int  `json:"timeout_seconds"`
-	HeartbeatSeconds  int  `json:"heartbeat_seconds"`
-	MaxBodyMiB        int  `json:"max_body_mib"`
-	MaxResponseMiB    int  `json:"max_response_mib"`
-	DoneSentinel      bool `json:"done_sentinel"`
-	RawRequestLogging bool `json:"raw_request_logging"`
+	Shadow            ShadowConfig `json:"shadow"`
+	Enabled           bool         `json:"enabled"`
+	TimeoutSeconds    int          `json:"timeout_seconds"`
+	HeartbeatSeconds  int          `json:"heartbeat_seconds"`
+	MaxBodyMiB        int          `json:"max_body_mib"`
+	MaxResponseMiB    int          `json:"max_response_mib"`
+	DoneSentinel      bool         `json:"done_sentinel"`
+	RawRequestLogging bool         `json:"raw_request_logging"`
 }
 
 func Defaults() Config {
-	return Config{TimeoutSeconds: 900, HeartbeatSeconds: 5, MaxBodyMiB: 128, MaxResponseMiB: 64}
+	return Config{Shadow: ShadowDefaults(), TimeoutSeconds: 900, HeartbeatSeconds: 5, MaxBodyMiB: 128, MaxResponseMiB: 64}
 }
 
 var modelName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
 func (c Config) Validate() error {
+	if err := c.Shadow.Validate(); err != nil {
+		return err
+	}
 	if c.TimeoutSeconds < 1 || c.TimeoutSeconds > 3600 ||
 		c.HeartbeatSeconds < 1 || c.HeartbeatSeconds > 60 || c.MaxBodyMiB < 1 || c.MaxBodyMiB > 128 ||
 		c.MaxResponseMiB < 1 || c.MaxResponseMiB > 128 {
@@ -80,6 +84,7 @@ type Status struct {
 }
 
 type Manager struct {
+	shadow          *shadowStore
 	mu              sync.Mutex
 	dir             string
 	config          Config
@@ -124,6 +129,7 @@ func New(dir string) (*Manager, error) {
 		return nil, err
 	}
 	m.pruneLocked()
+	m.shadow = newShadowStore(dir)
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -132,6 +138,7 @@ func New(dir string) (*Manager, error) {
 			case <-m.stop:
 				return
 			case <-ticker.C:
+				m.shadow.persist()
 				m.mu.Lock()
 				m.pruneLocked()
 				m.persistLocked()
@@ -143,6 +150,7 @@ func New(dir string) (*Manager, error) {
 }
 
 func (m *Manager) Close() {
+	m.shadow.close()
 	m.stopOnce.Do(func() { close(m.stop) })
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -198,6 +206,22 @@ func (m *Manager) SaveConfig(c Config) error {
 	}
 	m.config = c
 	return nil
+}
+
+// Main and shadow forms may be saved concurrently. Merge under the same lock
+// as persistence so a stale main form cannot revert the independent test target.
+func (m *Manager) SaveMainConfig(c Config) (Config, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c.Shadow = m.config.Shadow
+	if err := c.Validate(); err != nil {
+		return c, err
+	}
+	if err := atomicJSON(filepath.Join(m.dir, "config.json"), c); err != nil {
+		return c, err
+	}
+	m.config = c
+	return c, nil
 }
 
 func (m *Manager) Snapshot() Status {

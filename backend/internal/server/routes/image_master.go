@@ -45,7 +45,7 @@ func imageMasterMiddleware(m *imagemaster.Manager, images gin.HandlerFunc, gates
 	internal.POST("/v1/images/edits", images)
 	return func(c *gin.Context) {
 		cfg := m.Config()
-		if !cfg.Enabled || c.Request.Method != http.MethodPost {
+		if !cfg.Enabled || c.GetBool("image_master_shadow_passthrough") || c.Request.Method != http.MethodPost {
 			c.Next()
 			return
 		}
@@ -105,6 +105,25 @@ func registerImageMasterRoutes(admin *gin.RouterGroup, m *imagemaster.Manager, s
 		c.Next()
 	})
 	group.GET("", func(c *gin.Context) { response.Success(c, m.Snapshot()) })
+	group.GET("/shadow", func(c *gin.Context) { c.Header("Cache-Control", "no-store"); response.Success(c, m.ShadowSnapshot()) })
+	group.PUT("/shadow/settings", func(c *gin.Context) {
+		var cfg imagemaster.ShadowConfig
+		decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 8193))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&cfg) != nil || decoder.Decode(new(any)) != io.EOF || cfg.Validate() != nil {
+			response.BadRequest(c, "Invalid shadow settings")
+			return
+		}
+		if m.ValidateShadowTarget(c.Request.Context(), cfg) != nil {
+			response.BadRequest(c, "Test key must be active and belong to an OpenAI group with image generation enabled and stream-only disabled")
+			return
+		}
+		if err := m.SaveShadowConfig(cfg); err != nil {
+			response.Error(c, 503, "Could not save shadow settings")
+			return
+		}
+		response.Success(c, cfg)
+	})
 	group.PUT("/settings", func(c *gin.Context) {
 		var cfg imagemaster.Config
 		decoder := json.NewDecoder(io.LimitReader(c.Request.Body, 8193))
@@ -113,11 +132,12 @@ func registerImageMasterRoutes(admin *gin.RouterGroup, m *imagemaster.Manager, s
 			response.BadRequest(c, "Invalid image master settings")
 			return
 		}
-		if err := m.SaveConfig(cfg); err != nil {
+		saved, err := m.SaveMainConfig(cfg)
+		if err != nil {
 			response.Error(c, 503, "Could not save image master settings")
 			return
 		}
-		response.Success(c, cfg)
+		response.Success(c, saved)
 	})
 	group.POST("/requests/:id/cancel", func(c *gin.Context) {
 		if !m.Cancel(c.Param("id")) {
