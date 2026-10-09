@@ -81,16 +81,32 @@ class ReleaseMatrixTest(unittest.TestCase):
 
     def test_full_and_simple_matrix_match_existing_targets(self):
         full = release.targets()
-        self.assertEqual(len(full), 5)
-        self.assertNotIn({'goos': 'windows', 'goarch': 'arm64'}, full)
+        self.assertEqual(full, [{'goos': goos, 'goarch': 'amd64'}
+                                for goos in ('linux', 'windows', 'darwin')])
         self.assertEqual(release.targets(True), [{'goos': 'linux', 'goarch': 'amd64'}])
+
+    def test_runtime_and_image_release_targets_are_amd64_only(self):
+        for filename, job in (('release.yml', 'build-reauth-runtime'), ('reauth-runtime.yml', 'package')):
+            workflow = yaml.safe_load((ROOT / '.github/workflows' / filename).read_text())
+            self.assertEqual(workflow['jobs'][job]['strategy']['matrix']['include'],
+                             [{'arch': 'amd64', 'runner': 'ubuntu-24.04'}])
+        for simple in (False, True):
+            config = release.config(simple)
+            for docker in config['dockers']:
+                self.assertEqual(docker['goarch'], 'amd64')
+            for manifest in config.get('docker_manifests', []):
+                self.assertTrue(all(image.endswith('-amd64') for image in manifest['image_templates']))
+        validation = (ROOT / 'tools/reauth-runtime/build.sh').read_text().split('runtime_output=$(mktemp -d)')[0]
+        result = subprocess.run(['bash', '-c', 'VERSION=9.8.7\nARCH=arm64\n' + validation],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
 
     def test_leaf_keeps_packaging_and_selects_only_one_target(self):
         original = release.config()
-        release.generate_config(argparse.Namespace(mode='build', simple=False, goos='darwin', goarch='arm64', output='leaf.yaml'))
+        release.generate_config(argparse.Namespace(mode='build', simple=False, goos='darwin', goarch='amd64', output='leaf.yaml'))
         leaf = yaml.safe_load(Path('leaf.yaml').read_text())
         self.assertEqual(leaf['builds'][0]['goos'], ['darwin'])
-        self.assertEqual(leaf['builds'][0]['goarch'], ['arm64'])
+        self.assertEqual(leaf['builds'][0]['goarch'], ['amd64'])
         self.assertEqual(leaf['builds'][0]['ignore'], [])
         self.assertEqual(leaf['archives'], original['archives'])
         self.assertEqual(leaf['release'], original['release'])
@@ -144,7 +160,8 @@ class ReleaseMatrixTest(unittest.TestCase):
         Path('backend/resources').mkdir()
         Path('backend/resources/data').write_text('fixture')
         release.contexts(args)
-        for arch in ('amd64', 'arm64'):
+        self.assertEqual({path.name for path in Path('contexts').iterdir()}, {'amd64'})
+        for arch in ('amd64',):
             binary = Path('contexts') / arch / 'sub2api'
             self.assertEqual(binary.read_bytes(), b'fixture')
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
@@ -165,7 +182,7 @@ class ReleaseMatrixTest(unittest.TestCase):
         output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
         self.assertEqual(output['dry_run'], 'true')
         self.assertEqual(output['owner_lower'], 'exampleowner')
-        self.assertEqual(len(json.loads(output['matrix'])['include']), 5)
+        self.assertEqual(json.loads(output['matrix'])['include'], release.targets())
 
     def test_docker_commands_do_not_publish_during_dry_run(self):
         fake_bin = Path('bin')
@@ -179,8 +196,9 @@ class ReleaseMatrixTest(unittest.TestCase):
                'DRY_RUN': 'true', 'SIMPLE_RELEASE': 'false', 'DOCKERHUB_USERNAME': 'skip'}
         subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, check=True)
         log = Path('docker.log').read_text()
-        self.assertEqual(log.count('buildx build'), 2)
-        self.assertIn('linux/arm64', log)
+        self.assertEqual(log.count('buildx build'), 1)
+        self.assertIn('linux/amd64', log)
+        self.assertNotIn('arm64', log)
         self.assertNotIn('--push', log)
         self.assertNotIn('imagetools', log)
         self.assertNotIn('skip/sub2api', log)
@@ -204,7 +222,8 @@ class ReleaseMatrixTest(unittest.TestCase):
                 log = log_path.read_text()
                 self.assertIn('--push', log)
                 self.assertIn('ghcr.io/exampleowner/sub2api:9.8.7.10', log)
-                self.assertEqual(log.count('buildx build'), 1 if simple else 2)
+                self.assertEqual(log.count('buildx build'), 1)
+                self.assertNotIn('arm64', log)
                 if simple:
                     self.assertNotIn('fixturehub', log)
                     self.assertNotIn('imagetools', log)

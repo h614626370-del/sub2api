@@ -6,8 +6,7 @@ registries=("ghcr.io/${owner,,}/sub2api")
 if [[ ${SIMPLE_RELEASE:-false} != true && ${DOCKERHUB_USERNAME:-skip} != skip ]]; then
   registries+=("${DOCKERHUB_USERNAME}/sub2api")
 fi
-arches=(amd64 arm64)
-if [[ ${SIMPLE_RELEASE:-false} == true ]]; then arches=(amd64); fi
+arches=(amd64)
 for arch in "${arches[@]}"; do
   args=(--platform "linux/$arch" --file ".release-context/$arch/Dockerfile"
     --label "org.opencontainers.image.version=$RELEASE_VERSION"
@@ -36,6 +35,6 @@ if [[ ${DRY_RUN:-false} != true && ${SIMPLE_RELEASE:-false} != true ]]; then
       tags+=(--tag "$registry:latest" --tag "$registry:$major.$minor" --tag "$registry:$major")
     fi
     docker buildx imagetools create "${tags[@]}" \
-      "$registry:$RELEASE_VERSION-amd64" "$registry:$RELEASE_VERSION-arm64"
+      "$registry:$RELEASE_VERSION-amd64"
   done
 fi

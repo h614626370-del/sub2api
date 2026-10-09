@@ -3,7 +3,7 @@ set -euo pipefail
 : "${VERSION:?set VERSION}"
 : "${ARCH:?set ARCH}"
 [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[A-Za-z0-9.-]+)?$ ]]
-[[ $ARCH == amd64 || $ARCH == arm64 ]]
+[[ $ARCH == amd64 ]]
 runtime_output=$(mktemp -d)
 trap 'rm -rf "$runtime_output"' EXIT
 docker buildx build --platform "linux/$ARCH" -f tools/reauth-runtime/Dockerfile \
