@@ -1,6 +1,7 @@
 import imageMaster from './imageMaster'
 import priorityScheduling from './priorityScheduling'
 import qualityOps from './qualityOps'
+import controlledExperiments from './controlledExperiments'
 import accountOps from './accountOps'
 import tokenGuard from './tokenGuard'
 import pelicanTests from './pelicanTests'
@@ -10,6 +11,7 @@ import common from './common'
 import dashboard from './dashboard'
 import channelMonitorV2 from './channelMonitorV2'
 import channelMonitorV3 from './channelMonitorV3'
+import supportTickets from './supportTickets'
 import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
@@ -23,6 +25,7 @@ export default {
   autoConfig,
   priorityScheduling,
   qualityOps,
+  controlledExperiments,
   accountOps,
   tokenGuard,
   pelicanTests,
@@ -33,6 +36,7 @@ export default {
   ...dashboard,
   ...channelMonitorV2,
   ...channelMonitorV3,
+  ...supportTickets,
   ...batchImage,
   admin,
   ...misc,
