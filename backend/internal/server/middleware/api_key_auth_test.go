@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
+	"github.com/DATA-DOG/go-sqlmock"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -135,8 +139,21 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 				return nil
 			},
 		}
-		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, client, cfg)
 		t.Cleanup(subscriptionService.Stop)
+		mock.ExpectBegin()
+		mock.ExpectQuery("SELECT id FROM user_subscriptions").
+			WithArgs(sub.ID, user.ID, service.SubscriptionStatusActive).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(sub.ID))
+		mock.ExpectExec("INSERT INTO subscription_conversion_leases").
+			WithArgs(sqlmock.AnyArg(), sub.ID, user.ID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectCommit()
+		mock.ExpectExec("DELETE FROM subscription_conversion_leases WHERE id=").
+			WillReturnResult(sqlmock.NewResult(0, 1))
 
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 
@@ -146,6 +163,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code)
+		require.NoError(t, mock.ExpectationsWereMet())
 		select {
 		case <-maintenanceCalled:
 			// ok

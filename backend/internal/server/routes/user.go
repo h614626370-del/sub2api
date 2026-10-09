@@ -149,6 +149,8 @@ func RegisterUserRoutes(
 			subscriptions.GET("/active", h.Subscription.GetActive)
 			subscriptions.GET("/progress", h.Subscription.GetProgress)
 			subscriptions.GET("/summary", h.Subscription.GetSummary)
+			subscriptions.GET("/conversion", h.Subscription.ConversionOverview(settingService))
+			subscriptions.POST("/:id/convert-to-balance", h.Subscription.ConvertToBalance)
 		}
 
 		// 渠道监控（用户只读）

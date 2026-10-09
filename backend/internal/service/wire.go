@@ -928,6 +928,12 @@ func ProvideAPIKeyService(
 	return svc
 }
 
+func ProvideSubscriptionService(groupRepo GroupRepository, subRepo UserSubscriptionRepository, billing *BillingCacheService, client *dbent.Client, cfg *config.Config, authCache APIKeyAuthCacheInvalidator) *SubscriptionService {
+	svc := NewSubscriptionService(groupRepo, subRepo, billing, client, cfg)
+	svc.conversionAuthCacheInvalidator = authCache
+	return svc
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	ProvideRequestCaptureManager,
@@ -1014,7 +1020,7 @@ var ProviderSet = wire.NewSet(
 	NewTurnstileService,
 	NewTencentCaptchaService,
 	NewAliyunCaptchaService,
-	NewSubscriptionService,
+	ProvideSubscriptionService,
 	wire.Bind(new(DefaultSubscriptionAssigner), new(*SubscriptionService)),
 	ProvideConcurrencyService,
 	ProvideUserMessageQueueService,

@@ -122,7 +122,18 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		"poll_url":   pollURL,
 	})
 
-	go h.run(task.ID, platform, taskCtx, recorder, cancel)
+	lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context())
+	if lease != nil {
+		if !lease.Retain() {
+			lease.MarkUnsettled()
+		}
+	}
+	go func() {
+		if lease != nil {
+			defer lease.Release()
+		}
+		h.run(task.ID, platform, taskCtx, recorder, cancel)
+	}()
 }
 
 func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKey *service.APIKey, platform string, body []byte) bool {
@@ -224,6 +235,9 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 	defer cancel()
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			if lease := service.SubscriptionConversionLeaseFromContext(taskCtx.Request.Context()); lease != nil {
+				lease.MarkUnsettled()
+			}
 			logger.L().Error("image_task.execution_panicked", zap.String("task_id", taskID), zap.Any("panic", recovered))
 			h.failTask(taskID, http.StatusInternalServerError, imageTaskErrorPayload("api_error", "image generation task panicked"))
 		}

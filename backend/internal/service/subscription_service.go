@@ -44,10 +44,11 @@ var (
 
 // SubscriptionService 订阅服务
 type SubscriptionService struct {
-	groupRepo           GroupRepository
-	userSubRepo         UserSubscriptionRepository
-	billingCacheService *BillingCacheService
-	entClient           *dbent.Client
+	groupRepo                      GroupRepository
+	userSubRepo                    UserSubscriptionRepository
+	billingCacheService            *BillingCacheService
+	entClient                      *dbent.Client
+	conversionAuthCacheInvalidator APIKeyAuthCacheInvalidator
 
 	// L1 缓存：加速中间件热路径的订阅查询
 	subCacheL1     *ristretto.Cache
@@ -623,6 +624,9 @@ func (s *SubscriptionService) RestoreSubscription(ctx context.Context, subscript
 	}
 	if sub.DeletedAt == nil {
 		return nil, ErrSubscriptionNotRevoked
+	}
+	if sub.Status == SubscriptionStatusConverted {
+		return nil, ErrSubscriptionConverted
 	}
 
 	exists, err := s.userSubRepo.ExistsActiveByUserIDAndGroupID(ctx, sub.UserID, sub.GroupID)

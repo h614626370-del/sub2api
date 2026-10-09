@@ -9,6 +9,7 @@ export type OrderStatus =
   | 'PAID'
   | 'RECHARGING'
   | 'COMPLETED'
+  | 'CONVERTED'
   | 'EXPIRED'
   | 'CANCELLED'
   | 'FAILED'

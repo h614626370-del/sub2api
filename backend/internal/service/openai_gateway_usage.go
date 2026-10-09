@@ -151,10 +151,17 @@ func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTie
 }
 
 // RecordUsage records usage and deducts balance
-func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
+func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) (err error) {
 	if input == nil {
 		return errors.New("openai usage input is nil")
 	}
+	defer func() {
+		if err != nil && input.Subscription != nil {
+			if lease := SubscriptionConversionLeaseFromContext(ctx); lease != nil {
+				lease.MarkUnsettled()
+			}
+		}
+	}()
 	result := input.Result
 	if result == nil {
 		return errors.New("openai usage result is nil")

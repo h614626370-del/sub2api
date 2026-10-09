@@ -192,7 +192,7 @@ func (s *PaymentService) alreadyProcessed(ctx context.Context, o *dbent.PaymentO
 		return nil
 	}
 	switch cur.Status {
-	case OrderStatusCompleted, OrderStatusRefunded:
+	case OrderStatusCompleted, OrderStatusConverted, OrderStatusRefunded:
 		return nil
 	case OrderStatusFailed, OrderStatusPaid, OrderStatusRecharging:
 		return s.executeFulfillment(ctx, o.ID)
@@ -229,7 +229,7 @@ func (s *PaymentService) ExecuteBalanceFulfillment(ctx context.Context, oid int6
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
-	if o.Status == OrderStatusCompleted {
+	if o.Status == OrderStatusCompleted || o.Status == OrderStatusConverted {
 		return nil
 	}
 	if psIsRefundStatus(o.Status) {
@@ -283,7 +283,7 @@ func (s *PaymentService) acquirePaymentFulfillmentLease(ctx context.Context, o *
 		if getErr != nil {
 			return nil, fmt.Errorf("reload fulfillment lease: %w", getErr)
 		}
-		if current.Status == OrderStatusCompleted {
+		if current.Status == OrderStatusCompleted || current.Status == OrderStatusConverted {
 			return nil, nil
 		}
 		if current.Status == OrderStatusRecharging {
@@ -511,7 +511,7 @@ func (s *PaymentService) ExecuteSubscriptionFulfillment(ctx context.Context, oid
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
-	if o.Status == OrderStatusCompleted {
+	if o.Status == OrderStatusCompleted || o.Status == OrderStatusConverted {
 		return nil
 	}
 	if psIsRefundStatus(o.Status) {
@@ -879,7 +879,7 @@ func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error 
 	if psIsRefundStatus(o.Status) {
 		return infraerrors.BadRequest("INVALID_STATUS", "refund-related order cannot retry")
 	}
-	if o.Status == OrderStatusCompleted {
+	if o.Status == OrderStatusCompleted || o.Status == OrderStatusConverted {
 		return infraerrors.BadRequest("INVALID_STATUS", "order already completed")
 	}
 	if o.Status != OrderStatusFailed && o.Status != OrderStatusPaid && o.Status != OrderStatusRecharging {

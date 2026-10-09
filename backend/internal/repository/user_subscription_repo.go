@@ -172,6 +172,7 @@ func (r *userSubscriptionRepository) Restore(ctx context.Context, subscriptionID
 	client := clientFromContext(ctx, r.client)
 	queryCtx := mixins.SkipSoftDelete(ctx)
 	_, err := client.UserSubscription.UpdateOneID(subscriptionID).
+		Where(usersubscription.StatusNEQ(service.SubscriptionStatusConverted)).
 		SetStatus(restoredStatus).
 		ClearDeletedAt().
 		SetUpdatedAt(time.Now()).

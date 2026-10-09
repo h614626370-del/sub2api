@@ -297,7 +297,13 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		}
 
 		authDone()
-		nextWithAPIKeyAdmissionOwner(c, apiKeyService, apiKeyString, ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL()), apiKey, false)
+		admittedSubscription := subscription
+		if skipBilling {
+			admittedSubscription = nil
+		}
+		nextWithSubscriptionConversionLease(c, subscriptionService, admittedSubscription, apiKey.User.ID, false, func() {
+			nextWithAPIKeyAdmissionOwner(c, apiKeyService, apiKeyString, ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL()), apiKey, false)
+		})
 	}
 }
 

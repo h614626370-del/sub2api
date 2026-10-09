@@ -40,6 +40,15 @@ describe('FeatureFlags.subscription', () => {
   })
 })
 
+describe('FeatureFlags.subscriptionConversion', () => {
+  it('shows the user entry only after an explicit enable', () => {
+    expect(resolveFeatureFlag(undefined, FeatureFlags.subscriptionConversion)).toBe(false)
+    expect(resolveFeatureFlag({} as PublicSettings, FeatureFlags.subscriptionConversion)).toBe(false)
+    expect(resolveFeatureFlag({ subscription_conversion_enabled: false } as PublicSettings, FeatureFlags.subscriptionConversion)).toBe(false)
+    expect(resolveFeatureFlag({ subscription_conversion_enabled: true } as PublicSettings, FeatureFlags.subscriptionConversion)).toBe(true)
+  })
+})
+
 describe('resolveFeatureFlag', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

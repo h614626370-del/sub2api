@@ -154,6 +154,9 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		// consumes the quota at the expected speed.
 		if cost.ActualCost > 0 {
 			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
+				if lease := SubscriptionConversionLeaseFromContext(ctx); lease != nil {
+					lease.MarkUnsettled()
+				}
 				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
 			}
 		}
@@ -642,7 +645,17 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 }
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
-func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) (err error) {
+	if input == nil {
+		return errors.New("usage input is nil")
+	}
+	defer func() {
+		if err != nil && input.Subscription != nil {
+			if lease := SubscriptionConversionLeaseFromContext(ctx); lease != nil {
+				lease.MarkUnsettled()
+			}
+		}
+	}()
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		APIKey:             input.APIKey,

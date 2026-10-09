@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -399,6 +400,19 @@ func TestGrokMediaVideoLookupOwnerIsolation(t *testing.T) {
 			require.Zero(t, bindings.writes)
 		})
 	}
+}
+
+func TestGrokMediaVideoCreateHoldsConversionAfterResponse(t *testing.T) {
+	lease, mock := conversionTaskLease(t)
+	h, _, _, _ := newGrokMediaSlotHandler(t, false, false)
+	mock.ExpectExec("INSERT INTO subscription_conversion_leases").
+		WithArgs(sqlmock.AnyArg(), int64(55), int64(66), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	c, w := grokMediaSlotContext(service.WithSubscriptionConversionLease(context.Background(), lease), true)
+	h.GrokVideoGeneration(c)
+	require.Equal(t, http.StatusOK, w.Code)
+	mock.ExpectExec("DELETE FROM subscription_conversion_leases WHERE id=").WillReturnResult(sqlmock.NewResult(0, 1))
+	lease.Release() // deferred task row must remain after the create request
 }
 
 func TestGrokMediaVideoCompletionStillClaimsBillingOnce(t *testing.T) {

@@ -370,6 +370,7 @@ type DefaultSubscriptionSetting struct {
 }
 
 type PublicSettings struct {
+	SubscriptionConversionEnabled       bool `json:"subscription_conversion_enabled"`
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	ForceEmailOnThirdPartySignup        bool

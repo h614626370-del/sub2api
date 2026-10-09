@@ -283,6 +283,7 @@ export interface PublicSettings {
   /** Opt-in user gallery of scheduled Pelican HTML results (sidebar「鹈鹕测智」). */
   pelican_showcase_enabled?: boolean
   /** When false, the whole user-facing subscription surface is hidden. Default true. */
+  subscription_conversion_enabled?: boolean
   subscription_enabled: boolean
   /** Mirrors payment config BALANCE_PAYMENT_DISABLED; true = balance top-up closed (subscription-only site). */
   payment_balance_disabled: boolean

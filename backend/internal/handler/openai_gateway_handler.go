@@ -510,6 +510,7 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if parent == nil {
 		return base
 	}
+	base = service.WithSubscriptionConversionLease(base, service.SubscriptionConversionLeaseFromContext(parent))
 	if clientRequestID, _ := parent.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
 		base = context.WithValue(base, ctxkey.ClientRequestID, strings.TrimSpace(clientRequestID))
 	}
@@ -523,7 +524,23 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 	if task == nil {
 		return nil
 	}
+	lease := service.SubscriptionConversionLeaseFromContext(parent)
+	if lease != nil && !lease.Retain() {
+		// This should be impossible while the request middleware still owns its
+		// reference. Do not silently discard a money-critical usage task.
+		lease.MarkUnsettled()
+		return func(ctx context.Context) { task(usageRecordContext(parent, ctx)) }
+	}
 	return func(ctx context.Context) {
+		if lease != nil {
+			defer lease.Release()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					lease.MarkUnsettled()
+					panic(recovered)
+				}
+			}()
+		}
 		task(usageRecordContext(parent, ctx))
 	}
 }
@@ -3736,6 +3753,9 @@ func (h *OpenAIGatewayHandler) recoverResponsesPanic(c *gin.Context, streamStart
 	if recovered == nil {
 		return
 	}
+	if lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context()); lease != nil {
+		lease.MarkUnsettled()
+	}
 
 	started := false
 	if streamStarted != nil {
@@ -3756,6 +3776,9 @@ func (h *OpenAIGatewayHandler) recoverAnthropicMessagesPanic(c *gin.Context, str
 	recovered := recover()
 	if recovered == nil {
 		return
+	}
+	if lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context()); lease != nil {
+		lease.MarkUnsettled()
 	}
 
 	started := streamStarted != nil && *streamStarted
@@ -3840,14 +3863,13 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, tas
 	}
 	task = wrapUsageRecordTaskContext(parent, task)
 	if h.usageRecordWorkerPool != nil {
-		if mode := h.usageRecordWorkerPool.Submit(task); mode != service.UsageRecordSubmitModeDroppedStopped {
+		if mode := h.usageRecordWorkerPool.Submit(task); !mode.Dropped() || (mode == service.UsageRecordSubmitModeDropped && service.SubscriptionConversionLeaseFromContext(parent) == nil) {
 			return
 		}
-		// 池已停止（进程关停窗口）：计费任务不能静默丢失，降级为内联同步执行。
-		// 显式配置的 drop/sample 溢出丢弃仍按配置语义保留。
+		// 池已停止或订阅用量任务溢出时，内联执行以免漏扣。
 		logger.L().With(
 			zap.String("component", "handler.openai_gateway.responses"),
-		).Warn("openai.usage_record_task_stopped_sync_fallback")
+		).Warn("openai.usage_record_task_sync_fallback")
 	}
 	// 回退路径：worker 池未注入或已停止时同步执行，避免退回到无界 goroutine 模式。
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -4986,8 +5008,23 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarkedWithIdentity(c *gin.Cont
 			cancel()
 		}
 	}
+	lease := service.SubscriptionConversionLeaseFromContext(requestCtx)
+	if lease != nil {
+		if !lease.Retain() {
+			lease.MarkUnsettled()
+		}
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if lease != nil {
+			defer lease.Release()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					lease.MarkUnsettled()
+					logger.L().With(zap.String("component", "handler.openai_gateway.cyber_policy"), zap.Any("panic", recovered)).Error("cyber_policy.record_panicked")
+				}
+			}()
+		}
+		ctx, cancel := context.WithTimeout(service.WithSubscriptionConversionLease(context.Background(), lease), 30*time.Second)
 		defer cancel()
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{

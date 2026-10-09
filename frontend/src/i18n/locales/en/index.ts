@@ -1,3 +1,4 @@
+import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
 import priorityScheduling from './priorityScheduling'
 import qualityOps from './qualityOps'
@@ -21,6 +22,7 @@ import requestTiming from './requestTiming'
 import autoConfig from './autoConfig'
 
 export default {
+  subscriptionConversion,
   imageMaster,
   autoConfig,
   priorityScheduling,
