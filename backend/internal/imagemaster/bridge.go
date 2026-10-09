@@ -65,14 +65,14 @@ func (m *Manager) serve(w http.ResponseWriter, req *http.Request, raw []byte, wh
 	w.Header().Set("X-Bridge-Request-Id", id)
 	if len(raw) > cfg.MaxBodyMiB<<20 {
 		m.rejected(id, who, nil, "request_too_large")
-		writeJSON(w, 413, map[string]any{"error": errorBody("request_too_large")})
+		_ = writeJSON(w, 413, map[string]any{"error": errorBody("request_too_large")})
 		return
 	}
 	plan, err := Prepare(raw)
 	if err != nil {
 		status, code := errorInfo(err)
 		m.rejected(id, who, nil, code)
-		writeJSON(w, status, map[string]any{"error": errorBody(code)})
+		_ = writeJSON(w, status, map[string]any{"error": errorBody(code)})
 		return
 	}
 	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(cfg.TimeoutSeconds)*time.Second)
@@ -87,7 +87,7 @@ func (m *Manager) serve(w http.ResponseWriter, req *http.Request, raw []byte, wh
 		m.saveRaw(id, req.Header, raw)
 	}
 	events := &eventWriter{w: w}
-	defer http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	defer func() { _ = http.NewResponseController(w).SetWriteDeadline(time.Time{}) }()
 	if plan.Stream {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -227,7 +227,7 @@ func (m *Manager) serve(w http.ResponseWriter, req *http.Request, raw []byte, wh
 				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 			}
 		} else {
-			writeJSON(w, status, map[string]any{"error": errorBody(code)})
+			_ = writeJSON(w, status, map[string]any{"error": errorBody(code)})
 		}
 		return
 	}

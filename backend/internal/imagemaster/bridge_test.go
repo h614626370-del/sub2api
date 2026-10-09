@@ -137,7 +137,7 @@ func TestImageMasterDirectEditsAndMask(t *testing.T) {
 		require.Equal(t, "/v1/images/edits", r.URL.Path)
 		require.True(t, imagepolicy.DirectOnly(r.Context()))
 		require.NoError(t, r.ParseMultipartForm(4<<20))
-		defer r.MultipartForm.RemoveAll()
+		defer func() { require.NoError(t, r.MultipartForm.RemoveAll()) }()
 		require.Equal(t, "gpt-image-2", r.FormValue("model"))
 		require.Equal(t, "1", r.FormValue("n"))
 		require.Equal(t, "b64_json", r.FormValue("response_format"))
@@ -347,7 +347,7 @@ func TestImageMasterHeartbeatArrivesBeforeResult(t *testing.T) {
 	defer server.Close()
 	res, err := http.Get(server.URL)
 	require.NoError(t, err)
-	defer res.Body.Close()
+	defer func() { require.NoError(t, res.Body.Close()) }()
 	reader := bufio.NewReader(res.Body)
 	require.Eventually(t, func() bool {
 		line, err := reader.ReadString('\n')

@@ -375,7 +375,7 @@ func downloadImage(ctx context.Context, value string) (imageInput, error) {
 		}
 		return imageInput{}, fail(400, "image_download_failed")
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != 200 || (res.Header.Get("Content-Encoding") != "" && res.Header.Get("Content-Encoding") != "identity") {
 		return imageInput{}, fail(400, "image_download_failed")
 	}
