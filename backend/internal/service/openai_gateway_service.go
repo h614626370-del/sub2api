@@ -471,6 +471,7 @@ type OpenAIGatewayService struct {
 	excelBPSAttachments    basispoints.AttachmentCache
 	excelBPSIPPoolMu       sync.Mutex
 	excelBPSIPPoolSyncedAt time.Time
+	excelBPSModelCooldowns excelBPSModelCooldowns
 	excelBPSCooldownUntil  sync.Map // key: int64(accountID), value: time.Time
 	harvestIPPoolMu        sync.Mutex
 	harvestIPPoolExits     []harvestIPPoolExit
@@ -497,6 +498,7 @@ type OpenAIGatewayService struct {
 	pluginManager          *PluginManager
 	deferredService        *DeferredService
 	openAITokenProvider    *OpenAITokenProvider
+	excelOAuthReauth       *OpenAIOAuthReauthService
 	grokTokenProvider      *GrokTokenProvider
 	toolCorrector          *CodexToolCorrector
 	openaiWSResolver       OpenAIWSProtocolResolver
@@ -539,6 +541,7 @@ type OpenAIGatewayService struct {
 	responseHeaderFilter                *responseheaders.CompiledHeaderFilter
 	codexSnapshotThrottle               *accountWriteThrottle
 	openAIModelsCache                   openAIModelsCache
+	excelBPSModelsCache                 openAIModelsCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
 	// openaiCodexTurnStateOrigins: 下游会话 seed → openAICodexTurnStateOrigin，
@@ -548,7 +551,6 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
 	openaiCodexTickets             sync.Map
-	codex780Routes                 codex780RouteCache
 	openaiCodexTicketStateMu       sync.Mutex
 	openaiCodexTicketCursors       sync.Map // codexHarvestTier -> *atomic.Uint64
 	openaiCodexTicketFlight        singleflight.Group
@@ -652,6 +654,9 @@ func NewOpenAIGatewayService(
 	}
 	for _, option := range options {
 		option(svc)
+	}
+	if registrar, ok := httpUpstream.(interface{ SetAstraTicketLifecycle(AstraTicketLifecycle) }); ok {
+		registrar.SetAstraTicketLifecycle(svc)
 	}
 	svc.logOpenAIWSModeBootstrap()
 	svc.StartOpenAICodexTicketHarvester()

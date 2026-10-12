@@ -664,6 +664,7 @@ export interface SyncUpstreamPreviewParams {
   type: string
   base_url?: string
   api_key: string
+  proxy_id?: number
   model_mapping?: Record<string, string>
 }
 
@@ -1429,7 +1430,13 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
   return data
 }
 
+export async function getOpenAIRequestTimezones(): Promise<{ default: string; timezones: string[] }> {
+  const { data } = await apiClient.get<{ default: string; timezones: string[] }>('/admin/accounts/openai-request-timezones')
+  return data
+}
+
 export const accountsAPI = {
+  getOpenAIRequestTimezones,
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,

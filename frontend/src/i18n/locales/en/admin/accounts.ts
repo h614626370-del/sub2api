@@ -1,5 +1,17 @@
 export default {
     accounts: {
+      bpsAuthorizing: 'BPS authorization is automatic. Native routing remains active until authorization succeeds, then BPS activates automatically.',
+      "modelsLoadFailed": "Could not load models. Please retry.",
+      "retryModels": "Reload models",
+      "openCredentialOperations": "Open Credential Operations",
+      "excelAuthErrors": {
+        "OPENAI_EXCEL_AUTH_PENDING": "Excel authorization is in progress. Reload models after it completes.",
+        "OPENAI_EXCEL_AUTH_FAILED": "Automatic Excel authorization failed and will retry after cooldown. View progress in Credential Operations.",
+        "OPENAI_EXCEL_AUTH_VERIFICATION_REQUIRED": "Automatic Excel login is blocked by an upstream security check. View status in Credential Operations.",
+        "OPENAI_EXCEL_AUTH_CONFIG_REQUIRED": "Automatic Excel authorization needs login configuration. The worker resumes after configuration is saved.",
+        "OPENAI_EXCEL_AUTH_REQUIRED": "Excel authorization is waiting for the automatic worker. View progress in Credential Operations.",
+        "OPENAI_EXCEL_AUTH_UNAVAILABLE": "Excel authorization status is unavailable. Please retry later."
+      },
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
@@ -173,12 +185,15 @@ export default {
         },
         protocolRules: {
           title: 'Model protocol routing',
-          hint: 'In adaptive mode, each model is sent to a native upstream protocol. Use an exact ID or a trailing * glob (e.g. grok-*, qwen*). The first matching rule wins; unmatched models use Chat Completions.',
+          hint: 'In adaptive mode, each model is sent to a native upstream protocol. Use an exact ID or a trailing * glob (e.g. grok-*, qwen*). The first matching rule wins. If the inbound protocol is one the model also supports, the request passes through on that protocol without conversion; otherwise the selected protocol is used.',
           patternPlaceholder: 'grok-* or deepseek-v4-flash',
           add: 'Add rule',
           remove: 'Remove rule',
           restoreDefaults: 'Restore defaults',
+          alsoSupports: 'Also supports',
+          alsoSupportsHint: 'Requests arriving on one of these protocols are passed through unchanged, avoiding protocol conversion',
           fallback: 'Unmatched models → Chat Completions (/v1/chat/completions)',
+          catalogFallback: 'Unmatched models → protocols from the upstream model list (supported_endpoints in /models); Chat Completions when unavailable',
         },
         title: 'OpenCode Go usage',
         panelHint: 'Usage windows reported by the upstream OpenCode Go account. Refreshed on demand or automatically when enabled.',
@@ -203,7 +218,8 @@ export default {
         refreshSuccess: 'OpenCode Go usage refreshed',
         refreshFailed: 'Failed to refresh OpenCode Go usage',
         errors: {
-          OPENCODE_GO_USAGE_REFRESH_RATE_LIMITED: 'Refresh is limited. Try again in {retry_after_seconds} seconds.'
+          OPENCODE_GO_USAGE_REFRESH_RATE_LIMITED: 'Refresh is limited. Try again in {retry_after_seconds} seconds.',
+          forbidden: 'Upstream returned 403: could be a missing/expired OpenCode Go subscription or a WAF/access-policy block; check the network path and HTTP status.'
         }
       },
       types: {
@@ -696,6 +712,10 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        requestTimezone: 'Request timezone',
+        requestTimezoneDesc: 'Applies when Bind request timezone is enabled in system settings. Defaults to Asia/Singapore.',
+        requestTimezoneLoadFailed: 'Could not load timezones. Please retry later.',
+
         baseUrlHint: 'Leave default for official OpenAI API',
         prismBrowser: 'Use Prism browser protocol automatically',
         prismBrowserDesc: 'Uses this OpenAI OAuth account with the server-managed Prism adapter. No separate credentials are needed. Supports text for these four models and client function/custom tools for 6.1 Sol.',
@@ -831,14 +851,14 @@ export default {
         codexFingerprintDevice: 'Device only',
         codexFingerprintSession: 'Device + Session',
         codexFingerprintFull: 'Full convergence',
-        codexTurnTicket: 'Codex 780 ticket',
+        codexTurnTicket: 'Codex ticket',
         codexTurnTicketDesc: 'Ticket status for the configured models. Requests are paused without a valid ticket only when fail-closed is enabled.',
         ticketProbeNext: 'Next allowed probe: ',
         ticketStandbyExpires: 'Standby expires: ',
-        ticketProbe: { success: 'Harvest succeeded', token_error: 'Account token unavailable', response_incomplete_or_error: 'Upstream failed or did not complete', invalid_state: 'Invalid ticket shape or expiry' },
+        ticketProbe: { success: 'Harvest succeeded', token_error: 'Account token unavailable', response_incomplete_or_error: 'Upstream failed or did not complete', invalid_state: 'Ticket validation failed or expired' },
         codexTurnTicketMissing: 'No valid ticket; requests remain allowed',
         codexTurnTicketReady: '{time} left',
-        codexTurnTicketPaused: 'No 780 ticket; this model is paused',
+        codexTurnTicketPaused: 'No valid ticket; this model is paused',
         codexImageTool: 'Codex image bridge policy',
         codexImageToolDesc:
           'Controls the hosted image_generation bridge and client-declared image tools on Codex /responses text requests. Hosted auto-injection applies only to non-Responses Lite requests. Account policy takes precedence over channel and global settings; standalone image-generation endpoints are unaffected.',
@@ -987,7 +1007,7 @@ export default {
         'Only applies in pool mode. Use 0 to disable in-place retry. Default {default}, maximum {max}.',
       poolModeRetryStatusCodes: 'Retry Status Codes',
       poolModeRetryStatusCodesHint:
-        'Comma-separated HTTP status codes (100-599) that trigger same-account retry in pool mode. Leave blank to use defaults ({default}).',
+        'Comma-separated HTTP status codes (100-599) that trigger same-account retry in pool mode. With 503 listed and no proxy on the account, connection failures (refused, unreachable, etc.) are also retried in place as 503 instead of temporarily unscheduling the account for 10 minutes. Leave blank to use defaults ({default}).',
       customErrorCodes: 'Custom Error Codes',
       customErrorCodesHint: 'Only stop scheduling for selected error codes',
       customErrorCodesWarning:
@@ -1674,6 +1694,7 @@ export default {
       inputMethod: 'Input Method',
       reAuthorizedSuccess: 'Account re-authorized successfully',
       // Test Modal
+      testRequestStarted: 'Test request started; waiting for an upstream response',
       testAccountConnection: 'Test Account Connection',
       errorPrefix: 'Error: {message}',
       imagePreviewAlt: 'Test image {index}',
@@ -1683,6 +1704,16 @@ export default {
       connectingToApi: 'Connecting to API...',
       testCompleted: 'Test completed successfully!',
       testFailed: 'Test failed',
+      bpsCredentialState: {
+        unknown: 'Excel / BPS authorization unknown',
+        pending: 'Excel / BPS authorization pending',
+        not_expired: 'Excel / BPS token not expired (upstream unverified)',
+        expired: 'Excel / BPS token expired',
+        revoked: 'Excel / BPS token revoked',
+        auth_failed: 'Excel / BPS authentication failed',
+        expiresAt: 'Token expiry',
+        manualResume: 'Account is disabled or paused; restoring authorization does not enable it.',
+      },
       connectedToApi: 'Connected to API',
       usingModel: 'Using model: {model}',
       sendingTestMessage: 'Sending test message: "hi"',

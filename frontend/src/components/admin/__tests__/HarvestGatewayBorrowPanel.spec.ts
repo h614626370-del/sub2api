@@ -15,6 +15,13 @@ function value() { return { cookie_pool: { enabled: false, source_account_ids: [
 function render() { const wrapper = mount(HarvestGatewayBorrowPanel, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } }); void wrapper.get('[data-testid="expand-borrow"]').trigger('click'); return wrapper }
 beforeEach(() => { vi.clearAllMocks(); mocks.get.mockResolvedValue(value()); mocks.list.mockResolvedValue({ items: [{ id: 299, name: 'source' }, { id: 300, name: 'target' }], pages: 1 }); mocks.save.mockImplementation(v => Promise.resolve({ ...v, revision: 'two' })) })
 describe('Astra gateway configuration', () => {
+  it('renders as a section without a second card when embedded in harvest controls', async () => {
+    const w = mount(HarvestGatewayBorrowPanel, { props: { embedded: true }, global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    expect(w.get('[data-testid="gateway-borrow-panel"]').classes()).not.toContain('card')
+    w.unmount()
+  })
+
   it('keeps gateway borrowing in its own collapsed card and preserves edits when collapsed', async () => {
     const w = mount(HarvestGatewayBorrowPanel, { global: { stubs: { RouterLink: true } } })
     await flushPromises()
@@ -68,6 +75,17 @@ describe('Astra gateway configuration', () => {
     await w.get('form').trigger('submit'); await flushPromises()
     expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({ account_scheduling: true, cookie_pool: expect.objectContaining({ enabled: false, target_account_ids: [300] }) }))
     expect(toggle.attributes('aria-checked')).toBe('true')
+    w.unmount()
+  })
+  it('shows joined and removed memberships for group scheduling records', async () => {
+    const w = render(); await flushPromises()
+    w.findComponent(AstraGatewayRuntime).vm.$emit('scheduling', [true, false].map(ready => ({ account_id: 300, mode: 'groups', schedulable: ready, checked_at: '2026-10-09T08:00:00Z', reason: ready ? 'target_probe_passed' : 'route_expired' })))
+    await flushPromises()
+    const log = w.get('[data-testid="scheduling-records"]')
+    expect(log.text()).toContain('admin.astraGateway.groupsJoined')
+    expect(log.text()).toContain('admin.astraGateway.groupsRemoved')
+    expect(log.text()).not.toContain('admin.astraGateway.enabled')
+    expect(log.text()).not.toContain('admin.astraGateway.disabled')
     w.unmount()
   })
   it('loads disabled defaults and saves independent switches', async () => {
