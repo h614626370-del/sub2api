@@ -16,7 +16,7 @@ func TestSubscriptionConversionPublicSettings(t *testing.T) {
 		s := NewSettingService(&settingPublicRepoStub{values: map[string]string{SettingKeySubscriptionConversion: raw}}, &config.Config{})
 		settings, err := s.GetPublicSettings(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, raw == `{"enabled":true}`, settings.SubscriptionConversionEnabled)
+		require.False(t, settings.SubscriptionConversionEnabled)
 		injected, err := s.GetPublicSettingsForInjection(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, settings.SubscriptionConversionEnabled, injected.(*PublicSettingsInjectionPayload).SubscriptionConversionEnabled)

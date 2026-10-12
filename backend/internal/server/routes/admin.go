@@ -40,6 +40,8 @@ func RegisterAdminRoutes(
 	{
 		admin.GET("/subscription-conversion", h.Subscription.ConversionSettings(settingService))
 		admin.PUT("/subscription-conversion", h.Subscription.SaveConversionSettings(settingService))
+		admin.GET("/subscription-conversion/users/:user_id", h.Subscription.AdminConversionOverview(settingService))
+		admin.POST("/subscription-conversion/users/:user_id/subscriptions/:id/convert", h.Subscription.AdminConvertToBalance)
 		// Optional region-to-Pod routing, configured inside Gateway settings.
 		admin.GET("/serverless", h.Admin.Setting.GetServerless)
 		admin.PUT("/serverless", h.Admin.Setting.SaveServerless)

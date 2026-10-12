@@ -1,5 +1,5 @@
 <template>
-  <section class="rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-800 sm:p-6">
+  <section class="py-5">
     <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">{{ t('subscriptionConversion.formulaTitle') }}</h2>
     <p class="my-4 rounded-lg bg-primary-50 p-4 text-sm font-medium leading-7 text-primary-900 dark:bg-primary-900/20 dark:text-primary-200">{{ t('subscriptionConversion.formula') }}</p>
     <ul class="space-y-2 text-sm leading-6 text-gray-700 dark:text-gray-300">

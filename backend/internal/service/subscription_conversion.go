@@ -277,9 +277,7 @@ func scanConversionReceipt(rows *sql.Rows) (*SubscriptionConversionReceipt, erro
 }
 func (s *SubscriptionService) ConversionOverview(ctx context.Context, userID int64, cfg *SubscriptionConversionSettings) (*SubscriptionConversionOverview, error) {
 	out := &SubscriptionConversionOverview{Enabled: cfg.Enabled, Subscriptions: []SubscriptionConversionPreview{}, History: []SubscriptionConversionReceipt{}}
-	if !cfg.Enabled {
-		return out, nil
-	}
+	// Administrators can inspect subscriptions and receipts while conversion is disabled.
 	subs, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -305,7 +303,10 @@ func (s *SubscriptionService) ConversionOverview(ctx context.Context, userID int
 	}
 	return out, rows.Err()
 }
-func (s *SubscriptionService) ConvertToBalance(ctx context.Context, userID, subscriptionID int64, quote string) (*SubscriptionConversionReceipt, error) {
+func (s *SubscriptionService) ConvertToBalance(ctx context.Context, userID, subscriptionID int64, quote string, adminID int64) (*SubscriptionConversionReceipt, error) {
+	if adminID <= 0 {
+		return nil, infraerrors.Forbidden("ADMIN_REQUIRED", "Admin operator is required")
+	}
 	tx, err := s.entClient.Tx(ctx)
 	if err != nil {
 		return nil, err
@@ -411,7 +412,7 @@ func (s *SubscriptionService) ConvertToBalance(ctx context.Context, userID, subs
 	}
 	for _, orderID := range p.OrderIDs {
 		if _, err := client.PaymentAuditLog.Create().SetOrderID(strconv.FormatInt(orderID, 10)).
-			SetAction("SUBSCRIPTION_CONVERTED").SetOperator(fmt.Sprintf("user:%d", userID)).
+			SetAction("SUBSCRIPTION_CONVERTED").SetOperator(fmt.Sprintf("admin:%d", adminID)).
 			SetDetail(string(calculation)).Save(ctx); err != nil {
 			return nil, err
 		}

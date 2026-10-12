@@ -11,6 +11,9 @@ import (
 
 func (h *SubscriptionHandler) ConversionSettings(settings *service.SettingService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if _, ok := conversionAdmin(c); !ok {
+			return
+		}
 		cfg, err := settings.GetSubscriptionConversionSettings(c.Request.Context())
 		if err != nil {
 			response.ErrorFrom(c, err)
@@ -22,6 +25,9 @@ func (h *SubscriptionHandler) ConversionSettings(settings *service.SettingServic
 
 func (h *SubscriptionHandler) SaveConversionSettings(settings *service.SettingService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if _, ok := conversionAdmin(c); !ok {
+			return
+		}
 		var cfg service.SubscriptionConversionSettings
 		if err := c.ShouldBindJSON(&cfg); err != nil {
 			response.BadRequest(c, "Invalid conversion settings")
@@ -36,12 +42,37 @@ func (h *SubscriptionHandler) SaveConversionSettings(settings *service.SettingSe
 	}
 }
 
-func (h *SubscriptionHandler) ConversionOverview(settings *service.SettingService) gin.HandlerFunc {
+func conversionAdmin(c *gin.Context) (int64, bool) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not found in context")
+		return 0, false
+	}
+	role, ok := middleware.GetUserRoleFromContext(c)
+	if !ok || role != service.RoleAdmin {
+		response.Forbidden(c, "Admin access required")
+		return 0, false
+	}
+	return subject.UserID, true
+}
+
+func conversionUserID(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid user ID")
+		return 0, false
+	}
+	return id, true
+}
+
+func (h *SubscriptionHandler) AdminConversionOverview(settings *service.SettingService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
-		subject, ok := middleware.GetAuthSubjectFromContext(c)
+		if _, ok := conversionAdmin(c); !ok {
+			return
+		}
+		userID, ok := conversionUserID(c)
 		if !ok {
-			response.Unauthorized(c, "User not found in context")
 			return
 		}
 		cfg, err := settings.GetSubscriptionConversionSettings(c.Request.Context())
@@ -49,7 +80,7 @@ func (h *SubscriptionHandler) ConversionOverview(settings *service.SettingServic
 			response.ErrorFrom(c, err)
 			return
 		}
-		overview, err := h.subscriptionService.ConversionOverview(c.Request.Context(), subject.UserID, cfg)
+		overview, err := h.subscriptionService.ConversionOverview(c.Request.Context(), userID, cfg)
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return
@@ -58,11 +89,14 @@ func (h *SubscriptionHandler) ConversionOverview(settings *service.SettingServic
 	}
 }
 
-func (h *SubscriptionHandler) ConvertToBalance(c *gin.Context) {
+func (h *SubscriptionHandler) AdminConvertToBalance(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	adminID, ok := conversionAdmin(c)
 	if !ok {
-		response.Unauthorized(c, "User not found in context")
+		return
+	}
+	userID, ok := conversionUserID(c)
+	if !ok {
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -77,7 +111,7 @@ func (h *SubscriptionHandler) ConvertToBalance(c *gin.Context) {
 		response.BadRequest(c, "Invalid conversion confirmation")
 		return
 	}
-	receipt, err := h.subscriptionService.ConvertToBalance(c.Request.Context(), subject.UserID, id, input.Quote)
+	receipt, err := h.subscriptionService.ConvertToBalance(c.Request.Context(), userID, id, input.Quote, adminID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

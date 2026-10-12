@@ -11,6 +11,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
@@ -20,6 +21,10 @@ import (
 func TestSubscriptionConversionSettlement(t *testing.T) {
 	ctx := context.Background()
 	client := integrationEntClient
+	admin, err := client.User.Create().
+		SetEmail(fmt.Sprintf("conversion-admin-%d@test.invalid", time.Now().UnixNano())).
+		SetPasswordHash("test").SetRole("admin").SetBalance(5).Save(ctx)
+	require.NoError(t, err)
 	svc := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), NewUserSubscriptionRepository(client), nil, client, &config.Config{})
 	defer svc.Stop()
 	settings := service.NewSettingService(NewSettingRepository(client), &config.Config{})
@@ -71,7 +76,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r, e := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote)
+				r, e := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote, admin.ID)
 				errs <- e
 				receipts <- r
 			}()
@@ -89,6 +94,15 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		u, err := client.User.Get(ctx, f.user.ID)
 		require.NoError(t, err)
 		require.InDelta(t, 29.5, u.Balance, 0.001)
+		operator, err := client.User.Get(ctx, admin.ID)
+		require.NoError(t, err)
+		require.Equal(t, 5.0, operator.Balance)
+		audit, err := client.PaymentAuditLog.Query().Where(
+			paymentauditlog.OrderIDEQ(fmt.Sprint(f.order.ID)),
+			paymentauditlog.ActionEQ("SUBSCRIPTION_CONVERTED"),
+		).Only(ctx)
+		require.NoError(t, err)
+		require.Equal(t, fmt.Sprintf("admin:%d", admin.ID), audit.Operator)
 		o, err := client.PaymentOrder.Get(ctx, f.order.ID)
 		require.NoError(t, err)
 		require.Equal(t, service.OrderStatusConverted, o.Status)
@@ -101,17 +115,17 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		require.Empty(t, result.Subscriptions)
 		require.Len(t, result.History, 1)
 	})
-	t.Run("other user cannot convert", func(t *testing.T) {
+	t.Run("admin cannot credit a different subscription owner", func(t *testing.T) {
 		f := create(t)
 		other := create(t)
 		p := overview(t, f)
-		_, err := svc.ConvertToBalance(ctx, other.user.ID, f.sub.ID, p.Quote)
+		_, err := svc.ConvertToBalance(ctx, other.user.ID, f.sub.ID, p.Quote, admin.ID)
 		require.Error(t, err)
 	})
 	t.Run("stale confirmation and rollback", func(t *testing.T) {
 		f := create(t)
 		p := overview(t, f)
-		_, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, "stale")
+		_, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, "stale", admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionChanged)
 		u, err := client.User.Get(ctx, f.user.ID)
 		require.NoError(t, err)
@@ -123,7 +137,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		p := overview(t, f)
 		_, err := client.RedeemCode.Create().SetCode(fmt.Sprintf("subconv-%d", f.sub.ID)).Save(ctx)
 		require.NoError(t, err)
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote, admin.ID)
 		require.Error(t, err)
 		u, err := client.User.Get(ctx, f.user.ID)
 		require.NoError(t, err)
@@ -166,7 +180,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		p := overview(t, f)
 		_, err := client.Group.UpdateOneID(f.group.ID).SetMonthlyLimitUsd(200).Save(ctx)
 		require.NoError(t, err)
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionChanged)
 	})
 	t.Run("renewal includes both purchases", func(t *testing.T) {
@@ -209,7 +223,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		require.True(t, p.Eligible, p.Reason)
 		require.Equal(t, "30.00", p.PriceUSD)
 		require.Equal(t, []int64{f.order.ID}, p.OrderIDs)
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote, admin.ID)
 		require.NoError(t, err)
 		old, err = client.PaymentOrder.Get(ctx, old.ID)
 		require.NoError(t, err)
@@ -224,14 +238,18 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		p := overview(t, f)
 		require.False(t, p.Eligible)
 		require.Equal(t, "usage_incomplete", p.Reason)
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, "unused")
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, "unused", admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionUnavailable)
 	})
 	t.Run("disabled blocks direct submit", func(t *testing.T) {
 		f := create(t)
 		p := overview(t, f)
 		require.NoError(t, settings.SetSubscriptionConversionSettings(ctx, &service.SubscriptionConversionSettings{}))
-		_, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote)
+		readOnly, err := svc.ConversionOverview(ctx, f.user.ID, &service.SubscriptionConversionSettings{})
+		require.NoError(t, err)
+		require.False(t, readOnly.Enabled)
+		require.Len(t, readOnly.Subscriptions, 1)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, p.Quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionDisabled)
 		require.NoError(t, settings.SetSubscriptionConversionSettings(ctx, &service.SubscriptionConversionSettings{Enabled: true}))
 	})
@@ -242,7 +260,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, lease.Retain()) // usage task queued before the HTTP handler exits
 		lease.Release()                 // client already received the response
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionPending)
 		require.Equal(t, "pending_requests", overview(t, f).Reason)
 		u, err := client.User.Get(ctx, f.user.ID)
@@ -254,7 +272,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		p := overview(t, f)
 		require.True(t, p.Eligible, p.Reason)
 		require.Equal(t, "30.0000000000", p.UsedQuotaUSD)
-		r, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		r, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.NoError(t, err)
 		require.InDelta(t, 18, mustConversionAmount(t, r.AmountUSD), 0.001)
 		// Stale auth/cache state cannot admit another request after conversion.
@@ -268,10 +286,10 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		lease, err := svc.AcquireSubscriptionConversionLease(requestCtx, f.sub.ID, f.user.ID)
 		require.NoError(t, err)
 		cancel()
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionPending)
 		lease.Release()
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.NoError(t, err)
 	})
 
@@ -286,7 +304,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 
 		other := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), NewUserSubscriptionRepository(client), nil, client, &config.Config{})
 		defer other.Stop()
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionPending)
 		require.Equal(t, "pending_requests", overview(t, f).Reason)
 
@@ -296,13 +314,13 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		pollLease.Release()                 // status HTTP response returned
 		require.NoError(t, NewUserSubscriptionRepository(client).IncrementUsage(ctx, f.sub.ID, 10))
 		require.NoError(t, pollLease.CompleteDeferredBilling(71, "seedance:task-1"))
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionPending) // billing task still owns the poll lease
 		pollLease.Release()
 		p := overview(t, f)
 		require.True(t, p.Eligible, p.Reason)
 		require.Equal(t, "30.0000000000", p.UsedQuotaUSD)
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.NoError(t, err)
 	})
 
@@ -318,7 +336,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		pollLease.MarkUnsettled() // RecordUsage returned a billing error
 		require.Error(t, pollLease.CompleteDeferredBilling(72, "video-task-2"))
 		pollLease.Release()
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionUnsettled)
 		require.Equal(t, "unsettled_usage", overview(t, f).Reason)
 	})
@@ -331,7 +349,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		lease.Release()
 		other := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), NewUserSubscriptionRepository(client), nil, client, &config.Config{})
 		defer other.Stop()
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 		require.ErrorIs(t, err, service.ErrConversionUnsettled)
 		require.Equal(t, "unsettled_usage", overview(t, f).Reason)
 	})
@@ -353,7 +371,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 			}()
 			go func() {
 				<-start
-				_, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote)
+				_, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
 				converted <- err
 			}()
 			close(start)

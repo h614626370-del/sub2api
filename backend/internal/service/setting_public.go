@@ -375,8 +375,9 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
 		PelicanShowcaseEnabled:   settings[SettingKeyPelicanShowcaseEnabled] == "true",
 
-		SubscriptionEnabled:           !isFalseSettingValue(settings[SettingKeySubscriptionEnabled]),
-		SubscriptionConversionEnabled: conversionEnabled(settings[SettingKeySubscriptionConversion]),
+		SubscriptionEnabled: !isFalseSettingValue(settings[SettingKeySubscriptionEnabled]),
+		// Retain the legacy flag as false so cached user clients cannot expose this admin-only feature.
+		SubscriptionConversionEnabled: false,
 
 		ModelPlazaEnabled:       settings[SettingKeyModelPlazaEnabled] == "true",
 		ModelPlazaRequireAuth:   settings[SettingKeyModelPlazaRequireAuth] == "true",

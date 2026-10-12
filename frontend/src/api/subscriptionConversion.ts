@@ -38,6 +38,6 @@ export interface ConversionOverview {
 export const subscriptionConversionAPI = {
   async settings() { return (await apiClient.get<ConversionSettings>('/admin/subscription-conversion')).data },
   async save(settings: ConversionSettings) { return (await apiClient.put<ConversionSettings>('/admin/subscription-conversion', settings)).data },
-  async overview() { return (await apiClient.get<ConversionOverview>('/subscriptions/conversion')).data },
-  async convert(id: number, quote: string) { return (await apiClient.post<ConversionReceipt>(`/subscriptions/${id}/convert-to-balance`, { quote })).data }
+  async overview(userID: number) { return (await apiClient.get<ConversionOverview>(`/admin/subscription-conversion/users/${userID}`)).data },
+  async convert(userID: number, id: number, quote: string) { return (await apiClient.post<ConversionReceipt>(`/admin/subscription-conversion/users/${userID}/subscriptions/${id}/convert`, { quote })).data }
 }
