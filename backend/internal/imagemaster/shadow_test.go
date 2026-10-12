@@ -178,10 +178,21 @@ func TestShadowEveryRequestReachesGatewayWithRetiredSettings(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(m.Close)
 	entered, release := make(chan struct{}, 8), make(chan struct{})
-	defer close(release)
+	jobs := make([]*ShadowJob, 0, 8)
+	t.Cleanup(func() {
+		close(release)
+		for _, job := range jobs {
+			select {
+			case <-job.done:
+			case <-time.After(3 * time.Second):
+				t.Error("shadow worker did not finish before test cleanup")
+			}
+		}
+	})
 	for i := 0; i < 8; i++ {
 		job := m.BeginShadow(textRequest(false), Identity{}, 2, "", func(w http.ResponseWriter, r *http.Request) { entered <- struct{}{}; <-release; successful(w, r) })
 		require.NotNil(t, job)
+		jobs = append(jobs, job)
 		job.CompleteOriginal([]byte(originalImage), "application/json", 200, false, false)
 	}
 	for i := 0; i < 8; i++ {

@@ -174,6 +174,7 @@ type ShadowJob struct {
 	id       string
 	start    time.Time
 	original chan ShadowResult
+	done     chan struct{}
 }
 
 const ShadowBodyLimit = 16 << 20
@@ -212,7 +213,7 @@ func (m *Manager) BeginShadowWithConfig(raw []byte, who Identity, sourceGroup in
 		Original: ShadowResult{Outcome: "running"}, Test: ShadowResult{Outcome: "running"}}
 	s.active++
 	s.mu.Unlock()
-	j := &ShadowJob{s: s, id: id, start: start, original: make(chan ShadowResult, 1)}
+	j := &ShadowJob{s: s, id: id, start: start, original: make(chan ShadowResult, 1), done: make(chan struct{})}
 	// raw is exclusively read; the route restores the original body separately.
 	go j.run(raw, cfg, dispatch)
 	return j
@@ -221,6 +222,7 @@ func (m *Manager) BeginShadowWithConfig(raw []byte, who Identity, sourceGroup in
 func (j *ShadowJob) run(raw []byte, cfg Config, dispatch Dispatch) {
 	ctx, cancel := context.WithTimeout(j.s.ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
+	defer close(j.done)
 	result := ShadowResult{Outcome: "failed", Code: "shadow_execution_failed"}
 	defer func() {
 		if recover() != nil {
