@@ -106,6 +106,14 @@ func TestH614626370TransitionUpgrade(t *testing.T) {
 
 			require.NoError(t, ApplyMigrations(ctx, db))
 			require.Equal(t, before, transitionBusinessSnapshot(t, db), "business data changed")
+			if version != "upstream" {
+				var used string
+				var complete bool
+				require.NoError(t, db.QueryRowContext(ctx,
+					`SELECT conversion_used_usd::text, conversion_usage_complete FROM user_subscriptions WHERE id=1`).Scan(&used, &complete))
+				require.Equal(t, "9.8765432100", used, "historical counters must seed lifetime consumption")
+				require.False(t, complete, "missing historical billing logs must block conversion")
+			}
 			var nonDefaultKeys, nonDefaultOrders int
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT count(*) FROM api_keys WHERE concurrency_limit <> 0`).Scan(&nonDefaultKeys))
@@ -163,7 +171,7 @@ func transitionBusinessSnapshot(t *testing.T, db *sql.DB) map[string]string {
 		"users":         `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'observer_group_ids' ORDER BY id), '[]')::text FROM users t`,
 		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only' ORDER BY id), '[]')::text FROM groups t`,
 		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'concurrency_limit' ORDER BY id), '[]')::text FROM api_keys t`,
-		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM user_subscriptions t`,
+		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'conversion_used_usd'-'conversion_usage_complete' ORDER BY id), '[]')::text FROM user_subscriptions t`,
 		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount' ORDER BY id), '[]')::text FROM payment_orders t`,
 		"usage":         `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM usage_logs t`,
 		"credentials":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'extra'-'updated_at'-'group_rate_multiplier' ORDER BY id), '[]')::text FROM accounts t`,

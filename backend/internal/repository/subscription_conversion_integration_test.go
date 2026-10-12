@@ -25,6 +25,10 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		SetEmail(fmt.Sprintf("conversion-admin-%d@test.invalid", time.Now().UnixNano())).
 		SetPasswordHash("test").SetRole("admin").SetBalance(5).Save(ctx)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := client.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, admin.ID)
+		require.NoError(t, err)
+	})
 	svc := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), NewUserSubscriptionRepository(client), nil, client, &config.Config{})
 	defer svc.Stop()
 	settings := service.NewSettingService(NewSettingRepository(client), &config.Config{})
@@ -46,6 +50,23 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		require.NoError(t, err)
 		g, err := client.Group.Create().SetName(fmt.Sprintf("Purchased monthly %d", u.ID)).SetSubscriptionType("subscription").SetMonthlyLimitUsd(100).Save(ctx)
 		require.NoError(t, err)
+		t.Cleanup(func() {
+			// Unsettled leases intentionally survive requests, but not test fixtures.
+			for _, query := range []string{
+				`DELETE FROM subscription_conversion_leases WHERE user_id=$1`,
+				`DELETE FROM subscription_conversions WHERE user_id=$1`,
+				`DELETE FROM redeem_codes WHERE code IN (SELECT 'subconv-' || id FROM user_subscriptions WHERE user_id=$1)`,
+				`DELETE FROM payment_audit_logs WHERE order_id IN (SELECT id::text FROM payment_orders WHERE user_id=$1)`,
+				`DELETE FROM payment_orders WHERE user_id=$1`,
+				`DELETE FROM user_subscriptions WHERE user_id=$1`,
+				`DELETE FROM users WHERE id=$1`,
+			} {
+				_, err := client.ExecContext(ctx, query, u.ID)
+				require.NoError(t, err, query)
+			}
+			_, err := client.ExecContext(ctx, `DELETE FROM groups WHERE id=$1`, g.ID)
+			require.NoError(t, err)
+		})
 		o, err := client.PaymentOrder.Create().SetUserID(u.ID).SetUserEmail(u.Email).SetUserName("Test").SetAmount(30).SetPayAmount(210).SetRechargeCode(fmt.Sprintf("conv-%d", u.ID)).SetPaymentType("test").SetPaymentTradeNo("").SetOrderType("subscription").SetSubscriptionGroupID(g.ID).SetSubscriptionDays(30).SetStatus("COMPLETED").SetExpiresAt(start.Add(time.Hour)).SetCompletedAt(start.Add(time.Second)).SetClientIP("127.0.0.1").SetSrcHost("test").Save(ctx)
 		require.NoError(t, err)
 		_, err = client.PaymentAuditLog.Create().SetOrderID(fmt.Sprint(o.ID)).SetAction("SUBSCRIPTION_ASSIGNED").SetDetail("{}").SetOperator("system").Save(ctx)
