@@ -121,6 +121,14 @@ func TestH614626370TransitionUpgrade(t *testing.T) {
 				`SELECT count(*) FROM payment_orders WHERE bonus_amount <> 0`).Scan(&nonDefaultOrders))
 			require.Zero(t, nonDefaultKeys, "new concurrency limits must preserve unrestricted keys")
 			require.Zero(t, nonDefaultOrders, "historical orders must not acquire a bonus")
+			var renewalMode string
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT subscription_renewal_mode FROM payment_orders WHERE id=1`).Scan(&renewalMode))
+			require.Equal(t, "extend", renewalMode, "historical orders must retain extension semantics")
+			var nodeID sql.NullInt64
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT mihomo_node_id FROM proxies WHERE id=1`).Scan(&nodeID))
+			require.False(t, nodeID.Valid, "historical proxies must not acquire a managed node")
 			var preservesLedger bool
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT jsonb_object_agg(filename, checksum) @> $1::jsonb FROM schema_migrations`, oldLedger).Scan(&preservesLedger))
@@ -172,11 +180,11 @@ func transitionBusinessSnapshot(t *testing.T, db *sql.DB) map[string]string {
 		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only' ORDER BY id), '[]')::text FROM groups t`,
 		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'concurrency_limit' ORDER BY id), '[]')::text FROM api_keys t`,
 		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'conversion_used_usd'-'conversion_usage_complete' ORDER BY id), '[]')::text FROM user_subscriptions t`,
-		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount' ORDER BY id), '[]')::text FROM payment_orders t`,
+		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount'-'subscription_renewal_mode' ORDER BY id), '[]')::text FROM payment_orders t`,
 		"usage":         `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM usage_logs t`,
 		"credentials":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'extra'-'updated_at'-'group_rate_multiplier' ORDER BY id), '[]')::text FROM accounts t`,
 		"memberships":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'allowed_models' ORDER BY account_id,group_id), '[]')::text FROM account_groups t`,
-		"proxies":       `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM proxies t`,
+		"proxies":       `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'mihomo_node_id' ORDER BY id), '[]')::text FROM proxies t`,
 	}
 	result := make(map[string]string, len(queries))
 	for key, query := range queries {
