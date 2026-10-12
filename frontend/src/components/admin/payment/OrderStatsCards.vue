@@ -25,7 +25,7 @@
           <Icon name="creditCard" size="md" class="text-blue-600 dark:text-blue-400" :stroke-width="2" />
         </div>
         <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('payment.admin.totalRevenue') }}</p>
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('payment.admin.dateFilter.periodRevenue') }}</p>
           <p v-for="[currency, amount] in sortedAmounts(stats.total_amount)" :key="currency" class="text-xl font-bold text-gray-900 dark:text-white">
             {{ formatMoney(currency, amount) }}
           </p>

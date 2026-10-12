@@ -68,6 +68,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
+	src/api/__tests__/payment.dashboard.spec.ts \
+	src/components/admin/payment/__tests__ \
+	src/views/admin/orders/__tests__/AdminPaymentDashboardView.spec.ts \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/components/settings/ServerlessSettings.spec.ts \
