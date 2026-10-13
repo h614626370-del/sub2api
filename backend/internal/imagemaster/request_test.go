@@ -60,9 +60,6 @@ func TestImageMasterUnsupportedTextRequestsNeverDispatch(t *testing.T) {
 		"history ID":          func(v, _ map[string]any) { v["previous_response_id"] = "resp_previous" },
 		"conversation":        func(v, _ map[string]any) { v["conversation"] = "conv_previous" },
 		"prompt template":     func(v, _ map[string]any) { v["prompt"] = map[string]any{"id": "hidden-template"} },
-		"unknown top-level":   func(v, _ map[string]any) { v["future_context"] = "do not discard" },
-		"text constraint":     func(v, _ map[string]any) { v["text"] = map[string]any{"format": "json"} },
-		"reasoning":           func(v, _ map[string]any) { v["reasoning"] = map[string]any{"effort": "high"} },
 		"store response":      func(v, _ map[string]any) { v["store"] = true },
 		"message history": func(v, _ map[string]any) {
 			v["input"] = []any{map[string]any{"role": "user", "id": "msg_old", "content": "draw"}}
@@ -77,9 +74,8 @@ func TestImageMasterUnsupportedTextRequestsNeverDispatch(t *testing.T) {
 		"unknown content": func(v, _ map[string]any) {
 			v["input"] = []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_file", "file_id": "file_test"}}}}
 		},
-		"no tool selected":    func(v, _ map[string]any) { v["tool_choice"] = "none" },
-		"unknown tool option": func(_ map[string]any, tool map[string]any) { tool["future_instruction"] = "do not lose" },
-		"multiple output":     func(_ map[string]any, tool map[string]any) { tool["n"] = 2 },
+		"no tool selected": func(v, _ map[string]any) { v["tool_choice"] = "none" },
+		"multiple output":  func(_ map[string]any, tool map[string]any) { tool["n"] = 2 },
 		"mask without image": func(_ map[string]any, tool map[string]any) {
 			tool["input_image_mask"] = map[string]any{"image_url": testImage(t)}
 		},
@@ -96,6 +92,44 @@ func TestImageMasterUnsupportedTextRequestsNeverDispatch(t *testing.T) {
 			require.NoError(t, err)
 			w := serve(t, m, raw, func(http.ResponseWriter, *http.Request) { t.Error("must not dispatch") })
 			require.Equal(t, 400, w.Code)
+		})
+	}
+}
+
+func TestImageMasterIgnoresUnconvertedOptions(t *testing.T) {
+	for name, change := range map[string]func(map[string]any, map[string]any){
+		"sequential tools": func(v, _ map[string]any) { v["parallel_tool_calls"] = false },
+		"parallel tools":   func(v, _ map[string]any) { v["parallel_tool_calls"] = true },
+		"unknown controller option": func(v, _ map[string]any) {
+			v["future_context"] = map[string]any{"value": "ignored"}
+		},
+		"text constraint": func(v, _ map[string]any) { v["text"] = map[string]any{"format": "json"} },
+		"reasoning":       func(v, _ map[string]any) { v["reasoning"] = map[string]any{"effort": "high"} },
+		"unknown image option": func(_ map[string]any, tool map[string]any) {
+			tool["future_instruction"] = "ignored"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := textRequest(false)
+			baseline, err := Prepare(raw)
+			require.NoError(t, err)
+			expected, contentType, err := baseline.encode(context.Background(), 1<<20, nil)
+			require.NoError(t, err)
+
+			var v map[string]any
+			require.NoError(t, json.Unmarshal(raw, &v))
+			change(v, firstImageTool(t, v))
+			raw, err = json.Marshal(v)
+			require.NoError(t, err)
+			original := append([]byte(nil), raw...)
+
+			p, err := Prepare(raw)
+			require.NoError(t, err)
+			actual, actualContentType, err := p.encode(context.Background(), 1<<20, nil)
+			require.NoError(t, err)
+			require.Equal(t, contentType, actualContentType)
+			require.JSONEq(t, string(expected), string(actual))
+			require.Equal(t, original, raw)
 		})
 	}
 }

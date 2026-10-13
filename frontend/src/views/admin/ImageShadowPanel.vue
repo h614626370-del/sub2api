@@ -14,17 +14,27 @@
           <label class="toggle"><input v-model="draft.enabled" type="checkbox" role="switch" data-testid="shadow-enabled" />{{ t('imageMaster.shadowEnable') }}</label>
           <div class="fields">
             <label>{{ t('imageMaster.shadowGroup') }}
-              <select v-model.number="draft.group_id" class="input" :required="draft.enabled" data-testid="shadow-group">
+              <select v-model.number="draft.group_id" class="input" :required="draft.enabled" data-testid="shadow-group" @change="draft.api_key_id = 0">
                 <option :value="0" disabled>{{ t('imageMaster.shadowSelectGroup') }}</option>
                 <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} · #{{ group.id }}</option>
                 <option v-if="draft.group_id && !groups.some(g => g.id === draft!.group_id)" :value="draft.group_id">#{{ draft.group_id }} · {{ t('imageMaster.shadowUnavailable') }}</option>
               </select>
             </label>
-            <label>{{ t('imageMaster.shadowKey') }}<input v-model.number="draft.api_key_id" class="input" type="number" :min="draft.enabled ? 1 : 0" step="1" :required="draft.enabled" data-testid="shadow-key" /></label>
+            <div class="key-field">
+              <label for="shadow-key">{{ t('imageMaster.shadowKey') }}</label>
+              <Select id="shadow-key" v-model="draft.api_key_id" :options="keyOptions"
+                :searchable="true" :loading="keysLoading" :disabled="saving || keysLoading || !draft.group_id"
+                :placeholder="t(keysLoading ? 'imageMaster.loading' : 'imageMaster.shadowSelectKey')"
+                :empty-text="t('imageMaster.shadowNoKeys')" :aria-label="t('imageMaster.shadowKey')" data-testid="shadow-key" />
+              <div v-if="keysError" role="alert" class="key-error">
+                {{ t('imageMaster.shadowKeysError') }}
+                <button type="button" class="btn btn-secondary" :disabled="keysLoading" @click="loadKeys(draft.group_id)">{{ t('imageMaster.refresh') }}</button>
+              </div>
+            </div>
           </div>
           <p class="help">{{ t('imageMaster.shadowBilling') }}</p>
           <p class="help">{{ t('imageMaster.shadowLimits') }}</p>
-          <div class="save-row"><button class="btn btn-primary" :disabled="saving || loading || !dirty" type="submit">{{ t(saving ? 'imageMaster.loading' : 'imageMaster.save') }}</button></div>
+          <div class="save-row"><button class="btn btn-primary" :disabled="saving || loading || !dirty || invalidKey" type="submit">{{ t(saving ? 'imageMaster.loading' : 'imageMaster.save') }}</button></div>
         </fieldset>
       </form>
       <div class="section-heading"><div><h2>{{ t('imageMaster.shadowComparison') }}</h2><p class="help">{{ t('imageMaster.shadowDenominator', { count: paired.length }) }}</p></div><button class="btn btn-secondary" :disabled="loading || saving" @click="load">{{ t('imageMaster.refresh') }}</button></div>
@@ -63,7 +73,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { imageMasterAPI, type ShadowConfig, type ShadowRecord, type ShadowStatus } from '@/api/admin/imageMaster'
-import { getAll } from '@/api/admin/groups'
+import { getAll, getGroupApiKeys } from '@/api/admin/groups'
+import Select from '@/components/common/Select.vue'
+import type { ApiKey } from '@/types'
+type ShadowKey = Pick<ApiKey, 'id' | 'name' | 'user_id' | 'group_id' | 'status' | 'expires_at' | 'quota' | 'quota_used'> & {
+  user?: { username?: string; email?: string }
+}
 const { t } = useI18n()
 const data = ref<ShadowStatus | null>(null), draft = ref<ShadowConfig | null>(null)
 const groups = ref<{ id: number; name: string }[]>([])
@@ -71,6 +86,56 @@ const loading = ref(false), saving = ref(false), error = ref(''), notice = ref('
 const search = ref(''), filter = ref(''), page = ref(1)
 let alive = true, timer: ReturnType<typeof setInterval> | undefined
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(data.value?.config))
+const keys = ref<ShadowKey[]>([])
+const keysLoading = ref(false), keysError = ref(false)
+let keysRequest = 0
+const usableKey = (key: ShadowKey) => key.status === 'active'
+  && (!key.expires_at || new Date(key.expires_at).getTime() > Date.now())
+  && (!key.quota || key.quota_used < key.quota)
+const keyOptions = computed(() => {
+  const options = keys.value.map(key => ({
+    value: key.id,
+    label: `${key.name} · ${key.user?.username || key.user?.email || t('imageMaster.user')} #${key.user_id} · Key #${key.id}${usableKey(key) ? '' : ` · ${t('imageMaster.shadowKeyUnavailable')}`}`,
+    disabled: !usableKey(key)
+  }))
+  const selected = draft.value?.api_key_id
+  if (selected && !options.some(option => option.value === selected)) {
+    options.push({ value: selected, label: `#${selected} · ${t(keysLoading.value ? 'imageMaster.loading' : 'imageMaster.shadowKeyUnavailable')}`, disabled: true })
+  }
+  return options
+})
+const invalidKey = computed(() => draft.value?.enabled && (keysLoading.value || keysError.value
+  || !keys.value.some(key => key.id === draft.value?.api_key_id && usableKey(key))))
+async function loadKeys(groupId: number) {
+  const request = ++keysRequest
+  keys.value = []; keysError.value = false; keysLoading.value = !!groupId
+  if (!groupId) return
+  try {
+    const collected: ShadowKey[] = []
+    let nextPage = 1
+    while (true) {
+      const result = await getGroupApiKeys(groupId, nextPage, 100)
+      if (!alive || request !== keysRequest) return
+      // Keep only display metadata, never the API key secret.
+      for (const key of result.items) {
+        if (key.group_id !== groupId) continue
+        collected.push({
+          id: key.id, name: key.name, user_id: key.user_id, group_id: key.group_id,
+          status: key.status, expires_at: key.expires_at, quota: key.quota, quota_used: key.quota_used,
+          user: key.user ? { username: key.user.username, email: key.user.email } : undefined
+        })
+      }
+      if (nextPage >= result.pages || !result.items.length) break
+      nextPage++
+    }
+    keys.value = collected
+  } catch {
+    if (alive && request === keysRequest) keysError.value = true
+  } finally {
+    if (alive && request === keysRequest) keysLoading.value = false
+  }
+}
+watch(() => draft.value?.group_id, groupId => { void loadKeys(groupId || 0) })
 const known = (value: string) => ['completed', 'failed', 'no_image', 'disconnected'].includes(value)
 const paired = computed(() => data.value?.items.filter(r => known(r.original.outcome) && ['completed', 'failed'].includes(r.test.outcome)) || [])
 const unsupported = computed(() => data.value?.items.filter(r => r.test.outcome === 'unsupported').length || 0)
@@ -110,7 +175,7 @@ async function load() {
   finally { loading.value = false }
 }
 async function save() {
-  if (!draft.value || saving.value || loading.value) return
+  if (!draft.value || saving.value || loading.value || invalidKey.value) return
   saving.value = true; error.value = ''; notice.value = ''
   try {
     const saved = await imageMasterAPI.saveShadow({ ...draft.value })
@@ -144,6 +209,8 @@ h2 { font-size: 16px; font-weight: 600; }
 .toggle input { width: 16px; height: 16px; accent-color: #008577; }
 .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 20px 0 12px; }
 .fields label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; min-width: 0; }
+.key-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.key-error { color: #a32437; font-size: 12px; }
 .save-row { margin-top: 16px; display: flex; justify-content: flex-end; }
 .section-heading { margin: 24px 0 12px; }.pager { display: flex; gap: 8px; }
 .comparison-scroll { overflow-x: auto; }

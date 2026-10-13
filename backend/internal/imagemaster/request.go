@@ -63,19 +63,10 @@ func Prepare(raw []byte) (*Plan, error) {
 	if json.Unmarshal(raw, &body) != nil || body == nil {
 		return nil, fail(400, "invalid_json")
 	}
-	for name, value := range body {
-		switch name {
-		case "model", "input", "instructions", "tools", "tool_choice", "stream", "background",
-			"previous_response_id", "conversation", "prompt":
-		case "store":
-			if value != nil && value != false {
-				return nil, fail(400, "response_storage_not_supported")
-			}
-		default:
-			if value != nil {
-				return nil, fail(400, "unsupported_response_option")
-			}
-		}
+	// Controller-only and unknown options stay on the original request;
+	// direct image conversion extracts only the fields it can represent.
+	if value := body["store"]; value != nil && value != false {
+		return nil, fail(400, "response_storage_not_supported")
 	}
 	model, _ := body["model"].(string)
 	if !modelName.MatchString(model) {
@@ -105,14 +96,6 @@ func Prepare(raw []byte) (*Plan, error) {
 		n, ok := value.(float64)
 		if !ok || n < 0 || n > 3 || n != float64(int(n)) {
 			return nil, fail(400, "invalid_image_option")
-		}
-	}
-	for name := range tool {
-		switch name {
-		case "type", "model", "n", "action", "partial_images", "input_image_mask",
-			"size", "quality", "background", "output_format", "output_compression", "moderation", "input_fidelity", "style":
-		default:
-			return nil, fail(400, "unsupported_image_option")
 		}
 	}
 	if action := tool["action"]; action != nil && action != "auto" && action != "edit" && action != "generate" {
