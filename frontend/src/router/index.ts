@@ -559,6 +559,7 @@ const routes: RouteRecordRaw[] = [
   },
   { path: '/admin/priority-scheduling', name: 'AdminPriorityScheduling', component: () => import('@/views/admin/PrioritySchedulingView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Priority scheduling', titleKey: 'priorityScheduling.title' } },
   { path: '/admin/auto-config', name: 'AdminAutoConfig', component: () => import('@/views/admin/AutoConfigView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Auto Configuration', titleKey: 'autoConfig.title' } },
+  { path: '/admin/group-cache-tests', name: 'AdminGroupCacheTests', component: () => import('@/views/admin/GroupCacheTestView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Group cache test', titleKey: 'admin.groupCacheTest.title', descriptionKey: 'admin.groupCacheTest.description' } },
   { path: '/admin/smart-ops', redirect: '/admin/account-quality', meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/admin/subscription-conversion', name: 'AdminSubscriptionConversion', component: () => import('@/views/admin/SubscriptionConversionView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: 'Subscription to balance', titleKey: 'subscriptionConversion.title' } },
   { path: '/admin/my-operations', redirect: '/admin/image-master', meta: { requiresAuth: true, requiresAdmin: true } },

@@ -125,3 +125,56 @@ func TestSubscriptionConversionTaskFailureKeepsLease(t *testing.T) {
 		})
 	}
 }
+
+func TestWrapUsageRecordTaskContextPreservesBothBillingGuards(t *testing.T) {
+	for _, mode := range []string{"complete", "abandon", "panic"} {
+		t.Run(mode, func(t *testing.T) {
+			lease, mock := conversionTaskLease(t)
+			cache := newHandlerInflightCache(1)
+			cfg := &config.Config{}
+			cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
+			billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(billing.Stop)
+
+			apiKey := &service.APIKey{User: &service.User{ID: 66}}
+			reservation, err := billing.ReserveInflight(context.Background(), apiKey.User, nil, nil, 0.9)
+			require.NoError(t, err)
+			require.NotNil(t, reservation)
+			parent := service.WithInflightReservation(
+				service.WithSubscriptionConversionLease(context.Background(), lease), reservation,
+			)
+			ran := false
+			task, abandon := wrapUsageRecordTaskContext(parent, func(ctx context.Context) {
+				ran = true
+				require.Same(t, lease, service.SubscriptionConversionLeaseFromContext(ctx))
+				if mode == "panic" {
+					panic("billing failed")
+				}
+			})
+			reservation.HandlerDone()
+			require.Equal(t, 1, cache.count(), "queued billing must retain the balance reservation")
+
+			switch mode {
+			case "complete":
+				task(context.Background())
+			case "abandon":
+				abandon()
+			case "panic":
+				require.Panics(t, func() { task(context.Background()) })
+			}
+			abandon() // Cleanup must be idempotent, including after successful billing.
+			require.Equal(t, mode != "abandon", ran)
+			require.Zero(t, cache.count())
+			require.True(t, lease.Retain(), "the HTTP owner's subscription reference must survive task cleanup")
+			lease.Release()
+			if mode == "complete" {
+				mock.ExpectExec("DELETE FROM subscription_conversion_leases WHERE id=").
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			} else {
+				mock.ExpectExec("UPDATE subscription_conversion_leases SET state='unsettled'").
+					WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			lease.Release()
+		})
+	}
+}

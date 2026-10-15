@@ -106,6 +106,10 @@ func TestH614626370TransitionUpgrade(t *testing.T) {
 
 			require.NoError(t, ApplyMigrations(ctx, db))
 			require.Equal(t, before, transitionBusinessSnapshot(t, db), "business data changed")
+			var localizedGroups int
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT count(*) FROM groups WHERE i18n <> '{}'::jsonb`).Scan(&localizedGroups))
+			require.Zero(t, localizedGroups, "historical groups must retain their original display text")
 			if version != "upstream" {
 				var used string
 				var complete bool
@@ -177,7 +181,7 @@ func transitionBusinessSnapshot(t *testing.T, db *sql.DB) map[string]string {
 	t.Helper()
 	queries := map[string]string{
 		"users":         `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'observer_group_ids' ORDER BY id), '[]')::text FROM users t`,
-		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only' ORDER BY id), '[]')::text FROM groups t`,
+		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only'-'i18n' ORDER BY id), '[]')::text FROM groups t`,
 		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'concurrency_limit' ORDER BY id), '[]')::text FROM api_keys t`,
 		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'conversion_used_usd'-'conversion_usage_complete' ORDER BY id), '[]')::text FROM user_subscriptions t`,
 		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount'-'subscription_renewal_mode' ORDER BY id), '[]')::text FROM payment_orders t`,
