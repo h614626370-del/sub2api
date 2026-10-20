@@ -118,13 +118,16 @@ func TestH614626370TransitionUpgrade(t *testing.T) {
 				require.Equal(t, "9.8765432100", used, "historical counters must seed lifetime consumption")
 				require.False(t, complete, "missing historical billing logs must block conversion")
 			}
-			var nonDefaultKeys, nonDefaultOrders int
+			var nonDefaultKeys, nonDefaultOrders, restrictedGroups int
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT count(*) FROM api_keys WHERE concurrency_limit <> 0`).Scan(&nonDefaultKeys))
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT count(*) FROM payment_orders WHERE bonus_amount <> 0`).Scan(&nonDefaultOrders))
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT count(*) FROM groups WHERE codex_cli_only OR block_subagents`).Scan(&restrictedGroups))
 			require.Zero(t, nonDefaultKeys, "new concurrency limits must preserve unrestricted keys")
 			require.Zero(t, nonDefaultOrders, "historical orders must not acquire a bonus")
+			require.Zero(t, restrictedGroups, "historical groups must not acquire client or subagent restrictions")
 			var renewalMode string
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT subscription_renewal_mode FROM payment_orders WHERE id=1`).Scan(&renewalMode))
@@ -181,7 +184,7 @@ func transitionBusinessSnapshot(t *testing.T, db *sql.DB) map[string]string {
 	t.Helper()
 	queries := map[string]string{
 		"users":         `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'observer_group_ids' ORDER BY id), '[]')::text FROM users t`,
-		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only'-'i18n' ORDER BY id), '[]')::text FROM groups t`,
+		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only'-'i18n'-'codex_cli_only'-'block_subagents' ORDER BY id), '[]')::text FROM groups t`,
 		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'concurrency_limit' ORDER BY id), '[]')::text FROM api_keys t`,
 		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'conversion_used_usd'-'conversion_usage_complete' ORDER BY id), '[]')::text FROM user_subscriptions t`,
 		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount'-'subscription_renewal_mode' ORDER BY id), '[]')::text FROM payment_orders t`,
