@@ -1,5 +1,7 @@
 import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
+import securityRecords from './securityRecords'
+import siwc from './siwc'
 import priorityScheduling from './priorityScheduling'
 import qualityOps from './qualityOps'
 import controlledExperiments from './controlledExperiments'
@@ -25,6 +27,8 @@ import autoConfig from './autoConfig'
 export default {
   subscriptionConversion,
   imageMaster,
+  securityRecords,
+  siwc,
   autoConfig,
   priorityScheduling,
   qualityOps,
