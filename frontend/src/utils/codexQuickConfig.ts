@@ -1,4 +1,5 @@
 import type { GroupPlatform } from '@/types'
+import { GROK_CC_SWITCH_MODEL, OPENAI_CC_SWITCH_CODEX_MODEL } from '@/utils/ccswitchImport'
 
 export const CODEX_QUICK_CONFIG_PLATFORMS = [
   'openai',
@@ -33,17 +34,17 @@ export interface CodexQuickConfigInput {
 }
 
 const preferredModels: Record<CodexQuickConfigPlatform, string> = {
-  openai: 'gpt-5.5',
+  openai: OPENAI_CC_SWITCH_CODEX_MODEL,
   anthropic: 'claude-sonnet-4-6',
   gemini: 'gemini-2.5-pro',
   antigravity: 'claude-sonnet-4-6',
-  grok: 'grok-4.5',
+  grok: GROK_CC_SWITCH_MODEL,
   kimi: 'kimi-k2.5',
   zhipu: 'glm-4.7',
   deepseek: 'deepseek-v4-pro',
   minimax: 'MiniMax-M3',
   opencode_go: 'glm-5.3',
-  composite: 'gpt-5.5'
+  composite: OPENAI_CC_SWITCH_CODEX_MODEL
 }
 
 const providerNames: Record<CodexQuickConfigPlatform, string> = {

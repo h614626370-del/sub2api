@@ -281,6 +281,7 @@ import {
   parseCodexCatalogModels,
   selectCodexConfigReasoningEffort
 } from '@/utils/codexCatalogConfig'
+import { GROK_CC_SWITCH_MODEL, OPENAI_CC_SWITCH_CODEX_MODEL } from '@/utils/ccswitchImport'
 
 interface Props {
   show: boolean
@@ -921,12 +922,12 @@ function generateGrokClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] 
   const environment = {
     ANTHROPIC_BASE_URL: baseUrl,
     ANTHROPIC_AUTH_TOKEN: apiKey,
-    ANTHROPIC_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_FABLE_MODEL: 'grok-4.5',
-    CLAUDE_CODE_SUBAGENT_MODEL: 'grok-4.5',
+    ANTHROPIC_MODEL: GROK_CC_SWITCH_MODEL,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: GROK_CC_SWITCH_MODEL,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: GROK_CC_SWITCH_MODEL,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: GROK_CC_SWITCH_MODEL,
+    ANTHROPIC_DEFAULT_FABLE_MODEL: GROK_CC_SWITCH_MODEL,
+    CLAUDE_CODE_SUBAGENT_MODEL: GROK_CC_SWITCH_MODEL,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
   }
   let path: string
@@ -1022,7 +1023,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
-  const model = selectCodexCatalogModel('gpt-5.5')
+  const model = selectCodexCatalogModel(OPENAI_CC_SWITCH_CODEX_MODEL)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content
@@ -1141,10 +1142,10 @@ cli_chat_proxy_base_url = "${baseUrl}"      # CLI chat-proxy base (env: GROK_CLI
 [auth]
 preferred_method = "api_key"
 
-[model."grok-4.5"]
-model = "grok-4.5"                          # id sent to the API
-name = "Grok 4.5"                           # shown in /model picker
-description = "Grok 4.5 via Sub2API (Responses)"
+[model."${GROK_CC_SWITCH_MODEL}"]
+model = "${GROK_CC_SWITCH_MODEL}"            # id sent to the API
+name = "Grok 4.7"                           # shown in /model picker
+description = "Grok 4.7 via Sub2API (Responses)"
 # base_url inherits from [endpoints].models_base_url; override only if needed:
 # base_url = "${baseUrl}"
 env_key = "XAI_API_KEY"                     # or: api_key = "${apiKey}"  (not recommended)
@@ -1186,7 +1187,7 @@ supports_backend_search = true
 
 # Optional short alias for /model grok:
 # [model."grok"]
-# model = "grok-4.5"
+# model = "${GROK_CC_SWITCH_MODEL}"
 # name = "Grok"
 # env_key = "XAI_API_KEY"
 # api_backend = "responses"
@@ -1194,10 +1195,10 @@ supports_backend_search = true
 # supports_backend_search = true
 
 [models]
-# xAI recommends grok-build* for coding/agent sessions; use grok-4.5 for general chat.
-default = "grok-4.5"
-web_search = "grok-4.5"                     # client-side web_search tool model (must exist as [model.*])
-image_description = "grok-4.5"              # vision/describe-image helper model
+# xAI recommends grok-build* for coding/agent sessions; use Grok 4.7 for general chat.
+default = "${GROK_CC_SWITCH_MODEL}"
+web_search = "${GROK_CC_SWITCH_MODEL}"       # client-side web_search tool model (must exist as [model.*])
+image_description = "${GROK_CC_SWITCH_MODEL}" # vision/describe-image helper model
 # Optional environment-wide sampling defaults (per-model values win):
 # temperature = 0.7
 # top_p = 0.95
@@ -1235,7 +1236,7 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const shell = activeTab.value
   const isWindowsPath = shell === 'windows' || shell === 'cmd' || shell === 'powershell'
   const configDir = isWindowsPath ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel('grok-4.5')
+  const model = selectCodexCatalogModel(GROK_CC_SWITCH_MODEL)
 
   let envPath: string
   let envContent: string
@@ -1258,7 +1259,7 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
 # Docs: Codex config reference (model_providers.*, wire_api = "responses")
 #
 # Text models only. Image/video: grok-imagine-image / grok-imagine-video on media endpoints.
-# Switch model: grok-4.5 | grok-4.3 | grok-build-0.1 | grok-4.20-multi-agent-0309 (text / web_search)
+# Switch model: ${GROK_CC_SWITCH_MODEL} | grok-4.3 | grok-build-0.1 | grok-4.20-multi-agent-0309 (text / web_search)
 
 model_provider = "sub2api"
 model = "${model}"
@@ -1304,17 +1305,17 @@ function generateRoutedCodexFiles(
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   const preferredModels: Partial<Record<GroupPlatform, string>> = {
-    openai: 'gpt-5.5',
+    openai: OPENAI_CC_SWITCH_CODEX_MODEL,
     anthropic: 'claude-sonnet-4-6',
     gemini: 'gemini-2.5-pro',
     antigravity: 'claude-sonnet-4-6',
-    grok: 'grok-4.5',
+    grok: GROK_CC_SWITCH_MODEL,
     kimi: 'kimi-k2.5',
     zhipu: 'glm-4.7',
     deepseek: 'deepseek-v4-pro',
     minimax: 'MiniMax-M3',
     opencode_go: 'glm-5.3',
-    composite: 'gpt-5.5'
+    composite: OPENAI_CC_SWITCH_CODEX_MODEL
   }
   const preferredModel = preferredModels[platform] || ''
   const model = selectCodexCatalogModel(preferredModel)
@@ -1370,7 +1371,7 @@ supports_websockets = false${codexModelCatalogMode.value === 'remote' ? '\n\n[fe
 function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
-  const model = selectCodexCatalogModel('gpt-5.5')
+  const model = selectCodexCatalogModel(OPENAI_CC_SWITCH_CODEX_MODEL)
   const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content with WebSocket v2
@@ -1963,8 +1964,8 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
   // Align context_window with Grok Build official sample (docs.x.ai/build/settings) where known.
   // Image/video: grok-imagine-image / grok-imagine-video on media endpoints — not this list.
   const grokModels = {
-    'grok-4.5': {
-      name: 'Grok 4.5',
+    [GROK_CC_SWITCH_MODEL]: {
+      name: 'Grok 4.7',
       limit: { context: 500000, output: 64000 }
     },
     'grok-build-0.1': {

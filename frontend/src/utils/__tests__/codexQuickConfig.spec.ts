@@ -111,6 +111,20 @@ describe('codexQuickConfig', () => {
     expect(config).not.toContain('model_catalog_json')
   })
 
+  it.each([
+    ['openai', 'gpt-6-astra'],
+    ['composite', 'gpt-6-astra'],
+    ['grok', 'grok-4.7']
+  ] as const)('uses the selected default model for %s quick configs', (platform, model) => {
+    const config = buildCodexQuickConfigToml({
+      apiKey: 'sk-test',
+      baseUrl: 'https://example.com',
+      platform
+    })
+    expect(config).toContain(`model = "${model}"`)
+    expect(config).toContain(`review_model = "${model}"`)
+  })
+
   it('embeds model catalog data only when requested', () => {
     const catalog = '{"models":[{"slug":"gpt-test"}]}'
     const config = buildCodexQuickConfigToml({
