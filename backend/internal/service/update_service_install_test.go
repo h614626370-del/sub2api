@@ -72,6 +72,25 @@ func TestUpdateServicePendingRestartPrecedesReleaseLookup(t *testing.T) {
 	}
 }
 
+func TestUpdateServiceCachedCheckReportsPendingRestart(t *testing.T) {
+	cache := &updateServiceCacheStub{
+		data: map[string]string{
+			githubRepo: `{"latest":"2.1.0","timestamp":9999999999}`,
+		},
+	}
+	client := &updateInstallClient{}
+	svc := NewUpdateService(cache, client, "2.0.0", "release")
+	svc.restartRequired = true
+
+	info, err := svc.CheckUpdate(context.Background(), false)
+
+	require.NoError(t, err)
+	require.True(t, info.Cached)
+	require.True(t, info.RestartRequired)
+	require.True(t, info.HasUpdate)
+	require.Zero(t, client.latestCalls)
+}
+
 func TestUpdateServiceRequiresRestartBeforeNextMutation(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("in-place executable replacement requires Unix rename semantics")

@@ -97,7 +97,7 @@ describe('useAppStore', () => {
   describe('independent repository updates', () => {
     const custom: VersionInfo = {
       current_version: '2.10.0', latest_version: '2.10.0.1',
-      has_update: true, cached: false, build_type: 'release'
+      has_update: true, cached: false, build_type: 'release', restart_required: true
     }
     const upstream: VersionInfo = { ...custom, latest_version: '2.11.0' }
 
@@ -110,6 +110,7 @@ describe('useAppStore', () => {
       expect(checkUpdates).toHaveBeenCalledTimes(1)
       expect(checkUpstreamUpdates).toHaveBeenCalledTimes(1)
       expect(store.latestVersion).toBe('2.10.0.1')
+      expect(store.restartRequired).toBe(true)
       expect(store.upstreamVersionInfo?.latest_version).toBe('2.11.0')
       await Promise.all([store.fetchVersion(true), store.fetchUpstreamVersion(true)])
       expect(checkUpdates).toHaveBeenLastCalledWith(true)

@@ -33,6 +33,7 @@ describe('VersionBadge dual repositories', () => {
     mocks.auth.isAdmin = true
     mocks.app = reactive({
       currentVersion: '2.10.0', latestVersion: '2.10.0.1', hasUpdate: true,
+      restartRequired: false,
       buildType: 'release', versionLoaded: true, versionLoading: false, versionWarning: '',
       releaseInfo: { body: 'Custom release', html_url: 'https://github.com/h614626370-del/sub2api/releases/tag/v2.10.0.1' },
       upstreamVersionInfo: {
@@ -121,11 +122,47 @@ describe('VersionBadge dual repositories', () => {
     await open()
     await click('install-custom-update')
     expect(mocks.update).toHaveBeenCalledTimes(1)
+    expect(mocks.app.restartRequired).toBe(true)
     expect(element('restart-service')).not.toBeNull()
     expect(mocks.app.clearVersionCache).toHaveBeenCalled()
     await click('refresh-versions')
     expect(element('restart-service')).not.toBeNull()
     expect(mocks.restart).not.toHaveBeenCalled()
+  })
+
+  it('restores the restart action after the update panel is reopened', async () => {
+    mocks.update.mockResolvedValue({ need_restart: true })
+    await open()
+    await click('install-custom-update')
+    expect(element('restart-service')).not.toBeNull()
+
+    document.querySelector<HTMLButtonElement>('[aria-label="common.close"]')!.click()
+    await flushPromises()
+    wrapper?.unmount()
+    wrapper = undefined
+    await open()
+
+    expect(element('restart-service')).not.toBeNull()
+    expect(element('install-custom-update')).toBeNull()
+  })
+
+  it('shows the restart action when an update is rejected because restart is pending', async () => {
+    mocks.update.mockRejectedValue({
+      response: {
+        data: {
+          reason: 'SYSTEM_RESTART_REQUIRED',
+          message: 'restart the service before another update or rollback'
+        }
+      }
+    })
+    await open()
+
+    await click('install-custom-update')
+
+    expect(mocks.app.restartRequired).toBe(true)
+    expect(element('restart-service')).not.toBeNull()
+    expect(element('install-custom-update')).toBeNull()
+    expect(element('version-custom').querySelector('[role="alert"]')).toBeNull()
   })
 
   it('does not request restart when the backend reports already up to date', async () => {

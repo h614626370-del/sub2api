@@ -87,13 +87,14 @@ func NewUpdateService(cache UpdateCache, githubClient GitHubReleaseClient, versi
 
 // UpdateInfo contains update information
 type UpdateInfo struct {
-	CurrentVersion string       `json:"current_version"`
-	LatestVersion  string       `json:"latest_version"`
-	HasUpdate      bool         `json:"has_update"`
-	ReleaseInfo    *ReleaseInfo `json:"release_info,omitempty"`
-	Cached         bool         `json:"cached"`
-	Warning        string       `json:"warning,omitempty"`
-	BuildType      string       `json:"build_type"` // "source" or "release"
+	CurrentVersion  string       `json:"current_version"`
+	LatestVersion   string       `json:"latest_version"`
+	HasUpdate       bool         `json:"has_update"`
+	ReleaseInfo     *ReleaseInfo `json:"release_info,omitempty"`
+	Cached          bool         `json:"cached"`
+	Warning         string       `json:"warning,omitempty"`
+	BuildType       string       `json:"build_type"` // "source" or "release"
+	RestartRequired bool         `json:"restart_required"`
 }
 
 // ReleaseInfo contains GitHub release details
@@ -139,7 +140,11 @@ type GitHubAsset struct {
 
 // CheckUpdate checks for available updates
 func (s *UpdateService) CheckUpdate(ctx context.Context, force bool) (*UpdateInfo, error) {
-	return s.checkUpdate(ctx, force, githubRepo)
+	info, err := s.checkUpdate(ctx, force, githubRepo)
+	if info != nil {
+		info.RestartRequired = s.isRestartRequired()
+	}
+	return info, err
 }
 
 // CheckUpstreamUpdate is informational only; installation and rollback use githubRepo.
@@ -202,12 +207,16 @@ func (s *UpdateService) PerformUpdate(ctx context.Context) error {
 // Check before release lookups so pending restarts take precedence over network
 // failures and version checks. Mutations must also recheck under installMu.
 func (s *UpdateService) checkRestartRequired() error {
-	s.installMu.Lock()
-	defer s.installMu.Unlock()
-	if s.restartRequired {
+	if s.isRestartRequired() {
 		return ErrSystemRestartRequired
 	}
 	return nil
+}
+
+func (s *UpdateService) isRestartRequired() bool {
+	s.installMu.Lock()
+	defer s.installMu.Unlock()
+	return s.restartRequired
 }
 
 // applyReleaseAssets downloads the platform archive from the given release assets,

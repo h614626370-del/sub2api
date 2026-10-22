@@ -1,5 +1,7 @@
 import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
+import ipAudit from './ipAudit'
+import connections from './connections'
 import securityRecords from './securityRecords'
 import siwc from './siwc'
 import priorityScheduling from './priorityScheduling'
@@ -27,6 +29,8 @@ import autoConfig from './autoConfig'
 export default {
   subscriptionConversion,
   imageMaster,
+  ipAudit,
+  connections,
   securityRecords,
   siwc,
   autoConfig,

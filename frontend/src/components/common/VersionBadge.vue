@@ -104,20 +104,24 @@
 
             <template v-if="source.key === 'custom'">
               <p v-if="operationError" role="alert" class="break-words text-xs text-red-600 dark:text-red-400">{{ operationError }}</p>
-              <div v-if="updateSuccess" class="space-y-2 border-t border-gray-100 pt-3 dark:border-dark-700">
-                <p class="text-sm text-green-700 dark:text-green-400">
-                  {{ t(alreadyUpToDate ? 'version.upToDate' : successKind === 'rollback' ? 'version.rollbackComplete' : 'version.updateComplete') }}
+              <div v-if="needRestart" class="space-y-2 border-t border-gray-100 pt-3 dark:border-dark-700">
+                <p :class="updateSuccess
+                  ? 'text-sm text-green-700 dark:text-green-400'
+                  : 'text-xs text-gray-500 dark:text-dark-400'">
+                  {{ updateSuccess
+                    ? t(alreadyUpToDate ? 'version.upToDate' : successKind === 'rollback' ? 'version.rollbackComplete' : 'version.updateComplete')
+                    : t('version.restartRequired') }}
                 </p>
-                <template v-if="needRestart">
-                  <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('version.restartRequired') }}</p>
-                  <button type="button" data-testid="restart-service" class="btn btn-primary w-full"
-                    :disabled="busy" @click="handleRestart">
-                    <Icon name="refresh" size="sm" :class="{ 'animate-spin': restarting }" />
-                    {{ t(restarting ? 'version.restarting' : 'version.restartNow') }}
-                    <span v-if="restarting" class="tabular-nums">({{ restartCountdown }}s)</span>
-                  </button>
-                </template>
+                <button type="button" data-testid="restart-service" class="btn btn-primary w-full"
+                  :disabled="busy" @click="handleRestart">
+                  <Icon name="refresh" size="sm" :class="{ 'animate-spin': restarting }" />
+                  {{ t(restarting ? 'version.restarting' : 'version.restartNow') }}
+                  <span v-if="restarting" class="tabular-nums">({{ restartCountdown }}s)</span>
+                </button>
               </div>
+              <p v-else-if="updateSuccess" class="border-t border-gray-100 pt-3 text-sm text-green-700 dark:border-dark-700 dark:text-green-400">
+                {{ t(alreadyUpToDate ? 'version.upToDate' : successKind === 'rollback' ? 'version.rollbackComplete' : 'version.updateComplete') }}
+              </p>
               <template v-else>
                 <button v-if="source.hasUpdate && isReleaseBuild" type="button" data-testid="install-custom-update"
                   class="btn btn-primary w-full" :disabled="busy || source.loading || !!source.warning" @click="handleUpdate">
@@ -212,7 +216,7 @@ const restarting = ref(false)
 const busy = computed(() => updating.value || rollingBack.value || restarting.value)
 const operationError = ref('')
 const updateSuccess = ref(false)
-const needRestart = ref(false)
+const needRestart = computed(() => appStore.restartRequired)
 const alreadyUpToDate = ref(false)
 const successKind = ref<'update' | 'rollback'>('update')
 const restartCountdown = ref(0)
@@ -281,6 +285,15 @@ function errorMessage(error: unknown, fallback: string) {
   const err = error as { response?: { data?: { message?: string } }; message?: string }
   return err?.response?.data?.message || err?.message || t(fallback)
 }
+function handleOperationFailure(error: unknown, fallback: string) {
+  const err = error as { response?: { data?: { reason?: string } } }
+  if (err?.response?.data?.reason === 'SYSTEM_RESTART_REQUIRED') {
+    appStore.restartRequired = true
+    operationError.value = ''
+    return
+  }
+  operationError.value = errorMessage(error, fallback)
+}
 async function handleUpdate() {
   if (!isAdmin.value || busy.value || !isReleaseBuild.value || !appStore.hasUpdate || appStore.versionWarning) return
   updating.value = true
@@ -290,9 +303,9 @@ async function handleUpdate() {
     successKind.value = 'update'
     updateSuccess.value = true
     alreadyUpToDate.value = result.already_up_to_date === true
-    needRestart.value = result.need_restart === true
+    appStore.restartRequired = result.need_restart === true
     appStore.clearVersionCache()
-  } catch (error) { operationError.value = errorMessage(error, 'version.updateFailed') }
+  } catch (error) { handleOperationFailure(error, 'version.updateFailed') }
   finally { updating.value = false }
 }
 async function toggleRollbackPanel() {
@@ -314,10 +327,10 @@ async function handleRollback() {
     successKind.value = 'rollback'
     updateSuccess.value = true
     alreadyUpToDate.value = false
-    needRestart.value = result.need_restart === true
+    appStore.restartRequired = result.need_restart === true
     rollbackPanelOpen.value = false
     appStore.clearVersionCache()
-  } catch (error) { operationError.value = errorMessage(error, 'version.rollbackFailed') }
+  } catch (error) { handleOperationFailure(error, 'version.rollbackFailed') }
   finally { rollingBack.value = false }
 }
 function formatPublishedAt(value: string) {
