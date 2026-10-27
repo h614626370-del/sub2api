@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -632,6 +633,9 @@ func (s *OpenAIGatewayService) ForwardImages(
 	}
 	account = latest
 	if err := parsed.ValidateAccountModels(account, channelMappedModel); err != nil {
+		if imagepolicy.DirectOnly(ctx) && (account.Type == AccountTypeOAuth || account.Type == AccountTypeSetupToken) {
+			return nil, openAIImagesDirectRequiredError()
+		}
 		return nil, err
 	}
 	if account.IsSIWCEnabled() {
