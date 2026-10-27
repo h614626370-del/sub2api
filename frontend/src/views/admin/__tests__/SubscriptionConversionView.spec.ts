@@ -82,7 +82,7 @@ describe('Admin subscription conversion', () => {
     w.unmount()
   })
 
-  it.each(['not_purchased', 'pending_requests', 'unsettled_usage'])('shows %s without a convert button', async reason => {
+  it.each(['not_purchased', 'usage_incomplete', 'order_unavailable'])('shows %s without a convert button', async reason => {
     const f = fixture(); f.subscriptions[0].eligible = false; f.subscriptions[0].reason = reason
     vi.mocked(api.overview).mockResolvedValue(f)
     const w = await openUser()

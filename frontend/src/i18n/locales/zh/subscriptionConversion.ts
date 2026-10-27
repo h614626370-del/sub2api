@@ -12,8 +12,8 @@ export default {
   closed: '订阅转换已关闭', activeTitle: '当前有效订阅', empty: '该用户暂无有效订阅',
   group: '订阅', expiry: '到期时间', price: '购买售价', remainingTime: '剩余时间', remainingQuota: '剩余额度', monthlyQuota: '月额度', totalQuota: '订阅总额度', usedQuota: '累计用量', estimate: '预计到账', days: '{days} 天', orders: '购买订单',
   convert: '转换为余额', unavailable: '不可转换', details: '计算明细', timeRatio: '时间剩余比例', quotaRatio: '额度剩余比例',
-  confirmTitle: '确认转换此订阅', confirmHint: '转换成功后将立即撤销「{name}」。绑定该订阅分组的密钥将失去此订阅权益，后续调用按分组规则处理。', acknowledge: '我已了解：转换后无法恢复原订阅，关联订单不能再退款。', confirm: '确认转换', cancel: '取消', converting: '转换中…', success: '转换成功，已到账 ${amount}', stale: '页面中的金额是预估值，最终以确认时计算的金额为准。',
+  confirmTitle: '确认转换此订阅', confirmHint: '转换成功后将立即撤销「{name}」并增加余额，不等待请求结算。不会自动切换密钥分组，请通知用户自行切换；原分组调用可能报错。', acknowledge: '我已了解：转换后无法恢复原订阅，关联订单不能再退款。', confirm: '确认转换', cancel: '取消', converting: '转换中…', success: '转换成功，已到账 ${amount}', stale: '页面中的金额是预估值，最终以确认时计算的金额为准。',
   history: '转换记录', historyLimit: '展示最近 100 条，完整记录保存在后台。', historyEmpty: '还没有转换记录', convertedAt: '转换时间', credited: '实际到账', converted: '已转余额',
-  reasons: { not_purchased: '仅限付费购买；此订阅的支付来源无法确认', inactive: '订阅已失效或尚未开始', mixed_term: '期限包含非购买调整，无法折算', usage_incomplete: '历史用量不完整，无法准确折算', unsupported_quota: '仅支持设置月额度、未设置日／周额度的订阅', order_unavailable: '关联订单未完成、已退款或已申请退款', too_small: '可转换金额不足 0.000001 USD', pending_requests: '仍有请求或用量待结算，请稍后刷新重试', unsettled_usage: '有未成功结算的请求，请先核对结算情况' },
+  reasons: { not_purchased: '仅限付费购买；此订阅的支付来源无法确认', inactive: '订阅已失效或尚未开始', mixed_term: '期限包含非购买调整，无法折算', usage_incomplete: '历史用量不完整，无法准确折算', unsupported_quota: '仅支持设置月额度、未设置日／周额度的订阅', order_unavailable: '关联订单未完成、已退款或已申请退款', too_small: '可转换金额不足 0.000001 USD' },
   failed: '操作失败，请稍后重试'
 }

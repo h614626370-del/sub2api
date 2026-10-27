@@ -145,15 +145,6 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
 		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, client, cfg)
 		t.Cleanup(subscriptionService.Stop)
-		mock.ExpectBegin()
-		mock.ExpectQuery("SELECT id FROM user_subscriptions").
-			WithArgs(sub.ID, user.ID, service.SubscriptionStatusActive).
-			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(sub.ID))
-		mock.ExpectExec("INSERT INTO subscription_conversion_leases").
-			WithArgs(sqlmock.AnyArg(), sub.ID, user.ID).WillReturnResult(sqlmock.NewResult(0, 1))
-		mock.ExpectCommit()
-		mock.ExpectExec("DELETE FROM subscription_conversion_leases WHERE id=").
-			WillReturnResult(sqlmock.NewResult(0, 1))
 
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 

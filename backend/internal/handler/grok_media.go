@@ -432,13 +432,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
 
 		if err != nil {
-			// A video create can be accepted upstream even if its response is lost.
-			// Without a task ID we cannot prove that there will be no later charge.
-			if isGrokVideoCreateEndpoint(endpoint) {
-				if lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context()); lease != nil {
-					lease.MarkUnsettled()
-				}
-			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				if failoverClientGone(c) {
@@ -515,20 +508,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		}
 
 		h.gatewayService.ReportOpenAIAccountScheduleResult(account, grokMediaScheduleModel(account, routingModel, result), true, nil)
-		if isGrokVideoCreateEndpoint(endpoint) && strings.TrimSpace(result.ResponseID) == "" {
-			if lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context()); lease != nil {
-				lease.MarkUnsettled()
-			}
-		}
 		if miniMaxH3BaseCost != nil {
 			result.MiniMaxH3BaseCost = miniMaxH3BaseCost
 		}
 		if isGrokVideoCreateEndpoint(endpoint) && strings.TrimSpace(result.ResponseID) != "" {
-			if lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context()); lease != nil {
-				if holdErr := lease.HoldDeferredBilling(apiKey.ID, result.ResponseID); holdErr != nil {
-					reqLog.Error("grok_media.hold_video_billing_failed", zap.Error(holdErr))
-				}
-			}
 			if err := h.gatewayService.BindGrokMediaVideoRequestAccount(
 				requestCtx, apiKey.GroupID, result.ResponseID, subject.UserID, apiKey.ID, account.ID,
 			); err != nil {
@@ -559,9 +542,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					zap.Error(err),
 				)
 				if err2 := h.gatewayService.StoreGrokVideoPendingBilling(requestCtx, result.ResponseID, subject.UserID, apiKey.ID, pending); err2 != nil {
-					if lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context()); lease != nil {
-						lease.MarkUnsettled()
-					}
 					// Response body may already be committed; completion path will fail-closed
 					// when pending is still missing and status cannot price duration.
 					reqLog.Error("grok_media.store_video_pending_billing_failed",
@@ -821,7 +801,7 @@ func recordGrokMediaUsage(
 		}
 	}
 	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
-		err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 			Result:             result,
 			APIKey:             apiKey,
 			User:               apiKey.User,
@@ -836,15 +816,7 @@ func recordGrokMediaUsage(
 			QuotaPlatform:      quotaPlatform,
 			SessionID:          sessionID,
 			ChannelUsageFields: channelUsageFields,
-		})
-		if err == nil && videoTaskID != "" {
-			if lease := service.SubscriptionConversionLeaseFromContext(ctx); lease != nil {
-				if finishErr := lease.CompleteDeferredBilling(apiKey.ID, videoTaskID); finishErr != nil {
-					reqLog.Error("grok_media.finish_video_billing_hold_failed", zap.Error(finishErr))
-				}
-			}
-		}
-		if err != nil {
+		}); err != nil {
 			if videoTaskID != "" {
 				if releaseErr := h.gatewayService.ReleaseGrokVideoBilling(ctx, videoTaskID, subject.UserID, apiKey.ID); releaseErr != nil {
 					reqLog.Warn("grok_media.video_billing_claim_release_failed",

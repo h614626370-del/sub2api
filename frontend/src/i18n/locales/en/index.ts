@@ -1,6 +1,7 @@
 import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
 import ipAudit from './ipAudit'
+import traffic from './traffic'
 import connections from './connections'
 import securityRecords from './securityRecords'
 import siwc from './siwc'
@@ -29,6 +30,7 @@ import autoConfig from './autoConfig'
 export default {
   subscriptionConversion,
   imageMaster,
+  traffic,
   ipAudit,
   connections,
   securityRecords,

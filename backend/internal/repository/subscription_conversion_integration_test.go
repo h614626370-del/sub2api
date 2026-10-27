@@ -51,7 +51,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		g, err := client.Group.Create().SetName(fmt.Sprintf("Purchased monthly %d", u.ID)).SetSubscriptionType("subscription").SetMonthlyLimitUsd(100).Save(ctx)
 		require.NoError(t, err)
 		t.Cleanup(func() {
-			// Unsettled leases intentionally survive requests, but not test fixtures.
+			// Remove historical leases before deleting their subscription fixtures.
 			for _, query := range []string{
 				`DELETE FROM subscription_conversion_leases WHERE user_id=$1`,
 				`DELETE FROM subscription_conversions WHERE user_id=$1`,
@@ -115,6 +115,7 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		u, err := client.User.Get(ctx, f.user.ID)
 		require.NoError(t, err)
 		require.InDelta(t, 29.5, u.Balance, 0.001)
+		require.Equal(t, f.user.TotalRecharged, u.TotalRecharged, "conversion must not count as a new recharge")
 		operator, err := client.User.Get(ctx, admin.ID)
 		require.NoError(t, err)
 		require.Equal(t, 5.0, operator.Balance)
@@ -274,138 +275,35 @@ func TestSubscriptionConversionSettlement(t *testing.T) {
 		require.ErrorIs(t, err, service.ErrConversionDisabled)
 		require.NoError(t, settings.SetSubscriptionConversionSettings(ctx, &service.SubscriptionConversionSettings{Enabled: true}))
 	})
-	t.Run("request and queued billing must both finish before conversion", func(t *testing.T) {
-		f := create(t)
-		quote := overview(t, f).Quote
-		lease, err := svc.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-		require.NoError(t, err)
-		require.True(t, lease.Retain()) // usage task queued before the HTTP handler exits
-		lease.Release()                 // client already received the response
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.ErrorIs(t, err, service.ErrConversionPending)
-		require.Equal(t, "pending_requests", overview(t, f).Reason)
-		u, err := client.User.Get(ctx, f.user.ID)
-		require.NoError(t, err)
-		require.Equal(t, 10.0, u.Balance)
-		// The queued charge commits before its retained lease is released.
-		require.NoError(t, NewUserSubscriptionRepository(client).IncrementUsage(ctx, f.sub.ID, 10))
-		lease.Release()
-		p := overview(t, f)
-		require.True(t, p.Eligible, p.Reason)
-		require.Equal(t, "30.0000000000", p.UsedQuotaUSD)
-		r, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.NoError(t, err)
-		require.InDelta(t, 18, mustConversionAmount(t, r.AmountUSD), 0.001)
-		// Stale auth/cache state cannot admit another request after conversion.
-		_, err = svc.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-		require.ErrorIs(t, err, service.ErrConversionUnavailable)
-	})
-	t.Run("disconnect does not release pending settlement", func(t *testing.T) {
-		f := create(t)
-		quote := overview(t, f).Quote
-		requestCtx, cancel := context.WithCancel(ctx)
-		lease, err := svc.AcquireSubscriptionConversionLease(requestCtx, f.sub.ID, f.user.ID)
-		require.NoError(t, err)
-		cancel()
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.ErrorIs(t, err, service.ErrConversionPending)
-		lease.Release()
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.NoError(t, err)
-	})
-
-	t.Run("video remains pending across HTTP requests until its charge commits", func(t *testing.T) {
-		f := create(t)
-		quote := overview(t, f).Quote
-		createLease, err := svc.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-		require.NoError(t, err)
-		require.NoError(t, createLease.HoldDeferredBilling(71, "seedance:task-1"))
-		require.NoError(t, createLease.HoldDeferredBilling(71, "seedance:task-1")) // duplicate response cannot double-hold
-		createLease.Release()                                                      // video-create HTTP response already returned
-
-		other := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), NewUserSubscriptionRepository(client), nil, client, &config.Config{})
-		defer other.Stop()
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.ErrorIs(t, err, service.ErrConversionPending)
-		require.Equal(t, "pending_requests", overview(t, f).Reason)
-
-		pollLease, err := other.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-		require.NoError(t, err)
-		require.True(t, pollLease.Retain()) // the status request enqueues its billing task
-		pollLease.Release()                 // status HTTP response returned
-		require.NoError(t, NewUserSubscriptionRepository(client).IncrementUsage(ctx, f.sub.ID, 10))
-		require.NoError(t, pollLease.CompleteDeferredBilling(71, "seedance:task-1"))
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.ErrorIs(t, err, service.ErrConversionPending) // billing task still owns the poll lease
-		pollLease.Release()
-		p := overview(t, f)
-		require.True(t, p.Eligible, p.Reason)
-		require.Equal(t, "30.0000000000", p.UsedQuotaUSD)
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.NoError(t, err)
-	})
-
-	t.Run("failed video settlement stays blocked for reconciliation", func(t *testing.T) {
-		f := create(t)
-		quote := overview(t, f).Quote
-		createLease, err := svc.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-		require.NoError(t, err)
-		require.NoError(t, createLease.HoldDeferredBilling(72, "video-task-2"))
-		createLease.Release()
-		pollLease, err := svc.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-		require.NoError(t, err)
-		pollLease.MarkUnsettled() // RecordUsage returned a billing error
-		require.Error(t, pollLease.CompleteDeferredBilling(72, "video-task-2"))
-		pollLease.Release()
-		_, err = svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.ErrorIs(t, err, service.ErrConversionUnsettled)
-		require.Equal(t, "unsettled_usage", overview(t, f).Reason)
-	})
-	t.Run("failed settlement remains blocked across service instances", func(t *testing.T) {
-		f := create(t)
-		quote := overview(t, f).Quote
-		lease, err := svc.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-		require.NoError(t, err)
-		lease.MarkUnsettled()
-		lease.Release()
-		other := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), NewUserSubscriptionRepository(client), nil, client, &config.Config{})
-		defer other.Stop()
-		_, err = other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-		require.ErrorIs(t, err, service.ErrConversionUnsettled)
-		require.Equal(t, "unsettled_usage", overview(t, f).Reason)
-	})
-	t.Run("admission and conversion race has only one winner", func(t *testing.T) {
-		for i := 0; i < 12; i++ {
+	for _, state := range []string{"active", "unsettled"} {
+		t.Run("legacy "+state+" requests do not block conversion", func(t *testing.T) {
 			f := create(t)
 			quote := overview(t, f).Quote
-			start := make(chan struct{})
-			type admissionResult struct {
-				lease *service.SubscriptionConversionLease
-				err   error
-			}
-			admitted := make(chan admissionResult, 1)
-			converted := make(chan error, 1)
-			go func() {
-				<-start
-				lease, err := svc.AcquireSubscriptionConversionLease(ctx, f.sub.ID, f.user.ID)
-				admitted <- admissionResult{lease, err}
-			}()
-			go func() {
-				<-start
-				_, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
-				converted <- err
-			}()
-			close(start)
-			a, conversionErr := <-admitted, <-converted
-			if a.err == nil {
-				require.ErrorIs(t, conversionErr, service.ErrConversionPending)
-				a.lease.Release()
-			} else {
-				require.ErrorIs(t, a.err, service.ErrConversionUnavailable)
-				require.NoError(t, conversionErr)
-			}
-		}
-	})
+			_, err := client.ExecContext(ctx, `INSERT INTO subscription_conversion_leases(id,subscription_id,user_id,state,deferred_task_key) VALUES($1,$2,$3,$4,$5)`, fmt.Sprintf("legacy-%d", f.sub.ID), f.sub.ID, f.user.ID, state, fmt.Sprintf("video-%d", f.sub.ID))
+			require.NoError(t, err)
+			p := overview(t, f)
+			require.True(t, p.Eligible, p.Reason)
+			r, err := svc.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
+			require.NoError(t, err)
+			require.InDelta(t, 19.5, mustConversionAmount(t, r.AmountUSD), 0.001)
+			u, err := client.User.Get(ctx, f.user.ID)
+			require.NoError(t, err)
+			require.InDelta(t, 29.5, u.Balance, 0.001)
+			var status string
+			var revoked bool
+			err = integrationDB.QueryRowContext(ctx, `SELECT status,deleted_at IS NOT NULL FROM user_subscriptions WHERE id=$1`, f.sub.ID).Scan(&status, &revoked)
+			require.NoError(t, err)
+			require.Equal(t, service.SubscriptionStatusConverted, status)
+			require.True(t, revoked)
+			other := service.NewSubscriptionConversionService(svc)
+			repeated, err := other.ConvertToBalance(ctx, f.user.ID, f.sub.ID, quote, admin.ID)
+			require.NoError(t, err)
+			require.Equal(t, r.AmountUSD, repeated.AmountUSD)
+			u, err = client.User.Get(ctx, f.user.ID)
+			require.NoError(t, err)
+			require.InDelta(t, 29.5, u.Balance, 0.001)
+		})
+	}
 }
 
 func mustConversionAmount(t *testing.T, amount string) float64 {

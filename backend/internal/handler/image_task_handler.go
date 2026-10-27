@@ -93,7 +93,7 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		return
 	}
 	if err := h.validateRequest(c, platform, body); err != nil {
-		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		imageTaskValidationError(c, err)
 		return
 	}
 	if !h.checkSecurityAuditBeforeSubmit(c, apiKey, platform, body) {
@@ -122,18 +122,7 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		"poll_url":   pollURL,
 	})
 
-	lease := service.SubscriptionConversionLeaseFromContext(c.Request.Context())
-	if lease != nil {
-		if !lease.Retain() {
-			lease.MarkUnsettled()
-		}
-	}
-	go func() {
-		if lease != nil {
-			defer lease.Release()
-		}
-		h.run(task.ID, platform, taskCtx, recorder, cancel)
-	}()
+	go h.run(task.ID, platform, taskCtx, recorder, cancel)
 }
 
 func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKey *service.APIKey, platform string, body []byte) bool {
@@ -153,7 +142,7 @@ func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKe
 	} else if h.openAI.gatewayService != nil {
 		parsed, err := h.openAI.gatewayService.ParseOpenAIImagesRequest(c, body)
 		if err != nil {
-			imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			imageTaskValidationError(c, err)
 			return false
 		}
 		model, moderationBody = parsed.Model, parsed.ModerationBody()
@@ -235,9 +224,6 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 	defer cancel()
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			if lease := service.SubscriptionConversionLeaseFromContext(taskCtx.Request.Context()); lease != nil {
-				lease.MarkUnsettled()
-			}
 			logger.L().Error("image_task.execution_panicked", zap.String("task_id", taskID), zap.Any("panic", recovered))
 			h.failTask(taskID, http.StatusInternalServerError, imageTaskErrorPayload("api_error", "image generation task panicked"))
 		}
@@ -342,4 +328,13 @@ func imageTaskError(c *gin.Context, err error) {
 func imageTaskJSONError(c *gin.Context, status int, code, message string) {
 	c.Header("Cache-Control", "no-store")
 	c.JSON(status, gin.H{"error": gin.H{"type": code, "code": code, "message": message}})
+}
+
+// Authorization storage failure is temporary, not an invalid image request.
+func imageTaskValidationError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrImageModelAuthorizationUnavailable) {
+		imageTaskJSONError(c, http.StatusServiceUnavailable, "api_error", err.Error())
+		return
+	}
+	imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 }
