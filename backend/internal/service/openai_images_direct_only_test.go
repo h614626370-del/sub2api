@@ -100,6 +100,7 @@ func TestImagesDirectOnlyKeepsSuccessfulDirectPathAndUsage(t *testing.T) {
 	result, err := svc.ForwardImages(imagepolicy.WithDirectOnly(context.Background()), c, directImagesTestAccount(), body, parsed, "")
 	require.NoError(t, err)
 	require.Equal(t, 1, result.ImageCount)
+	require.True(t, result.ImageEndpoint)
 	require.Equal(t, 20, result.Usage.ImageOutputTokens)
 	require.Equal(t, "/backend-api/codex/images/generations", upstream.lastReq.URL.Path)
 }
@@ -116,6 +117,57 @@ func TestImagesDirectOnlyAPIKeyUsesImageEndpoint(t *testing.T) {
 	result, err := svc.ForwardImages(imagepolicy.WithDirectOnly(context.Background()), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.Equal(t, 1, result.ImageCount)
+	require.True(t, result.ImageEndpoint)
 	require.True(t, imagepolicy.DirectOnly(upstream.lastReq.Context()))
 	require.Equal(t, "https://image-upstream.example/v1/images/generations", upstream.lastReq.URL.String())
+}
+
+func TestImagesDirectOnlyPreservesImageCountBilling(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		accountType string
+		empty       bool
+		wantError   bool
+	}{
+		{name: "oauth-actual-count", accountType: AccountTypeOAuth},
+		{name: "apikey-actual-count", accountType: AccountTypeAPIKey},
+		{name: "apikey-count-fallback", accountType: AccountTypeAPIKey, empty: true},
+		{name: "oauth-empty-result", accountType: AccountTypeOAuth, empty: true, wantError: true},
+	} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/count-billing=%t", tc.name, enabled), func(t *testing.T) {
+				body := []byte(`{"model":"gpt-image-2","prompt":"draw","n":3}`)
+				c, _ := newOpenAIImagesTestContext(t, body)
+				c.Set("api_key", &APIKey{Group: &Group{ImageCountBilling: enabled}})
+				upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
+				if tc.empty {
+					upstream.resp.Body = io.NopCloser(strings.NewReader(`{"created":1,"data":[]}`))
+				}
+				svc := newOpenAIImagesTestService(upstream)
+				parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+				require.NoError(t, err)
+				account := directImagesTestAccount()
+				if tc.accountType == AccountTypeAPIKey {
+					account = &Account{ID: 6, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+						Credentials: map[string]any{"api_key": "synthetic-key", "base_url": "https://image-upstream.example/v1"}}
+				}
+				result, err := svc.ForwardImages(imagepolicy.WithDirectOnly(context.Background()), c, account, body, parsed, "")
+				if tc.wantError {
+					var failover *UpstreamFailoverError
+					require.ErrorAs(t, err, &failover)
+					require.Nil(t, result)
+					return
+				}
+				require.NoError(t, err)
+				require.True(t, result.ImageEndpoint)
+				wantCount := 1
+				if tc.empty && !enabled {
+					wantCount = 3
+				}
+				require.Equal(t, wantCount, result.ImageCount)
+				require.True(t, imagepolicy.DirectOnly(upstream.lastReq.Context()))
+				require.True(t, strings.HasSuffix(upstream.lastReq.URL.Path, "/images/generations"))
+			})
+		}
+	}
 }
