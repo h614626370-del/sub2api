@@ -4,6 +4,7 @@ package service
 // 负载感知调度、配额自动暂停判定、并发槽位获取。仅做代码搬迁，无任何行为变更。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -107,7 +108,8 @@ func explicitOpenAIRequestSessionID(c *gin.Context, body []byte) string {
 	if sessionID == "" && isGrokRequestContext(c) {
 		sessionID = strings.TrimSpace(c.GetHeader(grokConversationIDHeader))
 	}
-	if sessionID == "" && len(body) > 0 {
+	// Escaped keys still require the original envelope-aware lookup.
+	if sessionID == "" && (bytes.Contains(body, []byte("prompt_cache_key")) || bytes.Contains(body, []byte(`\u`))) {
 		sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
 	}
 	if sessionID == "" && isGrokRequestContext(c) && len(body) > 0 {
@@ -142,6 +144,9 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	if c != nil {
+		c.Set("openai_auth_connection_session_hash", currentHash)
+	}
 	return currentHash
 }
 
@@ -181,6 +186,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	if c != nil {
+		c.Set("openai_auth_connection_session_hash", currentHash)
+	}
 	return currentHash
 }
 
@@ -217,6 +225,9 @@ func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, b
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(seed)
 	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	if c != nil {
+		c.Set("openai_auth_connection_session_hash", currentHash)
+	}
 	return currentHash
 }
 
@@ -1125,6 +1136,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 	if len(eligible) == 0 {
 		return nil, compactBlocked, filterStats
 	}
+	feedback := s.defaultFeedbackPenalties(ctx, groupID, requestedModel, eligible)
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {
 		rateOrder = newOpenAILegacyUpstreamRateOrder(eligible, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
@@ -1146,7 +1158,8 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 			return rateCmp < 0
 		}
 		if a.Priority == b.Priority {
-			aRPM, bRPM := openAIRPMEffectiveLoad(ctx, a, 0), openAIRPMEffectiveLoad(ctx, b, 0)
+			aRPM := float64(openAIRPMEffectiveLoad(ctx, a, 0)) + feedback[a.ID]
+			bRPM := float64(openAIRPMEffectiveLoad(ctx, b, 0)) + feedback[b.ID]
 			if aRPM != bRPM {
 				return aRPM < bRPM
 			}
@@ -1458,6 +1471,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		return nil, noAvailableOpenAISelectionError(requestedModel, false, filterStats.summary(""))
 	}
+	feedback := s.defaultFeedbackPenalties(ctx, groupID, requestedModel, candidates)
 	rateOrder := openAILegacyUpstreamRateOrder{}
 	if preferLowUpstreamRate {
 		rateOrder = newOpenAILegacyUpstreamRateOrder(candidates, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
@@ -1467,7 +1481,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	for _, acc := range candidates {
 		accountLoads = append(accountLoads, AccountWithConcurrency{
 			ID:             acc.ID,
-			MaxConcurrency: acc.EffectiveLoadFactor(),
+			MaxConcurrency: acc.Concurrency,
 		})
 	}
 
@@ -1495,8 +1509,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if a.account.Priority != b.account.Priority {
 				return a.account.Priority < b.account.Priority
 			}
-			if a.loadInfo.LoadRate != b.loadInfo.LoadRate {
-				return a.loadInfo.LoadRate < b.loadInfo.LoadRate
+			aLoad := accountLoadPreferenceRate(a.account, a.loadInfo.LoadRate)
+			bLoad := accountLoadPreferenceRate(b.account, b.loadInfo.LoadRate)
+			if aLoad != bLoad {
+				return aLoad < bLoad
 			}
 			switch {
 			case a.account.LastUsedAt == nil && b.account.LastUsedAt != nil:
@@ -1517,7 +1533,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			if a.account.Priority != b.account.Priority {
 				return a.account.Priority < b.account.Priority
 			}
-			return openAIRPMEffectiveLoad(ctx, a.account, a.loadInfo.LoadRate) < openAIRPMEffectiveLoad(ctx, b.account, b.loadInfo.LoadRate)
+			aLoad := float64(openAIRPMEffectiveLoad(ctx, a.account, accountLoadPreferenceRate(a.account, a.loadInfo.LoadRate))) + feedback[a.account.ID]
+			bLoad := float64(openAIRPMEffectiveLoad(ctx, b.account, accountLoadPreferenceRate(b.account, b.loadInfo.LoadRate))) + feedback[b.account.ID]
+			return aLoad < bLoad
 		})
 		if rateOrder.enabled {
 			sort.SliceStable(available, func(i, j int) bool {
@@ -1575,6 +1593,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if err != nil {
 		ordered := append([]*Account(nil), candidates...)
 		sortAccountsByPriorityAndLastUsed(ordered, false)
+		orderDefaultFeedback(ordered, feedback)
 		if rateOrder.enabled {
 			sort.SliceStable(ordered, func(i, j int) bool {
 				return rateOrder.compare(ordered[i], ordered[j]) < 0
@@ -1625,6 +1644,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	// ============ Layer 3: Fallback wait ============
 	sortAccountsByPriorityAndLastUsed(candidates, false)
+	orderDefaultFeedback(candidates, feedback)
 	if rateOrder.enabled {
 		sort.SliceStable(candidates, func(i, j int) bool {
 			return rateOrder.compare(candidates[i], candidates[j]) < 0

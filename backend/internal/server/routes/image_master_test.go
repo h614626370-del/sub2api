@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/imagemaster"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
@@ -25,6 +27,37 @@ func imageMasterForRoutes(t *testing.T) *imagemaster.Manager {
 	cfg.Enabled = true
 	require.NoError(t, m.SaveConfig(cfg))
 	return m
+}
+
+func TestImageMasterGatewayEnforcesLongContextBeforeConversion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
+		t.Run(path, func(t *testing.T) {
+			m := imageMasterForRoutes(t)
+			router := gin.New()
+			RegisterGatewayRoutes(router, &handler.Handlers{
+				ImageMaster:   m,
+				Gateway:       &handler.GatewayHandler{},
+				OpenAIGateway: &handler.OpenAIGatewayHandler{},
+				AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
+			}, middleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+				groupID := int64(1)
+				c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+					ID: 123, UserID: 5, GroupID: &groupID,
+					Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+				})
+				c.Next()
+			}), nil, nil, nil, nil, nil, &config.Config{
+				Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024, TextMaxBodySize: 1024 * 1024},
+			})
+			req := httptest.NewRequest("POST", path, strings.NewReader(`{"model":"gpt-5.4","input":"draw a square","previous_response_id":"resp_fixture","tools":[{"type":"image_generation","model":"gpt-image-2"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+			require.Equal(t, 400, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), "context_unverifiable")
+		})
+	}
 }
 
 func TestImageMasterGatewayPreservesAdmissionAndIdentity(t *testing.T) {

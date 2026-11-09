@@ -118,6 +118,19 @@ func TestH614626370TransitionUpgrade(t *testing.T) {
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT count(*) FROM groups WHERE image_count_billing`).Scan(&imageCountBillingGroups))
 			require.Zero(t, imageCountBillingGroups, "historical groups must not enable per-image billing on upgrade")
+			var policyKeys, measuredUsage int
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT count(*) FROM api_keys WHERE model_mapping <> '{}'::jsonb OR reasoning_effort <> '' OR NOT allow_long_context`).Scan(&policyKeys))
+			require.Zero(t, policyKeys, "historical keys must retain their model, reasoning and long-context behavior")
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT count(*) FROM usage_logs WHERE queue_wait_ms IS NOT NULL OR queue_timing IS NOT NULL`).Scan(&measuredUsage))
+			require.Zero(t, measuredUsage, "historical usage must not acquire fabricated timing observations")
+			if version != "upstream" {
+				var aiOpsRevision int64
+				require.NoError(t, db.QueryRowContext(ctx,
+					`SELECT ai_ops_revision FROM accounts WHERE name='bridge_fixture_account'`).Scan(&aiOpsRevision))
+				require.EqualValues(t, 1, aiOpsRevision, "historical accounts start at the initial AI operations revision")
+			}
 			if version != "upstream" {
 				var used string
 				var complete bool
@@ -193,11 +206,11 @@ func transitionBusinessSnapshot(t *testing.T, db *sql.DB) map[string]string {
 	queries := map[string]string{
 		"users":         `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'observer_group_ids'-'moderation_status_revision' ORDER BY id), '[]')::text FROM users t`,
 		"groups":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'stream_only'-'i18n'-'codex_cli_only'-'block_subagents'-'image_count_billing' ORDER BY id), '[]')::text FROM groups t`,
-		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'concurrency_limit' ORDER BY id), '[]')::text FROM api_keys t`,
+		"api_keys":      `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'concurrency_limit'-'model_mapping'-'reasoning_effort'-'allow_long_context' ORDER BY id), '[]')::text FROM api_keys t`,
 		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'conversion_used_usd'-'conversion_usage_complete' ORDER BY id), '[]')::text FROM user_subscriptions t`,
 		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount'-'subscription_renewal_mode' ORDER BY id), '[]')::text FROM payment_orders t`,
-		"usage":         `SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id), '[]')::text FROM usage_logs t`,
-		"credentials":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'extra'-'updated_at'-'group_rate_multiplier' ORDER BY id), '[]')::text FROM accounts t`,
+		"usage":         `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'queue_wait_ms'-'queue_timing' ORDER BY id), '[]')::text FROM usage_logs t`,
+		"credentials":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'extra'-'updated_at'-'group_rate_multiplier'-'ai_ops_revision' ORDER BY id), '[]')::text FROM accounts t`,
 		"memberships":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'allowed_models' ORDER BY account_id,group_id), '[]')::text FROM account_groups t`,
 		"proxies":       `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'mihomo_node_id' ORDER BY id), '[]')::text FROM proxies t`,
 	}

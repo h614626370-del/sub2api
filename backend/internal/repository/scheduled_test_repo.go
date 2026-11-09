@@ -109,6 +109,24 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err = checkQualityIsolationScope(updated, &state); err != nil {
 		return nil, err
 	}
+	if hasQualityCooldownOwnership(&state) {
+		account := &service.Account{}
+		var credentials, extra []byte
+		// Use the persisted account ID, never the caller's copy. This follows
+		// detection's plan -> account lock order and fences concurrent remapping.
+		if err = tx.QueryRowContext(ctx, `SELECT platform,type,COALESCE(credentials,'{}'::jsonb),COALESCE(extra,'{}'::jsonb) FROM accounts WHERE id=$1 FOR UPDATE`, updated.AccountID).Scan(&account.Platform, &account.Type, &credentials, &extra); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(credentials, &account.Credentials); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(extra, &account.Extra); err != nil {
+			return nil, err
+		}
+		if err = checkQualityCooldownTargets(updated, account, &state); err != nil {
+			return nil, err
+		}
+	}
 	if err = validateQualityGroupReferences(ctx, tx, updated.PelicanConfig); err != nil {
 		return nil, err
 	}
@@ -143,14 +161,20 @@ func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) erro
 	if state.Action == service.QualityActionIsolateModels || state.Models != nil || state.Groups != nil {
 		return service.QualityScopeConflict("restore this rule's isolated models and groups before deleting it")
 	}
+	if hasQualityCooldownOwnership(&state) {
+		return service.QualityScopeConflict("restore this rule's cooled models and concurrency before deleting it")
+	}
 	// Revalidate live ownership as well as durable snapshots. A stale/cleared
 	// snapshot must not let deletion leave a marker pointing at a missing rule.
-	var live []byte
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(extra->'quality_model_isolation','{}'::jsonb) FROM accounts WHERE id=(SELECT account_id FROM scheduled_test_plans WHERE id=$1) FOR UPDATE`, id).Scan(&live)
+	var liveIsolation, liveCooldowns []byte
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(extra->'quality_model_isolation','{}'::jsonb),COALESCE(extra->'model_rate_limits','{}'::jsonb) FROM accounts WHERE id=(SELECT account_id FROM scheduled_test_plans WHERE id=$1) FOR UPDATE`, id).Scan(&liveIsolation, &liveCooldowns)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
-	if len(live) > 0 {
+	for _, live := range [][]byte{liveIsolation, liveCooldowns} {
+		if len(live) == 0 {
+			continue
+		}
 		var entries map[string]json.RawMessage
 		if json.Unmarshal(live, &entries) != nil {
 			return service.QualityScopeConflict("review unreadable model ownership before deleting this rule")
@@ -187,7 +211,11 @@ func NewScheduledTestResultRepository(db *sql.DB) service.ScheduledTestResultRep
 }
 
 func (r *scheduledTestResultRepository) Create(ctx context.Context, result *service.ScheduledTestResult) (*service.ScheduledTestResult, error) {
-	row := r.db.QueryRowContext(ctx, `
+	return insertScheduledTestResult(ctx, r.db, result)
+}
+
+func insertScheduledTestResult(ctx context.Context, q planRowQuerier, result *service.ScheduledTestResult) (*service.ScheduledTestResult, error) {
+	row := q.QueryRowContext(ctx, `
 		INSERT INTO scheduled_test_results (plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config, quality_action, quality_judgment, quality_round_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11)
 		RETURNING id, plan_id, status, response_text, error_message, latency_ms, started_at, finished_at, created_at, pelican_config, quality_action, quality_judgment, quality_round_id
@@ -338,6 +366,9 @@ func (r *scheduledTestPlanRepository) ClaimPelican(ctx context.Context, plan *se
    AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id=account_id AND type='oauth')
    AND ($8::timestamptz IS NULL OR last_run_at IS NULL OR last_run_at < $8 OR pelican_config->'quality'->>'action'='remove_models')))
  AND (running_until IS NULL OR running_until < $2) AND updated_at = $5 AND next_run_at = $6
+ AND NOT EXISTS (SELECT 1 FROM account_quality_states rest WHERE rest.plan_id=scheduled_test_plans.id
+ AND COALESCE((pelican_config->'quality'->>'retest_rest_minutes')::int,0)>0
+ AND (rest.state->>'retest_after')::timestamptz>$2)
  AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id = account_id AND deleted_at IS NULL)
  AND NOT EXISTS (SELECT 1 FROM scheduled_test_plans other WHERE other.account_id = scheduled_test_plans.account_id
  AND other.id <> scheduled_test_plans.id AND other.pelican_config IS NOT NULL AND other.running_until > $2)`, plan.ID, now, until, next, plan.UpdatedAt, plan.NextRunAt, plan.TriggerSource == "upstream_5xx", plan.TriggerObservedAt)

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import SecurityAuditNav from '../SecurityAuditNav.vue'
 import IPAuditView from '@/features/ip-audit/IPAuditView.vue'
@@ -37,7 +38,7 @@ describe('security audit navigation', () => {
   it('passes the IP route from the real IP page to the shared navigation', async () => {
     const router = routerFixture()
     await router.push('/admin/ip-audit?tab=config'); await router.isReady()
-    const wrapper = mount(IPAuditView, { global: { plugins: [router], stubs: { AppLayout: { template: '<div><slot /></div>' }, IPRiskSettings: true, IPAuditPanel: true } } })
+    const wrapper = mount(IPAuditView, { global: { plugins: [createPinia(), router], stubs: { AppLayout: { template: '<div><slot /></div>' }, IPRiskSettings: true, IPAuditPanel: true } } })
     expect(wrapper.getComponent(SecurityAuditNav).props('active')).toBe('/admin/ip-audit')
     expect(wrapper.get('[aria-current="page"]').attributes('href')).toBe('/admin/ip-audit')
     wrapper.unmount()

@@ -39,6 +39,21 @@ func RegisterAdminRoutes(
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	// 受限密钥的账户操作走独立资源校验，普通管理员保持原处理器。
 	admin.Use(h.Admin.Account.ScopedAdminKeyAccounts)
+	if h.Lottery != nil {
+		lottery := admin.Group("/lottery")
+		lottery.GET("/settings", h.Lottery.Settings)
+		lottery.PUT("/settings", h.Lottery.SaveSettings)
+		lottery.DELETE("/pools/:id", h.Lottery.DeletePool)
+		lottery.DELETE("/pools/:id/prizes/:prize_id", h.Lottery.DeletePrize)
+		lottery.GET("/pools", h.Lottery.AdminPools)
+		lottery.POST("/pools", h.Lottery.SavePool)
+		lottery.PUT("/pools/:id", h.Lottery.SavePool)
+		lottery.POST("/pools/:id/prizes", h.Lottery.SavePrize)
+		lottery.PUT("/pools/:id/prizes/:prize_id", h.Lottery.SavePrize)
+		lottery.GET("/records", h.Lottery.AdminRecords)
+		lottery.GET("/ledger", h.Lottery.AdminLedger)
+		lottery.GET("/invitations", h.Lottery.AdminInvitations)
+	}
 	{
 		admin.GET("/subscription-conversion", h.Subscription.ConversionSettings(settingService))
 		admin.PUT("/subscription-conversion", h.Subscription.SaveConversionSettings(settingService))
@@ -245,6 +260,23 @@ func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	ops := admin.Group("/ops")
 	{
+		// AI observe mode uses a separate bounded companion service. These routes
+		// deliberately grant no production account/scheduling mutation capability.
+		ops.GET("/ai/status", h.Admin.Ops.GetAIOpsStatus)
+		ops.GET("/ai/runs", h.Admin.Ops.ListAIOpsRuns)
+		ops.GET("/ai/runs/:id", h.Admin.Ops.GetAIOpsRun)
+		ops.POST("/ai/runs", h.Admin.Ops.CreateAIOpsRun)
+		ops.GET("/ai/policy", h.Admin.Ops.GetAIOpsPolicy)
+		ops.PUT("/ai/policy", h.Admin.Ops.SaveAIOpsPolicy)
+		ops.POST("/ai/halt", h.Admin.Ops.HaltAIOps)
+		ops.POST("/ai/proposals/preview", h.Admin.Ops.PreviewAIOpsProposal)
+		ops.POST("/ai/proposals/:id/apply", h.Admin.Ops.ApplyAIOpsProposal)
+		ops.POST("/ai/proposals/:id/cancel", h.Admin.Ops.CancelAIOpsProposal)
+		ops.GET("/ai/actions", h.Admin.Ops.ListAIOpsActions)
+		ops.POST("/ai/actions/:id/rollback", h.Admin.Ops.RollbackAIOpsAction)
+		ops.GET("/ai/probes", h.Admin.Ops.ListAIOpsProbes)
+		ops.POST("/ai/probes", h.Admin.Ops.CreateAIOpsProbe)
+
 		// Realtime ops signals
 		ops.GET("/concurrency", h.Admin.Ops.GetConcurrencyStats)
 		ops.GET("/user-concurrency", h.Admin.Ops.GetUserConcurrencyStats)
@@ -324,6 +356,8 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Dashboard (vNext - raw path for MVP)
 		ops.GET("/dashboard/snapshot-v2", h.Admin.Ops.GetDashboardSnapshotV2)
 		ops.GET("/dashboard/overview", h.Admin.Ops.GetDashboardOverview)
+		ops.GET("/dashboard/latency-report", h.Admin.Ops.LatencyReport)
+		ops.GET("/dashboard/network-series", h.Admin.Ops.NetworkSeries)
 		ops.GET("/dashboard/throughput-trend", h.Admin.Ops.GetDashboardThroughputTrend)
 		ops.GET("/dashboard/latency-histogram", h.Admin.Ops.GetDashboardLatencyHistogram)
 		ops.GET("/dashboard/error-trend", h.Admin.Ops.GetDashboardErrorTrend)
@@ -364,6 +398,9 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		users.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)
 		users.GET("/:id/usage", h.Admin.User.GetUserUsage)
 		users.GET("/:id/balance-history", h.Admin.User.GetBalanceHistory)
+		users.GET("/:id/auto-credit", h.Admin.User.GetAutoCredit)
+		users.PUT("/:id/auto-credit", h.Admin.User.SaveAutoCredit)
+		users.POST("/:id/auto-credit/:entry_id/settle", h.Admin.User.SettleAutoCredit)
 		users.POST("/:id/replace-group", h.Admin.User.ReplaceGroup)
 		users.GET("/:id/rpm-status", h.Admin.User.GetUserRPMStatus)
 		users.POST("/batch-concurrency", h.Admin.User.BatchUpdateConcurrency)
@@ -394,6 +431,8 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.POST("/:id/composite-routes/preview", h.Admin.Group.PreviewCompositeRoute)
 		groups.PUT("/:id/composite-routes/:route_id", h.Admin.Group.UpdateCompositeRoute)
 		groups.DELETE("/:id/composite-routes/:route_id", h.Admin.Group.DeleteCompositeRoute)
+		groups.GET("/:id/anti-distillation", h.Admin.Group.GetAntiDistillation)
+		groups.PUT("/:id/anti-distillation", h.Admin.Group.SaveAntiDistillation)
 		groups.GET("/:id", h.Admin.Group.GetByID)
 		groups.POST("", h.Admin.Group.Create)
 		groups.POST("/:id/duplicate", h.Admin.Group.Duplicate)
@@ -437,6 +476,14 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.PUT("/opencode-go-usage/settings", h.Admin.Account.UpdateOpenCodeGoUsageSettings)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
 		if h.Admin.OpenAIOAuthReauth != nil {
+			accounts.POST("/:id/auth-connections/use-legacy", h.Admin.OpenAIOAuthReauth.SelectLegacyAuthConnection)
+			accounts.PUT("/:id/auth-connections/:connection_id/api-key", h.Admin.OpenAIOAuthReauth.RotateConnectionAPIKey)
+			accounts.GET("/:id/auth-connections", h.Admin.OpenAIOAuthReauth.ListAuthConnections)
+			accounts.POST("/:id/auth-connections", h.Admin.OpenAIOAuthReauth.CreateAuthConnection)
+			accounts.PATCH("/:id/auth-connections/:connection_id", h.Admin.OpenAIOAuthReauth.UpdateAuthConnection)
+			accounts.POST("/:id/auth-connections/:connection_id/authorize", h.Admin.OpenAIOAuthReauth.BeginConnectionAuthorization)
+			accounts.POST("/:id/auth-connections/:connection_id/callback", h.Admin.OpenAIOAuthReauth.CompleteConnectionAuthorization)
+			accounts.POST("/:id/auth-connections/:connection_id/revoke", h.Admin.OpenAIOAuthReauth.RevokeAuthConnection)
 			accounts.GET("/:id/openai-reauth", h.Admin.OpenAIOAuthReauth.GetStatus)
 			accounts.GET("/:id/siwc", h.Admin.OpenAIOAuthReauth.SIWCStatus)
 			accounts.POST("/:id/siwc/authorize", h.Admin.OpenAIOAuthReauth.BeginSIWC)
@@ -454,6 +501,10 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/import/codex-session", h.Admin.Account.ImportCodexSession)
 		accounts.POST("/sync/crs", h.Admin.Account.SyncFromCRS)
 		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)
+		accounts.POST("/performance", h.Admin.Account.AccountPerformanceBatch)
+		accounts.PUT("/:id/performance", h.Admin.Account.SaveAccountPerformance)
+		accounts.POST("/:id/performance/release", h.Admin.Account.ReleaseAccountPerformance)
+		accounts.GET("/:id/performance/events", h.Admin.Account.AccountPerformanceEvents)
 		accounts.PUT("/:id", h.Admin.Account.Update)
 		accounts.GET("/:id/grok-media-eligibility", h.Admin.Account.GetGrokMediaEligibility)
 		accounts.PUT("/:id/grok-media-eligibility", h.Admin.Account.UpdateGrokMediaEligibility)
@@ -496,6 +547,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/schedulable-timers", h.Admin.Account.ListSchedulableTimers)
 		accounts.POST("/:id/schedulable-timers/preview", h.Admin.Account.PreviewSchedulableTimer)
 		accounts.POST("/:id/schedulable-timers", h.Admin.Account.SaveSchedulableTimer)
+		accounts.POST("/:id/schedulable-timers/daily-window", h.Admin.Account.SaveDailySchedulableWindow)
 		accounts.DELETE("/:id/schedulable-timers/:action", h.Admin.Account.CancelSchedulableTimer)
 		accounts.POST("/models/sync-upstream-preview", h.Admin.Account.SyncUpstreamModelsPreview)
 		accounts.GET("/:id/models", h.Admin.Account.GetAvailableModels)
@@ -735,6 +787,11 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpA
 		// 流超时处理配置
 		adminSettings.GET("/stream-timeout", h.Admin.Setting.GetStreamTimeoutSettings)
 		adminSettings.PUT("/stream-timeout", h.Admin.Setting.UpdateStreamTimeoutSettings)
+		// OpenAI/Codex 响应头超时配置
+		adminSettings.GET("/openai-response-header-timeout", h.Admin.Setting.GetOpenAIResponseHeaderTimeoutSettings)
+		adminSettings.PUT("/openai-response-header-timeout", h.Admin.Setting.UpdateOpenAIResponseHeaderTimeoutSettings)
+		adminSettings.GET("/account-performance", h.Admin.Setting.GetAccountPerformanceSettings)
+		adminSettings.PUT("/account-performance", h.Admin.Setting.UpdateAccountPerformanceSettings)
 		// 请求整流器配置
 		adminSettings.GET("/rectifier", h.Admin.Setting.GetRectifierSettings)
 		adminSettings.PUT("/rectifier", h.Admin.Setting.UpdateRectifierSettings)
@@ -855,6 +912,7 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		usage.GET("/traffic/keys", h.Admin.Usage.TrafficKeys)
 		usage.GET("/traffic/health", h.Admin.Usage.TrafficHealth)
 		usage.GET("/stats", h.Admin.Usage.Stats)
+		usage.GET("/latency-report", h.Admin.Usage.LatencyReport)
 		usage.GET("/connections", h.Admin.Usage.Connections)
 		usage.POST("/connections/edge", h.Admin.Usage.ImportEdgeConnections)
 		usage.GET("/:id/timing", h.Admin.Usage.Timing)
@@ -882,6 +940,10 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.GET("/priority-scheduling/config", h.Admin.Setting.GetPriorityScheduling)
 	admin.PUT("/priority-scheduling/config", h.Admin.Setting.SavePriorityScheduling)
 	admin.GET("/priority-scheduling/snapshot", h.Admin.Account.PrioritySchedulingSnapshot)
+	admin.GET("/priority-scheduling/latency", h.Admin.Account.PrioritySchedulingLatency)
+	admin.POST("/priority-scheduling/recompute", h.Admin.Account.RecomputePriorityScheduling)
+	admin.GET("/priority-scheduling/sticky-bindings", h.Admin.Account.PrioritySchedulingStickyBindings)
+	admin.POST("/priority-scheduling/sticky-bindings/clear", h.Admin.Account.ClearPrioritySchedulingStickyBindings)
 	admin.GET("/account-ops/auto-config", h.Admin.AccountOps.GetAutoConfig)
 	admin.PUT("/account-ops/auto-config", h.Admin.AccountOps.SaveAutoConfig)
 	admin.GET("/account-ops/auto-config/events", h.Admin.AccountOps.ListAutoConfigEvents)
@@ -1017,6 +1079,17 @@ func registerPluginRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 }
 
 func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h.Admin.Account != nil && h.Admin.Channel != nil {
+		h.Admin.Account.SetUpstreamChannelService(h.Admin.Channel.UpstreamChannelService())
+	}
+	admin.GET("/upstream-channels", h.Admin.Channel.ListUpstreamChannels)
+	admin.POST("/upstream-channels", h.Admin.Channel.MutateUpstreamChannel)
+	admin.GET("/upstream-channels/:id", h.Admin.Channel.GetUpstreamChannel)
+	admin.PUT("/upstream-channels/:id", h.Admin.Channel.MutateUpstreamChannel)
+	admin.DELETE("/upstream-channels/:id", h.Admin.Channel.MutateUpstreamChannel)
+	admin.GET("/upstream-channels/:id/members", h.Admin.Channel.UpstreamChannelMembers)
+	admin.GET("/upstream-channel-bindings", h.Admin.Channel.ReadUpstreamChannelBindings)
+	admin.PUT("/upstream-channel-bindings", h.Admin.Channel.BindUpstreamChannelAccounts)
 	admin.GET("/profit-operations/snapshot", h.Admin.Channel.ProfitOperations)
 	admin.GET("/upstream-operations/snapshot", h.Admin.Channel.UpstreamOperations)
 	channels := admin.Group("/channels")

@@ -129,6 +129,7 @@
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
           <UsageTable
             enable-timing-details
+            :notice-user-id="props.observerMode ? undefined : authStore.user?.id"
             flat
             :data="usageLogs"
             :loading="loading"
@@ -163,6 +164,19 @@
           :refresh-key="connectionRefreshKey"
         />
         <TrafficPanel v-if="!props.observerMode && activeTab === 'traffic'" admin />
+        <LatencyObservabilityPanel
+          v-if="!props.observerMode && activeTab === 'latency'"
+          flat
+          hide-title
+          :start-date="filters.start_date || startDate"
+          :end-date="filters.end_date || endDate"
+          :model="filters.model"
+          :user-id="filters.user_id"
+          :api-key-id="filters.api_key_id"
+          :account-id="filters.account_id"
+          :group-id="filters.group_id"
+          :refresh-token="connectionRefreshKey"
+        />
         <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新 -->
         <div v-if="!props.observerMode && rankingMounted" v-show="activeTab === 'ranking'" class="overflow-hidden rounded-b-2xl">
           <UserTokenRanking
@@ -202,6 +216,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch, provide } from 
 import { observerUsageAPI } from '@/api/observerUsage'
 import { observerUsageContext } from '@/components/admin/usage/observerUsageContext'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 import { saveAs } from 'file-saver'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
@@ -213,6 +228,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination fro
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UsageConnections from '@/components/admin/usage/UsageConnections.vue'
+import LatencyObservabilityPanel from '@/components/admin/usage/LatencyObservabilityPanel.vue'
 import TrafficPanel from '@/components/usage/TrafficPanel.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
@@ -230,6 +246,7 @@ const props = withDefaults(defineProps<{ observerMode?: boolean }>(), { observer
 provide(observerUsageContext, props.observerMode)
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
@@ -843,7 +860,7 @@ const loadSavedColumns = () => {
 }
 
 // Detail tabs
-type DetailTab = 'usage' | 'errors' | 'connections' | 'ranking' | 'traffic'
+type DetailTab = 'usage' | 'errors' | 'connections' | 'ranking' | 'traffic' | 'latency'
 const activeTab = ref<DetailTab>('usage')
 const canViewErrors = computed(() => !props.observerMode || !!appStore.cachedPublicSettings?.allow_user_view_error_requests)
 const detailTabs = computed(() => [
@@ -852,6 +869,7 @@ const detailTabs = computed(() => [
   ...(!props.observerMode ? [{ key: 'connections' as const, label: t('connections.title'), icon: 'clock' as const }] : []),
   ...(!props.observerMode ? [{ key: 'ranking' as const, label: t('usage.tabs.ranking'), icon: 'chart' as const }] : []),
   ...(!props.observerMode ? [{ key: 'traffic' as const, label: t('traffic.title'), icon: 'chart' as const }] : []),
+  ...(!props.observerMode ? [{ key: 'latency' as const, label: t('latencyObservability.title'), icon: 'clock' as const }] : []),
 ])
 const usageFiltersRef = ref<InstanceType<typeof UsageFilters> | null>(null)
 const connectionRefreshKey = ref(0)

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
+import { createPinia } from 'pinia'
 import { readFileSync } from 'node:fs'
 import IPRiskSettings from '@/features/ip-risk/IPRiskSettings.vue'
 import type { IPRiskSnapshot } from '@/features/ip-risk/api'
@@ -55,7 +56,7 @@ async function open(url: string, locale: 'en' | 'zh' = 'en') {
   i18n.global.locale.value = locale
   await router.push(url)
   await router.isReady()
-  wrapper = mount(RouterView, { global: { plugins: [router, createI18n({ legacy: false, locale, messages: { en, zh } })], stubs: { RuntimeOverview: true, EndpointPool: true, PolicyPanel: true, PenaltyPolicyPanel: true, EventWorkspace: true, EventDetailDialog: true, FilterDeleteDialog: true, ConfirmDialog: true } } })
+  wrapper = mount(RouterView, { global: { plugins: [createPinia(), router, createI18n({ legacy: false, locale, messages: { en, zh } })], stubs: { RuntimeOverview: true, EndpointPool: true, PolicyPanel: true, PenaltyPolicyPanel: true, EventWorkspace: true, EventDetailDialog: true, FilterDeleteDialog: true, ConfirmDialog: true } } })
   await flushPromises()
   return wrapper
 }
