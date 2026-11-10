@@ -1,5 +1,8 @@
 import type { GroupPlatform } from '@/types'
 import { GROK_CC_SWITCH_MODEL, OPENAI_CC_SWITCH_CODEX_MODEL } from '@/utils/ccswitchImport'
+import { encodeUtf8Base64 } from '@/utils/base64'
+
+export { encodeUtf8Base64 } from '@/utils/base64'
 
 export const CODEX_QUICK_CONFIG_PLATFORMS = [
   'openai',
@@ -74,13 +77,6 @@ export function normalizeCodexBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
   if (!trimmed) return ''
   return /\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/v1`
-}
-
-export function encodeUtf8Base64(value: string): string {
-  const bytes = new TextEncoder().encode(value)
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
 }
 
 function encodeUtf16LeBase64(value: string): string {

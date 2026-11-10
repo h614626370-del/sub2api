@@ -1,5 +1,5 @@
 import type { GroupPlatform } from '@/types'
-import { encodeUtf8Base64 } from '@/utils/codexQuickConfig'
+import { encodeUtf8Base64 } from '@/utils/base64'
 
 export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6-astra'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.7'

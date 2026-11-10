@@ -12,6 +12,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/keys/__tests__/UseKeyModal.spec.ts \
 	src/utils/__tests__/codexQuickConfig.spec.ts \
 	src/utils/__tests__/ccswitchImport.spec.ts \
+	src/utils/__tests__/keyConfigBundle.spec.ts \
 	src/components/settings/SmartOpsSidebarSettings.spec.ts \
 	src/utils/__tests__/smartOpsSidebar.spec.ts \
 	src/components/settings/BalanceForecastSettings.spec.ts \
