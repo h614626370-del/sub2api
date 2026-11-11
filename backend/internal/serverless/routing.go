@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/imagepolicy"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
