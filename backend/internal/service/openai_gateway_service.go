@@ -526,6 +526,7 @@ type OpenAIGatewayService struct {
 	stopAstraSetup          func()
 	codexWSAnchors          codexWSAnchorStore
 	priorityScheduling      prioritySchedulingState
+	priorityAnalysis        priorityAnalysisFlights
 	excelBPSRecoveryMu      sync.Mutex
 	excelBPSRecoveryCancel  context.CancelFunc
 	excelBPSRecoveryDone    chan struct{}
@@ -876,6 +877,7 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 // 应在应用优雅关闭时调用。
 func (s *OpenAIGatewayService) CloseOpenAIWSPool() {
 	if s != nil {
+		s.priorityAnalysis.close()
 		s.codexSnapshotMu.Lock()
 		s.codexSnapshotClosed = true
 		throttle := s.codexSnapshotThrottle
@@ -1088,6 +1090,10 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 }
 
 func (s *OpenAIGatewayService) writeOpenAIWSFallbackErrorResponse(c *gin.Context, account *Account, wsErr error) bool {
+	var incomplete *OpenAIWSSSEIncompleteError
+	if errors.As(wsErr, &incomplete) {
+		return s.writeOpenAIWSSSEIncomplete(c, account, incomplete)
+	}
 	if c == nil || c.Writer == nil || c.Writer.Written() {
 		return false
 	}

@@ -930,16 +930,23 @@ describe('UseKeyModal', () => {
     }
   )
 
-  // Scenario: the platform-preferred model remains selected when the downloaded catalog contains it.
-  it('keeps the preferred Composite default when it exists in the catalog', async () => {
+  it.each([
+    {
+      name: 'custom Composite catalog',
+      models: ['claude-opus-4-8', 'gpt-6-astra'],
+      expected: 'claude-opus-4-8'
+    },
+    {
+      name: 'upstream catalog',
+      models: ['gpt-6-astra', 'gpt-5.5'],
+      expected: 'gpt-6-astra'
+    }
+  ])('uses the first available catalog model for $name', async ({ models, expected }) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       text: async () => JSON.stringify({
-        models: [
-          { slug: 'claude-opus-4-8' },
-          { slug: 'gpt-6-astra' }
-        ]
+        models: models.map((slug) => ({ slug }))
       })
     }))
 
@@ -973,8 +980,8 @@ describe('UseKeyModal', () => {
     const config = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.sub2api]'))
-    expect(config).toContain('model = "gpt-6-astra"')
-    expect(config).toContain('review_model = "gpt-6-astra"')
+    expect(config).toContain(`model = "${expected}"`)
+    expect(config).toContain(`review_model = "${expected}"`)
   })
 
   it('derives OpenAI Codex reasoning effort from the selected catalog descriptor', async () => {
