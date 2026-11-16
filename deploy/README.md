@@ -78,31 +78,33 @@ Use the automated preparation script for the easiest setup:
 
 ```bash
 # Download and run the preparation script
-curl -sSL https://raw.githubusercontent.com/ranxi2001/sub2api/production/deploy/docker-deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/h614626370-del/sub2api/main/deploy/docker-deploy.sh | bash
 
 # Or download first, then run
-curl -sSL https://raw.githubusercontent.com/ranxi2001/sub2api/production/deploy/docker-deploy.sh -o docker-deploy.sh
+curl -fsSL https://raw.githubusercontent.com/h614626370-del/sub2api/main/deploy/docker-deploy.sh -o docker-deploy.sh
 chmod +x docker-deploy.sh
 ./docker-deploy.sh
 ```
 
 **What the script does:**
 - Downloads `docker-compose.local.yml` and `.env.example`
-- Automatically generates secure secrets (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
-- Creates `.env` file with generated secrets
+- Uses this fork's image (`ghcr.io/h614626370-del/sub2api:latest`); registry authentication may be required
+- Generates PostgreSQL, Redis, JWT, TOTP and administrator credentials, stored only in `.env` with mode `0600`
+- Binds the application to `127.0.0.1` by default and removes fixed container names
 - Creates necessary data directories (data/, postgres_data/, redis_data/)
-- **Displays generated credentials** (POSTGRES_PASSWORD, JWT_SECRET, etc.)
+- Refuses to overwrite existing deployment files
+
+For multiple domain deployments, run in separate directories with distinct project names, for example `COMPOSE_PROJECT_NAME=aiziyou-sub2api ./docker-deploy.sh`, and choose different `SERVER_PORT` values in their `.env` files. Optional `SUB2API_REPOSITORY`, `SUB2API_REF` and `SUB2API_IMAGE` select a different template source or image; pin the image tag explicitly when using a release ref. Existing deployments should preserve their `.env` and data when updating.
 
 **After running the script:**
 ```bash
 # Start services
-docker compose -f docker-compose.local.yml up -d
+docker compose up -d
 
 # View logs
-docker compose -f docker-compose.local.yml logs -f sub2api
+docker compose logs -f sub2api
 
-# If admin email/password were auto-generated, find them in logs:
-docker compose -f docker-compose.local.yml logs sub2api | grep "Generated admin"
+# Read ADMIN_EMAIL and ADMIN_PASSWORD privately from .env; never publish them.
 
 # Access Web UI
 # http://localhost:8080
