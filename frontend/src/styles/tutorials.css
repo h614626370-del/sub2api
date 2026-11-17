@@ -1,0 +1,193 @@
+.tutorial-prose {
+  color: #334155;
+  font-size: 1rem;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.dark .tutorial-prose {
+  color: #e2e8f0;
+}
+.tutorial-prose h1,
+.tutorial-prose h2,
+.tutorial-prose h3,
+.tutorial-prose h4 {
+  color: #0f172a;
+  font-weight: 650;
+  line-height: 1.45;
+  margin: 1.8em 0 0.7em;
+  scroll-margin-top: 7rem;
+  text-wrap: balance;
+}
+.dark .tutorial-prose h1,
+.dark .tutorial-prose h2,
+.dark .tutorial-prose h3,
+.dark .tutorial-prose h4 {
+  color: #f8fafc;
+}
+.tutorial-prose h1 {
+  font-size: 1.75rem;
+}
+.tutorial-prose h2 {
+  font-size: 1.4rem;
+}
+.tutorial-prose h3 {
+  font-size: 1.15rem;
+}
+.tutorial-prose > :first-child {
+  margin-top: 0;
+}
+.tutorial-prose p,
+.tutorial-prose ul,
+.tutorial-prose ol,
+.tutorial-prose table,
+.tutorial-prose blockquote {
+  margin: 0 0 1.15em;
+}
+.tutorial-prose ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+.tutorial-prose ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+}
+.tutorial-prose li {
+  margin: 0.3em 0;
+}
+.tutorial-prose li > ul,
+.tutorial-prose li > ol {
+  margin-bottom: 0;
+}
+.tutorial-prose a {
+  color: #0f766e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.dark .tutorial-prose a {
+  color: #5eead4;
+}
+.tutorial-prose blockquote {
+  background: #f1f5f9;
+  padding: 1em 1.25em;
+  border-radius: 8px;
+}
+.dark .tutorial-prose blockquote {
+  background: #1e293b;
+}
+.tutorial-prose blockquote > :last-child {
+  margin-bottom: 0;
+}
+.tutorial-prose code {
+  font:
+    0.85em/1.7 ui-monospace,
+    monospace;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+}
+.dark .tutorial-prose code {
+  background: #1e293b;
+}
+.tutorial-prose pre {
+  position: relative;
+  margin: 1.5em 0;
+  padding: 2.75rem 1.25rem 1.25rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.tutorial-prose pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  white-space: pre;
+}
+.dark .tutorial-prose pre {
+  background: #020617;
+}
+.dark .tutorial-prose pre code {
+  background: transparent;
+}
+.tutorial-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  background: #334155;
+  color: #f8fafc;
+  border-radius: 4px;
+}
+.tutorial-copy:hover {
+  background: #475569;
+}
+.tutorial-copy:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 2px;
+}
+.tutorial-prose img {
+  max-width: 100%;
+  height: auto;
+  margin: 1.5em 0;
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+.tutorial-prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.tutorial-prose th,
+.tutorial-prose td {
+  padding: 0.6em 1em;
+  border: 1px solid #cbd5e1;
+  text-align: left;
+}
+.dark .tutorial-prose th,
+.dark .tutorial-prose td {
+  border-color: #475569;
+}
+.tutorial-prose th {
+  background: #f1f5f9;
+}
+.dark .tutorial-prose th {
+  background: #1e293b;
+}
+.tutorial-prose hr {
+  margin: 2em 0;
+  border-color: #cbd5e1;
+}
+.dark .tutorial-prose hr {
+  border-color: #475569;
+}
+.tutorial-lightbox {
+  border: 0;
+  padding: 1rem;
+  max-width: 95vw;
+  max-height: 95vh;
+  background: #0f172a;
+  border-radius: 12px;
+}
+.tutorial-lightbox::backdrop {
+  background: rgb(15 23 42 / 0.8);
+}
+.tutorial-lightbox img {
+  display: block;
+  max-width: 88vw;
+  max-height: 78vh;
+  object-fit: contain;
+  margin-top: 1rem;
+}
+.tutorial-focus:focus-visible {
+  outline: 2px solid #0d9488;
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-prose {
+    scroll-behavior: auto;
+  }
+}

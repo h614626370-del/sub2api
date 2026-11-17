@@ -8,6 +8,7 @@ type NavigationGuard = (
 
 const routerHarness = vi.hoisted(() => ({
   guard: null as NavigationGuard | null,
+  routes: [] as Array<{ path: string; meta?: Record<string, unknown> }>,
 }))
 
 const authStore = vi.hoisted(() => ({
@@ -36,13 +37,16 @@ const appStore = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
-  createRouter: vi.fn(() => ({
-    beforeEach: vi.fn((guard: NavigationGuard) => {
-      routerHarness.guard = guard
-    }),
-    afterEach: vi.fn(),
-    onError: vi.fn(),
-  })),
+  createRouter: vi.fn((config) => {
+    routerHarness.routes = config.routes
+    return {
+      beforeEach: vi.fn((guard: NavigationGuard) => {
+        routerHarness.guard = guard
+      }),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    }
+  }),
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -123,6 +127,21 @@ describe('feature route guard', () => {
     appStore.publicSettingsLoaded = false
     appStore.cachedPublicSettings = null
     appStore.fetchPublicSettings.mockReset()
+  })
+
+  it('allows guest tutorial reading while keeping management behind authentication', async () => {
+    authStore.isAuthenticated = false
+    for (const path of ['/tutorials', '/tutorials/:id(\\d+)']) {
+      const route = routerHarness.routes.find((r) => r.path === path)!
+      expect(route.meta?.requiresAuth).toBe(false)
+      const result = runGuard(route.meta!, path === '/tutorials' ? path : '/tutorials/42')
+      await result.navigation
+      expect(result.next).toHaveBeenCalledWith()
+    }
+    const management = routerHarness.routes.find((r) => r.path === '/admin/tutorials')!
+    const result = runGuard(management.meta!, management.path)
+    await result.navigation
+    expect(result.next).toHaveBeenCalledWith({ path: '/login', query: { redirect: '/admin/tutorials' } })
   })
 
   it('allows observers own usage in backend mode without opening other user or admin pages', async () => {

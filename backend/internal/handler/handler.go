@@ -4,6 +4,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/imagemaster"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
+	"github.com/Wei-Shaw/sub2api/internal/tutorial"
 )
 
 // AdminHandlers contains all admin-related HTTP handlers
@@ -55,6 +56,7 @@ type AdminHandlers struct {
 
 // Handlers contains all HTTP handlers
 type Handlers struct {
+	Tutorial         *tutorial.Handler
 	ImageMaster      *imagemaster.Manager
 	QQBot            *QQBotHandler
 	Lottery          *LotteryHandler

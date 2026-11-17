@@ -1,3 +1,4 @@
+import tutorials from './tutorials'
 import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
 import coupon from './coupon'
@@ -45,6 +46,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+  tutorials,
   subscriptionConversion,
   imageMaster,
   coupon,

@@ -24,6 +24,13 @@ func RegisterUserRoutes(
 	authenticated.Use(panelRateLimiter.Global())
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
+	if h.Tutorial != nil {
+		h.Tutorial.RegisterUser(authenticated.Group("/tutorials"))
+		publicTutorials := v1.Group("/public/tutorials")
+		publicTutorials.Use(panelRateLimiter.PublicIP())
+		publicTutorials.Use(middleware.BackendModeUserGuard(settingService))
+		h.Tutorial.RegisterPublic(publicTutorials)
+	}
 	if h.QQBot != nil {
 		bot := authenticated.Group("/user/qqbot")
 		bot.GET("/binding", h.QQBot.Binding)

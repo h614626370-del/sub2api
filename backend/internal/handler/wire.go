@@ -5,6 +5,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/tutorial"
 
 	"github.com/google/wire"
 )
@@ -211,6 +212,7 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
+	tutorialHandler *tutorial.Handler,
 	qqBotHandler *QQBotHandler,
 	lotteryHandler *LotteryHandler,
 	authHandler *AuthHandler,
@@ -242,6 +244,7 @@ func ProvideHandlers(
 	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
 	return &Handlers{
+		Tutorial:         tutorialHandler,
 		QQBot:            qqBotHandler,
 		Lottery:          lotteryHandler,
 		Auth:             authHandler,
@@ -273,6 +276,7 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
+	tutorial.NewHandler,
 	NewQQBotHandler,
 	// Top-level handlers
 	NewLotteryHandler,
