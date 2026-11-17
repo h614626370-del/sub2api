@@ -143,7 +143,7 @@ func (s *Store) List(ctx context.Context, access Access, search, status string, 
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := []Article{}
 	for rows.Next() {
 		a, err := scanArticle(rows, access)
@@ -184,7 +184,7 @@ func (s *Store) Create(ctx context.Context, author int64, in Content) (*Article,
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(8348201)`); err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func (s *Store) Change(ctx context.Context, id, version int64, action string, in
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(8348201)`); err != nil {
 		return nil, err
 	}
@@ -270,13 +270,13 @@ func (s *Store) Change(ctx context.Context, id, version int64, action string, in
 		for rows.Next() {
 			var key string
 			if e = rows.Scan(&key); e != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, e
 			}
 			a.DeletedAssets = append(a.DeletedAssets, key)
 		}
 		e = rows.Err()
-		rows.Close()
+		_ = rows.Close()
 		if e != nil {
 			return nil, e
 		}
@@ -311,7 +311,7 @@ func (s *Store) Categories(ctx context.Context, access Access) ([]Category, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := []Category{}
 	for rows.Next() {
 		var c Category
@@ -331,7 +331,7 @@ func (s *Store) SaveCategory(ctx context.Context, id int64, in Category) (*Categ
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(8348201)`); err != nil {
 		return nil, err
 	}
@@ -368,7 +368,7 @@ func (s *Store) DeleteCategory(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(8348201)`); err != nil {
 		return err
 	}

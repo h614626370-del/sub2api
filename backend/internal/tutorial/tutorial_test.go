@@ -58,7 +58,7 @@ func TestTutorialLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	schema := fmt.Sprintf("tutorial_test_%d", time.Now().UnixNano())
 	if _, err = root.Exec(`CREATE SCHEMA ` + schema); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestTutorialLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if _, err = db.Exec(`CREATE TABLE users(id BIGINT PRIMARY KEY);INSERT INTO users VALUES(1)`); err != nil {
 		t.Fatal(err)
 	}

@@ -222,13 +222,13 @@ func (h *Handler) upload(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAssetBytes+(1<<20))
 	file, _, err := c.Request.FormFile("file")
 	if c.Request.MultipartForm != nil {
-		defer c.Request.MultipartForm.RemoveAll()
+		defer func() { _ = c.Request.MultipartForm.RemoveAll() }()
 	}
 	if err != nil {
 		response.BadRequest(c, "Choose a PNG, JPEG or GIF image up to 5 MB")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(file, maxAssetBytes+1))
 	if err != nil || len(raw) > maxAssetBytes {
 		response.BadRequest(c, "Image exceeds 5 MB")
@@ -244,7 +244,7 @@ func (h *Handler) upload(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var article int64
 	err = tx.QueryRowContext(c.Request.Context(), `SELECT id FROM tutorials WHERE id=$1 FOR UPDATE`, id).Scan(&article)
 	if err == sql.ErrNoRows {
