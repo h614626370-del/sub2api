@@ -1,5 +1,8 @@
 import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
+import coupon from './coupon'
+import qqbot from './qqbot'
+import matureProviders from './matureProviders'
 import autoCredit from './autoCredit'
 import accountPerformance from './accountPerformance'
 import apiKeyModelPolicy from './apiKeyModelPolicy'
@@ -44,6 +47,9 @@ import autoConfig from './autoConfig'
 export default {
   subscriptionConversion,
   imageMaster,
+  coupon,
+  ...qqbot,
+  matureProviders,
   apiKeyModelPolicy,
   autoCredit,
  accountPerformance,

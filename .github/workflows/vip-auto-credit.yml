@@ -1,11 +1,41 @@
 name: VIP auto credit PostgreSQL
 on:
   push:
+    branches: [production]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
+# PR updates replace older runs; other events keep a separate group per commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
+  actions: read
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      postgres-repository: ${{ steps.select.outputs['postgres-repository'] }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install selector dependency
+        run: python3 -m pip install PyYAML==6.0.3
+      - name: Select affected checks
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/ci/select_jobs.py vip-auto-credit.yml
+
   postgres-repository:
+    needs: changes
+    if: needs.changes.outputs['postgres-repository'] == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -38,6 +68,16 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Mandatory real PostgreSQL ledger, admission, concurrency and upgrade regressions
+      - name: Exact same regressions GREEN, real PostgreSQL ledger, admission, mail, concurrency and upgrades
         working-directory: backend
-        run: go test -race -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCredit' -count=1 -v -timeout=10m
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vip-credit-logs"
+          go test -race -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCredit' -count=1 -v -timeout=10m | tee "$RUNNER_TEMP/vip-credit-logs/green.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vip-credit-logs-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/vip-credit-logs
+          if-no-files-found: error

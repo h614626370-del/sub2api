@@ -2,18 +2,58 @@ name: CI
 
 on:
   push:
+    branches: [production]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
+
+# PR updates replace older runs; other events keep a separate group per commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      shell: ${{ steps.select.outputs['shell'] }}
+      test: ${{ steps.select.outputs['test'] }}
+      frontend: ${{ steps.select.outputs['frontend'] }}
+      golangci-lint: ${{ steps.select.outputs['golangci-lint'] }}
+      release-helpers: ${{ steps.select.outputs['release-helpers'] }}
+      prism-adapter: ${{ steps.select.outputs['prism-adapter'] }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install selector dependency
+        run: python3 -m pip install PyYAML==6.0.3
+      - name: Select affected checks
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/ci/select_jobs.py backend-ci.yml
+
   shell:
+    needs: changes
+    if: needs.changes.outputs['shell'] == 'true'
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Check deployment scripts
         run: |
           /bin/bash -n deploy/install.sh deploy/install-mihomo-codex.sh deploy/migrate-mihomo-managed.sh
@@ -25,11 +65,32 @@ jobs:
           /bin/sh deploy/test-caddyfile-cache.sh
 
   test:
+    needs: changes
+    if: needs.changes.outputs['test'] == 'true'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: shadow_audit
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d shadow_audit"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['16379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Check Docker Compose simple mode environment
         run: /bin/sh deploy/tests/docker-compose-simple-mode-env-test.sh
       - name: Check Docker Compose trusted proxy environment
@@ -42,54 +103,15 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.27.3'
+          go version | grep -q 'go1.27.4'
       - name: Install Redis for isolated snapshot adapter checks
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           if ! command -v redis-server >/dev/null; then
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends redis-server
           fi
           redis-server --version
-      - name: Verify scope conflict regression against original handlers
-        if: github.head_ref == 'fix/quality-template-switch-conflicts' || github.ref_name == 'fix/quality-template-switch-conflicts'
-        shell: bash
-        run: |
-          set -euo pipefail
-          target=backend/internal/handler/admin/scheduled_test_handler.go
-          cp "$target" "$RUNNER_TEMP/quality-current-handler.go"
-          trap 'cp "$RUNNER_TEMP/quality-current-handler.go" "$target"' EXIT
-          git fetch --no-tags --depth=1 origin 9fcfe25d600a331abcc28a1788e597e5542d4cd3
-          git show 9fcfe25d600a331abcc28a1788e597e5542d4cd3:"$target" > "$target"
-          set +e
-          (cd backend && go test ./internal/handler/admin -run '^TestQualityScopeConflictsUse409ForUpdateAndDelete$' -count=1) > "$RUNNER_TEMP/quality-red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/quality-red.log"
-          test "$result" -ne 0
-          grep -q 'FAIL: TestQualityScopeConflictsUse409ForUpdateAndDelete' "$RUNNER_TEMP/quality-red.log"
-          grep -Eq 'actual.*(400|500)' "$RUNNER_TEMP/quality-red.log"
-      - name: Verify user enable reason regression against original handler
-        if: github.head_ref == 'fix/moderation-user-quick-enable' || github.ref_name == 'fix/moderation-user-quick-enable'
-        shell: bash
-        run: |
-          set -euo pipefail
-          target=backend/internal/handler/admin/user_handler.go
-          cp "$target" "$RUNNER_TEMP/user-enable-current-handler.go"
-          trap 'cp "$RUNNER_TEMP/user-enable-current-handler.go" "$target"' EXIT
-          git fetch --no-tags --depth=1 origin bccac61c757f2c04a2360063c4057db2b270c856
-          git show bccac61c757f2c04a2360063c4057db2b270c856:"$target" > "$target"
-          set +e
-          (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestUserQuickEnableReasonLimit$' -count=1) > "$RUNNER_TEMP/user-enable-red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/user-enable-red.log"
-          test "$result" -ne 0
-          grep -q 'FAIL: TestUserQuickEnableReasonLimit' "$RUNNER_TEMP/user-enable-red.log"
-          grep -q 'actual.*200' "$RUNNER_TEMP/user-enable-red.log"
-      - name: Verify user enable regressions
-        if: github.head_ref == 'fix/moderation-user-quick-enable' || github.ref_name == 'fix/moderation-user-quick-enable'
-        working-directory: backend
-        run: go test -tags=unit ./internal/handler/admin ./internal/server/middleware ./internal/service ./internal/repository -run 'TestUserQuickEnable|TestAdminService_UserQuickEnable|TestModerationRecoveryUnbanDoesNotClaimOtherDisable' -count=1 -v
       - name: Usage trend local bucket regressions
         working-directory: backend
         run: go test -tags=integration ./internal/repository -run '^TestUsageTrendAggregateTimezone' -count=1 -v
@@ -98,14 +120,26 @@ jobs:
         run: make test-unit
       - name: Integration tests
         working-directory: backend
+        env:
+          PROMPT_AUDIT_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/shadow_audit?sslmode=disable'
+          PROMPT_AUDIT_TEST_REDIS_ADDR: '127.0.0.1:16379'
+          # Keep real network timing fixtures isolated from other package/DB workloads.
+          # Every integration package and its existing assertions still run.
+          GOFLAGS: '-p=1'
         run: make test-integration
 
   frontend:
+    needs: changes
+    if: needs.changes.outputs['frontend'] == 'true'
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -123,11 +157,15 @@ jobs:
         run: make test-frontend
 
   golangci-lint:
+    needs: changes
+    if: needs.changes.outputs['golangci-lint'] == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -136,7 +174,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.27.3'
+          go version | grep -q 'go1.27.4'
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -144,83 +182,16 @@ jobs:
           args: --timeout=30m
           working-directory: backend
 
-  pr612-regressions:
-    if: github.head_ref == 'fix/openai-header-timeout-default' || github.ref_name == 'fix/openai-header-timeout-default'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - name: Exact candidate identity
-        run: git rev-parse HEAD
-      - name: Header safety, runtime settings and cache race regressions (loopback only)
-        working-directory: backend
-        run: >-
-          go test -race -tags=unit ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin
-          -run '^(TestPR612|TestOpenAIResponseHeaderTimeout|TestApplyProfilePoolSettingsUsesRuntimeOpenAIResponseHeaderTimeout|TestDefaultOpenAIResponseHeaderTimeoutSettings|TestRuntimeProxyChainEveryHopMustProveUnsent)'
-          -count=1 -v -timeout=3m
-
-  pr612-regressions-red:
-    if: github.head_ref == 'fix/openai-header-timeout-default' || github.ref_name == 'fix/openai-header-timeout-default'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      matrix:
-        defect: [safety, cache]
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          path: red
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: red/backend/go.mod
-          cache-dependency-path: red/backend/go.sum
-      - name: Restore only the defective production file in isolated RED checkout
-        working-directory: red
-        env:
-          DEFECT: ${{ matrix.defect }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rev-parse HEAD
-          original=3abcf230ee6dd4487d9fd880ad83040289c259a7
-          git fetch --no-tags --depth=1 origin "$original"
-          if [ "$DEFECT" = safety ]; then
-            target=backend/internal/service/openai_plugin_transport.go
-            packages=(./internal/handler)
-            regression='^TestPR612DelayedHeadersNeverReplaySubmittedPOST$'
-            diagnostic='submitted POST was replayed'
-          else
-            target=backend/internal/service/setting_openai_response_header_timeout.go
-            packages=(./internal/service ./internal/repository)
-            regression='^(TestOpenAIResponseHeaderTimeoutStaleRefreshCannotUndoDisable|TestPR612StaleReaderDisableControlsNextHTTPRequest)$'
-            diagnostic='old refresh must return the newer disable|neither success nor error refresh may republish|disabled next-request transport must have timeout 0'
-          fi
-          git rev-parse "$original:$target"
-          git show "$original:$target" > "$target"
-          git diff --stat
-          set +e
-          (cd backend && go test -tags=unit "${packages[@]}" -run "$regression" -count=1 -v -timeout=2m) > "$RUNNER_TEMP/pr612-red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/pr612-red.log"
-          test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:' "$RUNNER_TEMP/pr612-red.log"
-          grep -q -- '--- FAIL: Test' "$RUNNER_TEMP/pr612-red.log"
-          grep -Eq "$diagnostic" "$RUNNER_TEMP/pr612-red.log"
-
   release-helpers:
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs['release-helpers'] == 'true'
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -246,11 +217,15 @@ jobs:
       - run: python -m unittest discover -s deploy/connection-diagnostics -p 'test_collect.py'
 
   prism-adapter:
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs['prism-adapter'] == 'true'
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'

@@ -88,7 +88,7 @@ export interface User {
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
-  rpm_limit?: number // User-level RPM cap (0 = unlimited); effective as fallback when group has no rpm_limit
+  rpm_limit?: number // User-level RPM cap (0 = unlimited, still counted); enforced alongside group limits
   status: 'active' | 'disabled' // Account status
   observer_group_ids?: number[] | null
   allowed_groups: number[] | null // Allowed group IDs (null = all non-exclusive groups)
@@ -113,6 +113,7 @@ export interface AdminUser extends User {
   // 管理侧权限开关，普通用户接口不返回。
   restrict_public_groups?: boolean
   // 当前并发数（仅管理员列表接口返回）
+  current_rpm?: number | null
   current_concurrency?: number
 }
 
@@ -663,6 +664,7 @@ export interface AdminGroup extends Group {
   i18n?: GroupI18n
   force_openai_fast: boolean
   free_openai_fast: boolean
+  free_openai_ultrafast: boolean
   // 仅允许流式请求（管理端请求策略，用户侧分组不返回）
   stream_only: boolean
   codex_cli_only?: boolean
@@ -803,6 +805,7 @@ export interface ApiKey {
   model_mapping?: Record<string, string>
   reasoning_effort?: string
   allow_long_context?: boolean
+  context_token_limit?: number
 }
 
 export interface ApiKeyConcurrencySnapshot {
@@ -863,6 +866,7 @@ export interface CreateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  free_openai_ultrafast?: boolean
   stream_only?: boolean
   codex_cli_only?: boolean
   block_subagents?: boolean
@@ -934,6 +938,7 @@ export interface UpdateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  free_openai_ultrafast?: boolean
   stream_only?: boolean
   codex_cli_only?: boolean
   block_subagents?: boolean
@@ -1109,6 +1114,11 @@ export interface GeminiCredentials {
 
 export type TempUnschedulableScope = 'account' | 'model'
 
+// before_stream：仅流开始前的 HTTP 错误。
+// after_stream：流开始前和流开始后都可以，包括中途 502。
+// 省略时后端保持旧行为：中途 401/403/429/503/529 仍可触发，中途 502 不触发。
+export type TempUnschedulableStreamTiming = 'before_stream' | 'after_stream'
+
 export interface TempUnschedulableRule {
   error_code: number
   keywords: string[]
@@ -1116,6 +1126,13 @@ export interface TempUnschedulableRule {
   description: string
   // 作用范围：account 暂停整个账号，model 只冷却本次请求的模型；缺省时 401 按 account、其余按 model 处理。
   scope?: TempUnschedulableScope
+  // credentials JSON 键 stream_timing。
+  stream_timing?: TempUnschedulableStreamTiming
+  // credentials JSON 键 trigger_count。省略或小于 1 时按 1 次处理。
+  trigger_count?: number
+  // credentials JSON 键 trigger_window_minutes。从第一次匹配起累计次数的时间窗口。
+  // 与 duration_minutes 相互独立。省略或小于 1 时按 1 分钟处理。
+  trigger_window_minutes?: number
 }
 
 export interface TempUnschedulableState {
@@ -1411,6 +1428,7 @@ export interface GrokModelDiagnostics {
 }
 
 export interface Account {
+  moderation_scope_eligible?: boolean
   upstream_channel_binding?: import('@/api/admin/upstreamChannels').ChannelBinding
  excel_bps_credential_state?: ExcelBPSCredentialState
   id: number
@@ -1609,6 +1627,19 @@ export interface UsageProgress {
 }
 
 // Antigravity 单个模型的配额信息
+export interface AntigravityQuotaWindow {
+  window: string // '5h' or 'weekly'
+  utilization: number // 0-100
+  resets_at: string | null
+}
+
+export interface AntigravityQuotaGroup {
+  key: string // bucket prefix: 'gemini' or '3p' (Claude and GPT)
+  name: string
+  description?: string
+  windows: AntigravityQuotaWindow[]
+}
+
 export interface AntigravityModelQuota {
   utilization: number // 使用率 0-100
   reset_time: string  // 重置时间 ISO8601
@@ -1672,6 +1703,7 @@ export interface AccountUsageInfo {
   gemini_pro_minute?: UsageProgress | null
   gemini_flash_minute?: UsageProgress | null
   antigravity_quota?: Record<string, AntigravityModelQuota> | null
+  antigravity_quota_groups?: AntigravityQuotaGroup[] | null
   grok_request_quota?: GrokQuotaWindow | null
   grok_token_quota?: GrokQuotaWindow | null
   grok_retry_after_seconds?: number | null
@@ -1753,6 +1785,8 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  provider_id?: number
+  provider_key_id?: string
   upstream_channel_id?: number
   confirm_upstream_channel_binding?: boolean
   name: string
@@ -1988,7 +2022,32 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
+// Immutable display evidence from the Standard calculation that set actual_cost.
+export type CustomerCacheCostKind = 'read' | 'read_image' | 'write' | 'write_5m' | 'write_1h' | 'write_30m' | 'write_12h'
+export interface CustomerCacheCostDetail {
+  kind: CustomerCacheCostKind
+  tokens: number
+  unit_price: number
+}
+
+export interface CustomerCostDetails {
+  cache_cost_details?: CustomerCacheCostDetail[]
+  version: number
+  free_fast: boolean
+  free_ultrafast?: boolean
+  input_cost: number
+  output_cost: number
+  image_input_cost: number
+  image_output_cost: number
+  cache_creation_cost: number
+  cache_read_cost: number
+  total_cost: number
+  actual_cost: number
+  multiplier: number
+}
+
 export interface UsageLog {
+  customer_cost_details?: CustomerCostDetails | null
   id: number
   user_id: number
   api_key_id: number
@@ -2009,6 +2068,8 @@ export interface UsageLog {
   cache_read_tokens: number
   cache_creation_5m_tokens: number
   cache_creation_1h_tokens: number
+  cache_creation_30m_tokens?: number
+  cache_creation_12h_tokens?: number
 
   input_cost: number
   output_cost: number
@@ -2452,6 +2513,7 @@ export interface UserErrorRequest {
 }
 
 export interface UserErrorRequestDetail extends UserErrorRequest {
+  reset_reason?: string
   error_body: string
   upstream_status_code?: number
 }
@@ -2738,6 +2800,8 @@ export interface QualityBPSPolicy {
   models: string[]
   omit_unsupported_tools: boolean
   ignore_encrypted_content: boolean
+  web_search?: boolean
+  web_search_auto?: boolean
   auto_disable_on_403: boolean
   auto_recover_on_403?: boolean
   recovery_interval_minutes?: number
@@ -2782,7 +2846,19 @@ export interface QualityRestoreDiagnostic {
   current_concurrency?: number
 }
 
+export interface PelicanQuestion {
+  id: string
+  version: string
+  round_id: string
+  source: string
+  prompt: string
+  criteria: string[]
+}
+
 export interface PelicanTestConfig {
+  prompt_mode?: 'custom' | 'random'
+  pelican_question?: PelicanQuestion
+  actual_prompt?: string
   // Optional display name, persisted with the rule's editable configuration.
   rule_name?: string
   quality_restore_diagnostic?: QualityRestoreDiagnostic

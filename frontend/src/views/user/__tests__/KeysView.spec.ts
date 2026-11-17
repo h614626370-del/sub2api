@@ -22,6 +22,7 @@ const {
   getAvailableGroups,
   getUserGroupRates,
   showError,
+  showInfo,
   showSuccess,
   copyToClipboard,
   isCurrentStep,
@@ -37,6 +38,7 @@ const {
   getAvailableGroups: vi.fn(),
   getUserGroupRates: vi.fn(),
   showError: vi.fn(),
+  showInfo: vi.fn(),
   showSuccess: vi.fn(),
   copyToClipboard: vi.fn(),
   isCurrentStep: vi.fn(),
@@ -116,6 +118,7 @@ vi.mock('@/api', () => ({
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError,
+    showInfo,
     showSuccess,
   }),
 }))
@@ -196,7 +199,7 @@ const TablePageLayoutStub = {
 
 const DataTableStub = {
   name: 'DataTable',
-  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean },
+  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean, loading: Boolean },
   emits: ['sort', 'update:selectedKeys'],
   template: `
     <div>
@@ -217,6 +220,9 @@ const DataTableStub = {
         <slot name="cell-actions" :row="row" />
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
+        </div>
+        <div data-test="usage">
+          <slot name="cell-usage" :row="row" />
         </div>
         <div
           v-if="columns.some((col) => col.key === 'last_used_ip')"
@@ -356,6 +362,7 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockReset()
     getUserGroupRates.mockReset()
     showError.mockReset()
+    showInfo.mockReset()
     showSuccess.mockReset()
     copyToClipboard.mockReset()
     isCurrentStep.mockReset()
@@ -373,6 +380,65 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+  })
+
+  it('hands off only the clicked key and uses the configured API base independently of CCS', async () => {
+    const group = { id: 9, platform: 'openai' } as Group
+    setKeys(
+      { ...createApiKey(), group_id: group.id, group },
+      { ...createApiKey(), id: 2, name: '第二把密钥', key: 'sk-test-second+a&b', group_id: group.id, group }
+    )
+    getPublicSettings.mockResolvedValue({
+      api_base_url: 'https://gateway.example/relay/v1/',
+      site_name: '示例站',
+      hide_ccs_import_button: true
+    })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const wrapper = await mountView()
+    const buttons = wrapper.findAll('[data-testid="magpie-import-button"]')
+    expect(buttons).toHaveLength(2)
+    expect(wrapper.text()).not.toContain('keys.importToCcSwitch')
+    expect(open).not.toHaveBeenCalled()
+    await buttons[1].trigger('click')
+
+    expect(open).toHaveBeenCalledTimes(1)
+    const [href, target] = open.mock.calls[0]
+    const url = new URL(String(href))
+    expect(target).toBe('_self')
+    expect(url.protocol).toBe('magpie:')
+    expect(url.host).toBe('import')
+    expect(url.searchParams.get('name')).toBe('第二把密钥 · 示例站')
+    expect(url.searchParams.getAll('key')).toEqual(['sk-test-second+a&b'])
+    expect(url.searchParams.get('responses')).toBe('https://gateway.example/relay/v1')
+    expect(showInfo).toHaveBeenCalledWith('keys.magpieImport.openHelp', 6500)
+    expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('waits for API address settings before allowing the handoff', async () => {
+    const settings = deferred<{ api_base_url: string }>()
+    getPublicSettings.mockReturnValue(settings.promise)
+    const group = { id: 9, platform: 'openai' } as Group
+    setKeys({ ...createApiKey(), group_id: group.id, group })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const wrapper = await mountView()
+    const button = wrapper.get('[data-testid="magpie-import-button"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(open).not.toHaveBeenCalled()
+
+    settings.resolve({ api_base_url: 'https://gateway.example' })
+    await flushPromises()
+    expect(button.attributes('disabled')).toBeUndefined()
+    await button.trigger('click')
+    expect(new URL(String(open.mock.calls[0][0])).searchParams.get('chat')).toBe('https://gateway.example/v1')
+  })
+
+  it('does not open Magpie for a key with no assigned group', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const wrapper = await mountView()
+    await wrapper.get('[data-testid="magpie-import-button"]').trigger('click')
+    expect(open).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('keys.magpieImport.unsupportedGroup')
   })
 
   it('keeps usage available alongside risk notices', async () => {
@@ -1408,6 +1474,36 @@ describe('user KeysView column settings', () => {
       await getButtonByText(wrapper, 'common.edit').trigger('click')
       expect(wrapper.find('[data-tour="key-form-provider"]').exists()).toBe(false)
       expect(optionIds(wrapper)).toHaveLength(12)
+    })
+  })
+
+  describe('usage stats loading', () => {
+    it('renders the key list without waiting for slow usage stats', async () => {
+      let resolveUsage!: (value: { stats: Record<string, unknown> }) => void
+      getDashboardApiKeysUsage.mockReturnValue(new Promise((resolve) => { resolveUsage = resolve }))
+      const wrapper = await mountView()
+
+      const table = wrapper.findComponent({ name: 'DataTable' })
+      expect(table.props('loading')).toBe(false)
+      expect(table.props('data')).toHaveLength(1)
+      expect(wrapper.find('[data-test="usage-pending"]').exists()).toBe(true)
+
+      resolveUsage({
+        stats: { 1: { api_key_id: 1, today_actual_cost: 0.5, total_actual_cost: 12.25 } },
+      })
+      await flushPromises()
+      expect(wrapper.find('[data-test="usage-pending"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="usage"]').text()).toContain('$12.2500')
+    })
+
+    it('stops showing usage placeholders when the usage request fails', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      getDashboardApiKeysUsage.mockRejectedValue(new Error('timeout'))
+      const wrapper = await mountView()
+
+      expect(wrapper.find('[data-test="usage-pending"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="usage"]').text()).toContain('—')
+      consoleError.mockRestore()
     })
   })
 })

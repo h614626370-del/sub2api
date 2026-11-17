@@ -61,7 +61,39 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 			s.loadUserGroupRatesOneByOne(ctx, users)
 		}
 	}
+	s.populateUserRPM(ctx, users)
 	return users, result.Total, nil
+}
+
+// populateUserRPM reads the existing limiter counters without querying usage logs
+// or changing admission behavior. Zero limits are still counted.
+func (s *adminServiceImpl) populateUserRPM(ctx context.Context, users []User) {
+	reader, ok := s.userRPMCache.(interface {
+		GetUserRPMBatch(context.Context, []int64) (map[int64]int, error)
+	})
+	if !ok {
+		return
+	}
+	ids := make([]int64, 0, len(users))
+	for i := range users {
+		users[i].CurrentRPM = nil
+		ids = append(ids, users[i].ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	counts, err := reader.GetUserRPMBatch(ctx, ids)
+	if err != nil {
+		// Metrics failure must not prevent user management.
+		return
+	}
+	for i := range users {
+		if count, exists := counts[users[i].ID]; exists {
+			users[i].CurrentRPM = &count
+		}
+	}
 }
 
 func (s *adminServiceImpl) loadUserGroupRatesOneByOne(ctx context.Context, users []User) {
@@ -769,8 +801,15 @@ func (s *adminServiceImpl) GetUserUsageStats(ctx context.Context, userID int64, 
 // GetUserBalanceHistory returns paginated balance/concurrency change records for a user.
 func (s *adminServiceImpl) GetUserBalanceHistory(ctx context.Context, userID int64, page, pageSize int, codeType string) ([]RedeemCode, int64, float64, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize}
-	if codeType == RedeemTypeAffiliateBalance {
-		codes, total, err := s.listAffiliateBalanceHistory(ctx, userID, params)
+	if codeType == RedeemTypeAffiliateBalance || codeType == BalanceHistoryTypeAutoCredit {
+		var codes []RedeemCode
+		var total int64
+		var err error
+		if codeType == BalanceHistoryTypeAutoCredit {
+			codes, total, err = s.listAutoCreditBalanceHistory(ctx, userID, params.Offset(), params.Limit())
+		} else {
+			codes, total, err = s.listAffiliateBalanceHistory(ctx, userID, params)
+		}
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -812,13 +851,17 @@ func (s *adminServiceImpl) getAllUserBalanceHistory(ctx context.Context, userID 
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	codes := mergeBalanceHistoryCodes(redeemCodes, affiliateCodes, params)
+	autoCreditCodes, autoCreditTotal, err := s.listAutoCreditBalanceHistory(ctx, userID, 0, needed)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	codes := mergeBalanceHistoryCodes(redeemCodes, affiliateCodes, params, autoCreditCodes)
 
 	totalRecharged, err := s.redeemCodeRepo.SumPositiveBalanceByUser(ctx, userID)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	return codes, redeemTotal + affiliateTotal, totalRecharged, nil
+	return codes, redeemTotal + affiliateTotal + autoCreditTotal, totalRecharged, nil
 }
 
 func (s *adminServiceImpl) listRedeemBalanceHistoryForMerge(ctx context.Context, userID int64, needed int) ([]RedeemCode, int64, error) {
@@ -955,8 +998,11 @@ WHERE user_id = $1
 	return total.Int64, nil
 }
 
-func mergeBalanceHistoryCodes(redeemCodes, affiliateCodes []RedeemCode, params pagination.PaginationParams) []RedeemCode {
+func mergeBalanceHistoryCodes(redeemCodes, affiliateCodes []RedeemCode, params pagination.PaginationParams, additional ...[]RedeemCode) []RedeemCode {
 	combined := append(append([]RedeemCode{}, redeemCodes...), affiliateCodes...)
+	for _, codes := range additional {
+		combined = append(combined, codes...)
+	}
 	sort.SliceStable(combined, func(i, j int) bool {
 		return redeemCodeHistoryTime(combined[i]).After(redeemCodeHistoryTime(combined[j]))
 	})

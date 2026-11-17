@@ -1,6 +1,13 @@
+vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template: '<span />' } }))
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn(), readChannelBindings: vi.fn(), bindChannelAccounts: vi.fn() }))
 import { readChannelBindings, listUpstreamChannels } from '@/api/admin/upstreamChannels'
 import UpstreamChannelSelector from '../UpstreamChannelSelector.vue'
+import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/accountTokenGuard'
+
+vi.mock('@/api/admin/accountTokenGuard', async original => ({
+  ...await original<typeof import('@/api/admin/accountTokenGuard')>(),
+  startTwoFALogin: vi.fn(), getTwoFALogin: vi.fn(), deleteTwoFALogin: vi.fn(),
+}))
 
 vi.mock('@/api/admin/credentialEncryption', () => ({
   getCredentialEncryption: vi.fn().mockResolvedValue({ configured: true, source: 'server_config' }),
@@ -61,6 +68,10 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    proxies: {
+      getProxyAccounts: vi.fn().mockResolvedValue([]),
+      testProxy: vi.fn().mockResolvedValue({ success: true, message: 'Connected', latency_ms: 12 }),
+    },
     accounts: {
       getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       create: createAccountMock,
@@ -100,6 +111,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import CreateAccountModal from '../CreateAccountModal.vue'
+import BPSProxyRoutingSettings from '../BPSProxyRoutingSettings.vue'
 import OpenAITwoFAImport from '../OpenAITwoFAImport.vue'
 
 const BaseDialogStub = defineComponent({
@@ -116,6 +128,7 @@ const OAuthAuthorizationFlowStub = defineComponent({
     showAgentIdentityOption: Boolean,
     showCodexPatOption: Boolean,
     initialInputMethod: String,
+    error: String,
   },
   data: () => ({ inputMethod: 'manual', authCode: '', oauthState: '' }),
   methods: {
@@ -127,6 +140,7 @@ const OAuthAuthorizationFlowStub = defineComponent({
   emits: ['generate-url', 'validate-refresh-token', 'validate-mobile-refresh-token', 'import-codex-session', 'import-codex-pat'],
   template: `
     <div>
+      <p>{{ error }}</p>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
       <button data-testid="import-codex-pat" @click="$emit('import-codex-pat', 'pat-token')">pat</button>
     </div>
@@ -175,12 +189,14 @@ const ModelWhitelistSelectorStub = defineComponent({
   >models</button>`,
 })
 
-function mountModal(groups: any[] = []) {
+function mountModal(groups: any[] = [], realDialog = false, proxies: any[] = []) {
   return mount(CreateAccountModal, {
-    props: { show: true, proxies: [], groups },
+    attachTo: realDialog ? document.body : undefined,
+    props: { show: true, proxies, groups },
     global: {
       stubs: {
-        BaseDialog: BaseDialogStub,
+        BaseDialog: realDialog ? false : BaseDialogStub,
+        teleport: true,
         OAuthAuthorizationFlow: OAuthAuthorizationFlowStub,
         ConfirmDialog: true,
         Select: true,
@@ -260,6 +276,210 @@ function expectWSAcceleration(extra: unknown, enabled: boolean) {
 }
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
+  it('offers one unified single or multiple proxy entry for ordinary OpenAI OAuth', async () => {
+    const wrapper = mountModal([], false, [{ id: 11, name: 'Proxy A', status: 'active', expires_at: null }])
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.findAll('[data-testid="openai-proxy-settings"]')).toHaveLength(1)
+    expect(wrapper.findAllComponents({ name: 'ProxySelector' })).toHaveLength(1)
+    expect(wrapper.find('[data-testid="bps-oauth-models"] [data-testid="bps-proxy-routing"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    expect(wrapper.findAllComponents({ name: 'ProxySelector' })).toHaveLength(0)
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.bpsProxyRouting')
+    expect(wrapper.text()).toContain('admin.accounts.openai.proxyRequestHint')
+  })
+
+  it('creates ordinary OAuth with unified request proxies and authorizes through the first usable selected proxy', async () => {
+    const wrapper = mountModal([], false, [
+      { id: 11, name: 'Proxy A', status: 'active', expires_at: null },
+      { id: 22, name: 'Proxy B', status: 'active', expires_at: null },
+      { id: 45, name: 'Previous single proxy', status: 'active', expires_at: null },
+    ])
+    await selectButtonByText(wrapper, 'OpenAI')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', 45)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Ordinary proxy group')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-22"]').setValue(true)
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.$emit('generate-url')
+    await flushPromises()
+    expect(generateAuthUrlMock).toHaveBeenLastCalledWith('/admin/openai/generate-auth-url', { proxy_mode: 'request', proxy_ids: [22, 11] })
+    exchangeCodeMock.mockResolvedValueOnce({ access_token: 'ordinary-at', refresh_token: 'ordinary-rt', expires_at: 1900000000 })
+    flow.vm.authCode = 'code'
+    flow.vm.oauthState = 'state'
+    await flushPromises()
+    await selectButtonByText(wrapper, 'admin.accounts.oauth.completeAuth')
+    expect(exchangeCodeMock).toHaveBeenLastCalledWith('/admin/openai/exchange-code', expect.objectContaining({ proxy_mode: 'request', proxy_ids: [22, 11] }))
+    expect(exchangeCodeMock.mock.lastCall?.[1]).not.toHaveProperty('proxy_id')
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({ proxy_id: 45, extra: expect.objectContaining({ openai_proxy_mode: 'request', openai_proxy_ids: [22, 11] }) }))
+  })
+
+  it.each(['expired', 'removed', 'host', 'port', 'protocol', 'credentials', 'inactive'])('requires new authorization when its original request proxy is %s even if another selected proxy is usable', async change => {
+    const proxies = [
+      { id: 11, name: 'Original exit', protocol: 'http', host: 'original.example.test', port: 8080, status: 'active', expires_at: null },
+      { id: 22, name: 'Other exit', protocol: 'http', host: 'other.example.test', port: 8080, status: 'active', expires_at: null },
+    ]
+    generateAuthUrlMock.mockResolvedValueOnce({
+      auth_url: 'https://example.test/auth?state=test-state', session_id: 'test-session', proxy_id: 11,
+    })
+    const wrapper = mountModal([], false, proxies)
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Fixed authorization exit')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await wrapper.get('[data-testid="bps-proxy-22"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.$emit('generate-url')
+    await flushPromises()
+    const changes = {
+      expired: { expires_at: '2000-01-01T00:00:00Z' },
+      host: { host: 'replacement.example.test' },
+      port: { port: 9000 },
+      protocol: { protocol: 'socks5' },
+      credentials: { username: 'different-user' },
+      inactive: { status: 'inactive' },
+      removed: {},
+    }
+    await wrapper.setProps({ proxies: change === 'removed' ? [proxies[1]] : [{ ...proxies[0], ...changes[change as keyof typeof changes] }, proxies[1]] })
+    await flow.setData({ authCode: 'test-code' })
+    await selectButtonByText(wrapper, 'admin.accounts.oauth.completeAuth')
+    expect(exchangeCodeMock).not.toHaveBeenCalled()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.accounts.openai.proxyAuthorizationChanged')
+  })
+
+  it('retains the actual server-selected authorization exit when it differs from the first local candidate', async () => {
+    generateAuthUrlMock.mockResolvedValueOnce({
+      auth_url: 'https://example.test/auth?state=test-state', session_id: 'test-session', proxy_mode: 'request', proxy_id: 22,
+    })
+    const wrapper = mountModal([], false, [
+      { id: 11, name: 'First candidate', protocol: 'http', host: 'first.example.test', port: 8080, status: 'active', expires_at: null },
+      { id: 22, name: 'Server-selected exit', protocol: 'http', host: 'selected.example.test', port: 8080, status: 'active', expires_at: null },
+    ])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Server-selected authorization')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await wrapper.get('[data-testid="bps-proxy-22"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.$emit('generate-url')
+    await flushPromises()
+    await flow.setData({ authCode: 'test-code' })
+    await selectButtonByText(wrapper, 'admin.accounts.oauth.completeAuth')
+    expect(exchangeCodeMock).toHaveBeenCalledWith('/admin/openai/exchange-code', {
+      code: 'test-code', session_id: 'test-session', state: 'test-state', proxy_mode: 'request', proxy_ids: [11, 22],
+    })
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['single', 'request'] as const)('requires fresh authorization after switching away from %s mode', async initialMode => {
+    const wrapper = mountModal([], false, [
+      { id: 11, name: 'Selected exit', protocol: 'http', host: 'selected.example.test', port: 8080, status: 'active', expires_at: null },
+    ])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Changed authorization mode')
+    if (initialMode === 'request') {
+      await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+      await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+      await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    }
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('generate-url')
+    await flushPromises()
+    await selectButtonByText(wrapper, 'common.back')
+    const nextMode = initialMode === 'single' ? 'request' : 'single'
+    await wrapper.get(`[data-testid="openai-proxy-mode-${nextMode}"]`).setValue()
+    if (nextMode === 'request') {
+      await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+      await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    }
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.getComponent(OAuthAuthorizationFlowStub).setData({ authCode: 'old-code' })
+    const complete = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.oauth.completeAuth'))!
+    expect(complete.attributes('disabled')).toBeDefined()
+    await complete.trigger('click')
+    expect(exchangeCodeMock).not.toHaveBeenCalled()
+    expect(createAccountMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['pat', 'agent_identity'])('blocks unsupported %s imports in request mode instead of falling back to the single proxy', async method => {
+    const wrapper = mountModal([], false, [{ id: 11, name: 'Request proxy', status: 'active', expires_at: null }])
+    await selectButtonByText(wrapper, 'OpenAI')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', 45)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Unsupported import')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    if (method === 'pat') await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
+    else flow.vm.$emit('import-codex-session', JSON.stringify({ auth_mode: 'agentIdentity', agent_identity: {} }))
+    await flushPromises()
+    expect(createOpenAICodexPATMock).not.toHaveBeenCalled()
+    expect(importCodexSessionMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.accounts.openai.proxyUnsupportedImport')
+  })
+
+  it('blocks authorization and session import if the selected proxy group becomes unavailable', async () => {
+    const wrapper = mountModal([], false, [{ id: 11, name: 'Request proxy', status: 'active', expires_at: null }])
+    await selectButtonByText(wrapper, 'OpenAI')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', 45)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Unavailable group')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.setProps({ proxies: [{ id: 11, name: 'Expired', status: 'active', expires_at: '2000-01-01T00:00:00Z' }] })
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.$emit('generate-url')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(generateAuthUrlMock).not.toHaveBeenCalled()
+    expect(importCodexSessionMock).not.toHaveBeenCalled()
+    expect(createAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('rechecks proxy expiration at authorization time even when the catalog has not changed', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-16T00:00:00Z'))
+    try {
+      const wrapper = mountModal([], false, [{ id: 11, name: 'Expiring proxy', status: 'active', expires_at: '2026-11-16T00:01:00Z' }])
+      await selectButtonByText(wrapper, 'OpenAI')
+      await wrapper.get('form#create-account-form input[type="text"]').setValue('Expiring group')
+      await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+      await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+      await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      now.mockReturnValue(Date.parse('2026-11-16T00:02:00Z'))
+      wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('generate-url')
+      await flushPromises()
+      expect(generateAuthUrlMock).not.toHaveBeenCalled()
+    } finally { now.mockRestore() }
+  })
+
+  it('explains that first-time 2FA login requires single mode and permits request distribution after import', async () => {
+    const wrapper = mountModal([], false, [{ id: 11, name: 'Request proxy', status: 'active', expires_at: null }])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('2FA import')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    expect(wrapper.get('[data-testid="openai-proxy-two-fa-hint"]').text()).toBe('admin.accounts.openai.proxyTwoFAFirstImport')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(wrapper.findComponent(OpenAITwoFAImport).exists()).toBe(false)
+    expect(startTwoFALogin).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="openai-proxy-mode-single"]').setValue()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(wrapper.findComponent(OpenAITwoFAImport).exists()).toBe(true)
+  })
   it('leaves upstream response-tier billing disabled by default', async () => {
     await submitApiKeyAccount('openai')
 
@@ -368,6 +588,125 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expectWSAcceleration(payload.extra, clicks === 1)
     expect(wrapper.emitted('created')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('forwards proxy catalog loading, failure and retry without changing the BPS selection or OAuth proxy', async () => {
+    const proxies = [
+      { id: 11, name: 'Request proxy', protocol: 'http', host: 'request.example.test', port: 8080, status: 'active', expires_at: null },
+      { id: 45, name: 'OAuth proxy', protocol: 'http', host: 'oauth.example.test', port: 8080, status: 'active', expires_at: null },
+    ]
+    const wrapper = mountModal([], false, proxies)
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', 45)
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    const picker = wrapper.getComponent(BPSProxyRoutingSettings)
+    const selections = picker.emitted('update:proxyIds')?.length ?? 0
+
+    await wrapper.setProps({ proxiesLoading: true, proxies: [] })
+    expect(picker.props('loading')).toBe(true)
+    expect(wrapper.get('[data-testid="bps-proxy-trigger"]').attributes('disabled')).toBeDefined()
+    await wrapper.setProps({ proxiesLoading: false, proxiesLoadError: true })
+    expect(picker.props('loadError')).toBe(true)
+    expect(wrapper.text()).toContain('admin.accounts.openai.bpsProxyLoadFailed')
+    await wrapper.get('[data-testid="bps-proxy-catalog-retry"]').trigger('click')
+    expect(wrapper.emitted('retry-proxies')).toHaveLength(1)
+    await wrapper.setProps({ proxiesLoadError: false, proxies })
+    expect(picker.props('proxyIds')).toEqual([11])
+    expect(picker.emitted('update:proxyIds')).toHaveLength(selections)
+    expect(wrapper.getComponent({ name: 'OpenAIProxySettings' }).props('singleProxyId')).toBe(45)
+    expect(wrapper.find('[data-testid="bps-proxy-catalog-retry"]').exists()).toBe(false)
+  })
+
+  it('creates a BPS account with the explicitly selected proxy group', async () => {
+    const wrapper = mountModal([], false, [
+      { id: 11, name: 'Proxy A', status: 'active', expires_at: null },
+      { id: 22, name: 'Proxy B', status: 'active', expires_at: null },
+      { id: 33, name: 'Proxy C', status: 'active', expires_at: null },
+    ])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS proxy group')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await wrapper.get('[data-testid="bps-proxy-22"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.$emit('generate-url')
+    await flushPromises()
+    exchangeCodeMock.mockResolvedValueOnce({ access_token: 'excel-at', refresh_token: 'excel-rt', client_id: 'app_fnr0pYvVwwFDocDumLG3H2Bp', expires_at: 1900000000 })
+    flow.vm.authCode = 'code'
+    flow.vm.oauthState = 'state'
+    await flushPromises()
+    await selectButtonByText(wrapper, 'admin.accounts.oauth.completeAuth')
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      proxy_id: null,
+      extra: expect.objectContaining({ openai_excel_bps: true, openai_proxy_mode: 'request', openai_proxy_ids: [11, 22] }),
+    }))
+  })
+
+  it('requires a selected proxy before starting BPS request mode authorization', async () => {
+    const wrapper = mountModal([], false, [{ id: 11, name: 'Proxy A', status: 'active', expires_at: null }])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS empty proxy group')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(wrapper.findComponent(OAuthAuthorizationFlowStub).exists()).toBe(false)
+    expect(generateAuthUrlMock).not.toHaveBeenCalled()
+    expect(createAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('does not carry the BPS request proxy group into an API-key account', async () => {
+    const wrapper = mountModal([], false, [{ id: 11, name: 'Proxy A', status: 'active', expires_at: null }])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.find('[data-testid="bps-proxy-routing"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Unrelated API key')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload.type).toBe('apikey')
+    expect(payload.extra).not.toHaveProperty('openai_excel_bps_proxy_mode')
+    expect(payload.extra).not.toHaveProperty('openai_excel_bps_proxy_ids')
+    expect(payload.extra).not.toHaveProperty('openai_proxy_mode')
+    expect(payload.extra).not.toHaveProperty('openai_proxy_ids')
+  })
+
+  it('uses the selected BPS group for authorization while retaining the previous single proxy', async () => {
+    const wrapper = mountModal([], false, [
+      { id: 11, name: 'Request proxy', status: 'active', expires_at: null },
+      { id: 45, name: 'OAuth proxy', status: 'active', expires_at: null },
+    ])
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-bps-oauth"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('BPS separate proxies')
+    wrapper.getComponent({ name: 'ProxySelector' }).vm.$emit('update:modelValue', 45)
+    await wrapper.get('[data-testid="openai-proxy-mode-request"]').setValue()
+    await wrapper.get('[data-testid="bps-proxy-trigger"]').trigger('click')
+    await wrapper.get('[data-testid="bps-proxy-11"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.$emit('generate-url')
+    await flushPromises()
+    expect(generateAuthUrlMock).toHaveBeenLastCalledWith('/admin/openai/generate-auth-url', { oauth_client: 'excel', proxy_mode: 'request', proxy_ids: [11] })
+    exchangeCodeMock.mockResolvedValueOnce({ access_token: 'excel-at', refresh_token: 'excel-rt', client_id: 'app_fnr0pYvVwwFDocDumLG3H2Bp', expires_at: 1900000000 })
+    flow.vm.authCode = 'code'
+    flow.vm.oauthState = 'state'
+    await flushPromises()
+    await selectButtonByText(wrapper, 'admin.accounts.oauth.completeAuth')
+    expect(exchangeCodeMock).toHaveBeenLastCalledWith('/admin/openai/exchange-code', expect.objectContaining({ proxy_mode: 'request', proxy_ids: [11] }))
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({ proxy_id: 45, extra: expect.objectContaining({ openai_proxy_ids: [11] }) }))
   })
 
   it('creates BPS OAuth through the Excel client and enables only the selected BPS models', async () => {
@@ -517,9 +856,10 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
     authIsSimpleMode.value = true
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
-    generateAuthUrlMock.mockReset().mockResolvedValue({
+    generateAuthUrlMock.mockReset().mockImplementation(async (_endpoint: string, config: { proxy_mode?: string; proxy_ids?: number[] }) => ({
       auth_url: 'https://example.test/auth?state=test-state', session_id: 'test-session',
-    })
+      ...(config.proxy_mode === 'request' ? { proxy_mode: 'request', proxy_id: config.proxy_ids?.[0] } : {}),
+    }))
     const tokenInfo = {
       access_token: 'test-access', refresh_token: 'test-refresh', email: 'user@example.com',
       name: 'Account owner', privacy_mode: 'training_disabled',
@@ -584,6 +924,173 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createCredentialOperationsMock.mock.calls[1]?.[0]).toMatchObject({
       account_id: 42, password: login.password, totp_secret: login.mfa_secret, enabled: true, auto_relogin_enabled: true,
     })
+  })
+
+  it('keeps parallel 2FA imports and enrollment identities isolated until each enrollment completes', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const callback = wrapper.getComponent(OpenAITwoFAImport).props('importCredential')
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>(yes => { resolve = yes })
+      return { promise, resolve }
+    }
+    type Result = { created: number; failed: number; items: { action: string; account_id: number }[] }
+    const imports = [deferred<Result>(), deferred<Result>()]
+    const enrollments = [deferred<void>(), deferred<void>()]
+    importCodexSessionMock.mockImplementationOnce(() => imports[0]!.promise).mockImplementationOnce(() => imports[1]!.promise)
+    createCredentialOperationsMock.mockImplementation((entry: { account_id: number }) => enrollments[entry.account_id - 41]!.promise)
+    const logins = [41, 42].map(id => ({ email: `fixture-${id}@example.test`, password: `synthetic-${id}`, mfa_secret: `synthetic-secret-${id}` }))
+    const controller = new AbortController()
+    const completed: number[] = []
+    const tasks = logins.map((login, i) => callback({ synthetic_account: i + 41 }, login.email, login, controller.signal).then(() => completed.push(i)))
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(2)
+    expect(createCredentialOperationsMock).not.toHaveBeenCalled()
+    imports[1]!.resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 42 }] })
+    await flushPromises()
+    expect(createCredentialOperationsMock).toHaveBeenCalledTimes(1)
+    expect(createCredentialOperationsMock).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 42, login_email: logins[1]!.email, password: logins[1]!.password, totp_secret: logins[1]!.mfa_secret }), { signal: controller.signal })
+    expect(completed).toEqual([])
+    imports[0]!.resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 41 }] })
+    await flushPromises()
+    expect(createCredentialOperationsMock).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 41, login_email: logins[0]!.email, password: logins[0]!.password, totp_secret: logins[0]!.mfa_secret }), { signal: controller.signal })
+    enrollments[1]!.resolve()
+    await flushPromises()
+    expect(completed).toEqual([1])
+    enrollments[0]!.resolve()
+    await Promise.all(tasks)
+    expect(completed).toEqual([1, 0])
+    expect(wrapper.emitted('created')).toHaveLength(2)
+  })
+
+  it('does not enroll or announce success when stopped while a 2FA import response is pending', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    let resolve!: (result: unknown) => void
+    importCodexSessionMock.mockImplementationOnce(() => new Promise(yes => { resolve = yes }))
+    const controller = new AbortController()
+    const login = { email: 'fixture@example.test', password: 'synthetic', mfa_secret: 'synthetic-secret' }
+    const task = wrapper.getComponent(OpenAITwoFAImport).props('importCredential')({ synthetic_account: 41 }, login.email, login, controller.signal)
+    const rejection = expect(task).rejects.toThrow()
+    expect(importCodexSessionMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+    controller.abort()
+    resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 41 }] })
+    await rejection
+    expect(createCredentialOperationsMock).not.toHaveBeenCalled()
+    expect(wrapper.emitted('created')).toBeUndefined()
+  })
+
+  it.each(['deferred', 'failed'] as const)('2FA controlled Close/reopen preserves jobs through %s DELETE and allows cleanup recovery', async initialMode => {
+    const emails = ['a', 'b', 'c', 'd', 'e'].map(name => `${name}@example.test`)
+    const input = emails.map(email => `${email}----synthetic-password----synthetic-secret`).join('\n')
+    const live = new Map<string, string>()
+    let peak = 0
+    let sequence = 0
+    let mode: 'deferred' | 'failed' | 'confirmed' = initialMode
+    let retire!: () => void
+    const retirement = new Promise<void>(resolve => { retire = resolve })
+    vi.mocked(startTwoFALogin).mockReset().mockImplementation(async entry => {
+      const id = `fixture-${++sequence}`
+      live.set(id, entry.email)
+      peak = Math.max(peak, live.size)
+      return { id, status: 'running' }
+    })
+    vi.mocked(getTwoFALogin).mockReset().mockRejectedValue(Error('synthetic polling failure'))
+    vi.mocked(deleteTwoFALogin).mockReset().mockImplementation(async id => {
+      if (mode === 'failed') throw { status: 503 }
+      if (mode === 'deferred') await retirement
+      live.delete(id)
+    })
+    // Actual CreateAccountModal + BaseDialog + importer. Match AccountsView's
+    // controlled close listener instead of manually unmounting just the child.
+    const wrapper = mountModal([], true)
+    await wrapper.setProps({ onClose: () => { void wrapper.setProps({ show: false }) } })
+    const enter = async () => {
+      await selectButtonByText(wrapper, 'OpenAI')
+      await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await flushPromises()
+      const importer = wrapper.getComponent(OpenAITwoFAImport)
+      await importer.get('textarea').setValue(input)
+      await importer.get('[data-testid="two-fa-start"]').trigger('click')
+      await flushPromises()
+      return importer
+    }
+    try {
+      const original = await enter()
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+      await wrapper.get('[aria-label="Close modal"]').trigger('click')
+      await flushPromises()
+      // Reopen exactly as the owner would. The reviewed implementation has
+      // already dropped its rows here, and the next submission reaches six.
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+      if (!wrapper.findComponent(OpenAITwoFAImport).exists()) await enter()
+      expect(live.size).toBe(3)
+      expect(peak).toBe(3)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+      expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
+      expect(wrapper.emitted('close')).toBeUndefined()
+      expect(original.get('[data-testid="two-fa-owned-jobs"]').text()).toContain('tokenGuard.twoFA.ownedJobs')
+      expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await selectButtonByText(wrapper, 'common.back')
+      await flushPromises()
+      expect(wrapper.props('show')).toBe(true)
+      expect(wrapper.emitted('close')).toBeUndefined()
+
+      // Idle polling failures still offer explicit cleanup, so the Close fence
+      // has a visible recovery path without re-submitting any login.
+      await original.get('[data-testid="two-fa-stop"]').trigger('click')
+      await flushPromises()
+      expect(deleteTwoFALogin).toHaveBeenCalledTimes(3)
+      await wrapper.get('[aria-label="Close modal"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.props('show')).toBe(true)
+      expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+      if (initialMode === 'failed') {
+        expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
+        expect(original.get('[data-testid="two-fa-stop"]').attributes('disabled')).toBeUndefined()
+        expect(original.find('[data-testid="two-fa-owned-jobs"]').exists()).toBe(true)
+        mode = 'deferred'
+        await original.get('[data-testid="two-fa-stop"]').trigger('click')
+        await flushPromises()
+        expect(deleteTwoFALogin).toHaveBeenCalledTimes(6)
+      }
+      // Unconfirmed retirement cannot release the modal.
+      expect(live.size).toBe(3)
+      retire()
+      await flushPromises()
+      expect(live.size).toBe(0)
+      expect(original.find('[data-testid="two-fa-owned-jobs"]').exists()).toBe(false)
+      await wrapper.get('[aria-label="Close modal"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.props('show')).toBe(false)
+      expect(wrapper.emitted('close')).toHaveLength(1)
+      expect(wrapper.findComponent(OpenAITwoFAImport).exists()).toBe(false)
+      await wrapper.setProps({ show: true })
+      mode = 'confirmed'
+      const reopened = await enter()
+      expect(reopened.vm.$.uid).not.toBe(original.vm.$.uid)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(6)
+      expect(live.size).toBe(3)
+      expect(new Set(live.values()).size).toBe(3)
+      expect(peak).toBe(3)
+      await reopened.get('[data-testid="two-fa-stop"]').trigger('click')
+      await flushPromises()
+      expect(live.size).toBe(0)
+    } finally {
+      mode = 'confirmed'
+      retire()
+      wrapper.unmount()
+      await flushPromises()
+    }
   })
 
   it('sets month and year expiry presets without submitting the account form', async () => {
@@ -1094,7 +1601,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const labels = (testid: string) =>
       wrapper.get(`[data-testid="${testid}"]`).findAll('button').map(button => button.text().trim())
     expect(labels('platform-row-cn')).toEqual(['Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax'])
-    expect(labels('platform-row-aggregators')).toEqual(['OpenCode', 'Command Code', 'Cline', 'Mistral'])
+    expect(labels('platform-row-aggregators')).toEqual(['OpenCode', 'Command Code', 'Cline', 'Mistral', 'Qwen'])
   })
 
   it('creates a Cline account without an account type and with only the Chat Completions endpoint', async () => {
@@ -1119,6 +1626,48 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.credentials).not.toHaveProperty('protocol_rules')
     expect(payload?.credentials?.api_base_urls).not.toHaveProperty('responses')
     expect(payload?.credentials?.api_base_urls).not.toHaveProperty('anthropic')
+  })
+
+  it('creates Qwen with an independent platform and Chat Completions credentials', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-qwen"]').trigger('click')
+    expect(wrapper.find('[data-testid="generic-account-mode"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Qwen fixture')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture-qwen-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'qwen', type: 'apikey',
+      credentials: {
+        api_key: 'fixture-qwen-key', account_mode: 'payg', api_protocol: 'adaptive',
+        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        api_base_urls: { chat_completions: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+      },
+    })
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials.api_base_urls).not.toHaveProperty('responses')
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('model_mapping')
+  })
+
+  it('saves Qwen cache options and replaces both endpoint fields with the Token Plan preset', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-qwen"]').trigger('click')
+    await wrapper.get('[data-testid="qwen-session-cache"]').setValue(true)
+    await wrapper.get('[data-testid="qwen-strict-affinity"]').setValue(true)
+    await wrapper.get('[data-testid="qwen-token-plan-url"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Qwen cache fixture')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'qwen', type: 'apikey', credentials: {
+        base_url: 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1',
+        api_base_urls: { chat_completions: 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1' },
+        qwen_session_cache_enabled: true,
+        qwen_strict_session_affinity: true
+      }
+    })
   })
 
   it('creates Mistral through the catalog with API key and only its native Chat endpoint', async () => {
@@ -1580,4 +2129,13 @@ describe('explicit upstream channel on account creation', () => {
   await selector.get('[data-testid="upstream-channel-select"]').setValue('7')
   expect(w.find('[data-testid="confirm-create-channel"]').exists()).toBe(true)
  })
+})
+
+describe('mature provider import entry', () => {
+  it('offers provider selection for OpenAI API Key and Responses accounts', async () => {
+    const w = mountModal()
+    await selectButtonByText(w, 'OpenAI')
+    await selectButtonByText(w, 'API Key')
+    expect(w.find('[data-testid="provider-import-mode"]').exists(), 'API Key and Responses accounts must offer provider import').toBe(true)
+  })
 })

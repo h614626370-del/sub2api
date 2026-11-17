@@ -73,9 +73,10 @@ type APIKey struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 
-	ModelMapping     map[string]string `json:"model_mapping"`
-	ReasoningEffort  string            `json:"reasoning_effort"`
-	AllowLongContext bool              `json:"allow_long_context"`
+	ModelMapping      map[string]string `json:"model_mapping"`
+	ReasoningEffort   string            `json:"reasoning_effort"`
+	ContextTokenLimit int               `json:"context_token_limit"`
+	AllowLongContext  bool              `json:"allow_long_context"`
 
 	// CurrentConcurrency is the real-time active request count for this API key.
 	CurrentConcurrency int `json:"current_concurrency"`
@@ -182,8 +183,9 @@ type AdminGroup struct {
 	Group
 	// ForceOpenAIFast 是管理端请求策略，用户侧分组 DTO 无需暴露。
 	ForceOpenAIFast bool `json:"force_openai_fast"`
-	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。
-	FreeOpenAIFast bool `json:"free_openai_fast"`
+	// FreeOpenAIFast/FreeOpenAIUltrafast 是独立的管理端计费策略，用户侧分组 DTO 无需暴露。
+	FreeOpenAIFast      bool `json:"free_openai_fast"`
+	FreeOpenAIUltrafast bool `json:"free_openai_ultrafast"`
 	// StreamOnly 是管理端请求策略（只接受流式的对话生成请求），用户侧分组 DTO 无需暴露。
 	StreamOnly     bool `json:"stream_only"`
 	CodexCLIOnly   bool `json:"codex_cli_only"`
@@ -561,7 +563,8 @@ type RedeemCode struct {
 type AdminRedeemCode struct {
 	RedeemCode
 
-	Notes string `json:"notes"`
+	Notes      string                            `json:"notes"`
+	AutoCredit *service.AutoCreditBalanceHistory `json:"auto_credit,omitempty"`
 }
 
 type NullableTimeField struct {
@@ -619,13 +622,14 @@ type BatchUpdateRedeemCodesRequest struct {
 
 // UsageLog 是普通用户接口使用的 usage log DTO（不包含管理员字段）。
 type UsageLog struct {
-	ContentTiming *requesttiming.ContentObservation `json:"content_timing,omitempty"`
-	ID            int64                             `json:"id"`
-	UserID        int64                             `json:"user_id"`
-	APIKeyID      int64                             `json:"api_key_id"`
-	AccountID     int64                             `json:"account_id"`
-	RequestID     string                            `json:"request_id"`
-	Model         string                            `json:"model"`
+	CustomerCostDetails *service.CustomerCostDetails      `json:"customer_cost_details,omitempty"`
+	ContentTiming       *requesttiming.ContentObservation `json:"content_timing,omitempty"`
+	ID                  int64                             `json:"id"`
+	UserID              int64                             `json:"user_id"`
+	APIKeyID            int64                             `json:"api_key_id"`
+	AccountID           int64                             `json:"account_id"`
+	RequestID           string                            `json:"request_id"`
+	Model               string                            `json:"model"`
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string `json:"service_tier,omitempty"`
 	// ReasoningEffort is the client-requested effort (mapping-hidden, like Model).
@@ -645,8 +649,10 @@ type UsageLog struct {
 	CacheCreationTokens int `json:"cache_creation_tokens"`
 	CacheReadTokens     int `json:"cache_read_tokens"`
 
-	CacheCreation5mTokens int `json:"cache_creation_5m_tokens"`
-	CacheCreation1hTokens int `json:"cache_creation_1h_tokens"`
+	CacheCreation5mTokens  int `json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens  int `json:"cache_creation_1h_tokens"`
+	CacheCreation30mTokens int `json:"cache_creation_30m_tokens"`
+	CacheCreation12hTokens int `json:"cache_creation_12h_tokens"`
 
 	InputCost                 float64 `json:"input_cost"`
 	OutputCost                float64 `json:"output_cost"`

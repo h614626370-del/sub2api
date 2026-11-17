@@ -187,7 +187,7 @@ git switch -c fix/describe-the-change project/production
 
 ### 环境与依赖
 
-工具链以当前 checkout 的 [backend/go.mod](backend/go.mod)、[CI](.github/workflows/backend-ci.yml)、[frontend/package.json](frontend/package.json) 和锁文件为准。本指南编写时，后端 CI 使用 Go 1.27.3 与 golangci-lint v2.14.0；前端要求 Node.js >=22，CI 使用 Node.js 22 和 pnpm 9，与锁定的 vue-i18n / @intlify/message-compiler 11.4.16（Node.js >=22）一致，frontend/package.json 的 engines 与所有前端工作流保持一致；Docker 前端构建阶段使用 Node.js 24。版本要求变化时一并更新说明，不沿用旧教程中的最低版本。
+工具链以当前 checkout 的 [backend/go.mod](backend/go.mod)、[CI](.github/workflows/backend-ci.yml)、[frontend/package.json](frontend/package.json) 和锁文件为准。本指南编写时，后端 CI 使用 Go 1.27.4 与 golangci-lint v2.14.0；前端要求 Node.js >=22，CI 使用 Node.js 22 和 pnpm 9，与锁定的 vue-i18n / @intlify/message-compiler 11.4.16（Node.js >=22）一致，frontend/package.json 的 engines 与所有前端工作流保持一致；Docker 前端构建阶段使用 Node.js 24。版本要求变化时一并更新说明，不沿用旧教程中的最低版本。
 
 运行应用需要独立的 PostgreSQL/Redis 测试环境，配置与初始化方式见 [部署说明](deploy/README.md)。部分集成测试通过 testcontainers 启动依赖，需要可用的 Docker；缺少 Docker 或测试环境变量可能导致用例跳过，检查日志中的 skip 信息，不能仅凭退出码声称全部覆盖。
 
@@ -212,6 +212,16 @@ pnpm --dir frontend run dev
 ```
 
 前端默认代理到 `http://localhost:8080`；需要改动时使用 `frontend/vite.config.ts` 定义的 `VITE_DEV_PROXY_TARGET` 和 `VITE_DEV_PORT`。首次初始化参考部署说明，在隔离实例中完成。测试和联调优先使用 mock/离线输入；真实付费调用、支付、发邮件和生产操作不作为默认验证步骤。
+
+### CI 工作流维护
+
+主 CI 按[改动范围与成功证据](.github/ci/README.md)选择 job；未变化部分不重复执行。纯文档或触发规则改动不跑应用全量检查，手动/tag/定时验证保留全量入口。
+
+主前端 CI 固定使用 GitHub 托管的 `ubuntu-latest`，通过 `NODE_OPTIONS=--max-old-space-size=6144` 为类型检查和关键测试提供 6 GiB Node 堆上限。`SUB2API_SUPPLEMENTARY_RUNNER` 仅用于发布辅助、Prism adapter 和前端安全检查，不再影响主前端任务的运行位置。
+
+主 CI、安全扫描、多机部署验收和 VIP 入账回归在 PR、`production` 推送及 `v*` tag 上运行，也支持手动触发；功能分支推送由 PR 检查覆盖，避免同一提交重复运行这些检查。新的 PR 提交会取消该 PR 旧提交的同名工作流，production/tag 验证不主动取消。
+
+可复用的回归测试优先进入现有测试集或按路径触发的工作流。为单次 PR 添加的固定基线 RED/GREEN、截图和试用构建应在完成后移入[历史 CI 归档](.github/workflow-archive/README.md)，避免长期绑定已合并分支或为无关 PR 创建跳过的检查。归档只移走工作流入口，测试源码和取证脚本继续保留。
 
 ### 按改动范围验证
 

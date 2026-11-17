@@ -276,7 +276,9 @@
             <div class="key-usage-cell text-sm">
               <div class="flex items-center gap-1.5">
                 <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
-                <span class="key-usage-amount font-medium text-gray-900 dark:text-white">
+                <span v-if="usageLoading && !usageStats[row.id]" data-test="usage-pending"
+                  class="inline-block h-3 w-14 animate-pulse rounded bg-gray-200 dark:bg-dark-600" />
+                <span v-else class="key-usage-amount font-medium text-gray-900 dark:text-white">
                   {{ formatUsageCost(row.id, 'today_actual_cost') }}
                 </span>
               </div>
@@ -484,6 +486,17 @@
               >
                 <Icon name="upload" size="sm" />
                 <span class="text-xs">{{ t('keys.importToCcSwitch') }}</span>
+              </button>
+              <button
+                type="button"
+                @click="importToMagpie(row)"
+                :disabled="publicSettingsLoading"
+                data-testid="magpie-import-button"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                :title="t('keys.magpieImport.preview')"
+              >
+                <Icon name="externalLink" size="sm" />
+                <span class="text-xs">{{ t('keys.importToMagpie') }}</span>
               </button>
               <!-- Toggle Status Button -->
               <button
@@ -718,6 +731,7 @@
             </button>
             <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyModelPolicy" :user-id="authStore.user?.id" />
             <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyLongContext" :user-id="authStore.user?.id" compact />
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyContextTokenLimit" :user-id="authStore.user?.id" compact />
           </div>
           <p class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.scopeHint') }}</p>
         </div>
@@ -1384,6 +1398,7 @@ import {
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
 import { isCodexQuickConfigPlatform } from '@/utils/codexQuickConfig'
+import { buildMagpieImportLink } from '@/utils/magpieImport'
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1674,6 +1689,7 @@ const selectedCodexQuickConfigPlatform = computed(() => {
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
+const publicSettingsLoading = ref(true)
 const dropdownRef = ref<HTMLElement | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
@@ -1897,40 +1913,49 @@ const loadApiKeys = async () => {
     pagination.value.total = response.total
     pagination.value.pages = response.pages
 
-    // Load usage stats for all API keys in the list
+    usageLoading.value = response.items.length > 0
     if (response.items.length > 0) {
-      const keyIds = response.items.map((k) => k.id)
-      try {
-        const usageResponse = await usageAPI.getDashboardApiKeysUsage(keyIds, {
-          signal,
-          start_date: usageStartDate.value,
-          end_date: usageEndDate.value,
-          timezone: getBrowserTimeZone()
-        })
-        if (signal.aborted) return
-        usageStats.value = usageResponse.stats
-      } catch (e) {
-        if (signal.aborted) return
-        if (!isAbortError(e)) {
-          usageFailed.value = true
-          appStore.showError(t('keys.failedToLoadUsage'))
-          console.error('Failed to load usage stats:', e)
-        }
-      }
+      void loadUsageStats(response.items.map((k) => k.id), controller, {
+        start_date: usageStartDate.value,
+        end_date: usageEndDate.value,
+        timezone: getBrowserTimeZone()
+      })
     }
+
   } catch (error) {
     if (signal.aborted || isAbortError(error)) {
       return
     }
     usageFailed.value = true
+    usageLoading.value = false
     appStore.showError(t('keys.failedToLoad'))
   } finally {
     if (abortController === controller) {
       loading.value = false
-      usageLoading.value = false
       concurrencyPageReady = true
       void refreshConcurrency()
     }
+  }
+}
+
+const loadUsageStats = async (
+  keyIds: number[],
+  controller: AbortController,
+  range: { start_date: string; end_date: string; timezone: string }
+) => {
+  const { signal } = controller
+  try {
+    const response = await usageAPI.getDashboardApiKeysUsage(keyIds, { signal, ...range })
+    if (signal.aborted || abortController !== controller || disposed) return
+    usageStats.value = response.stats
+  } catch (error) {
+    if (signal.aborted || abortController !== controller || disposed) return
+    if (!isAbortError(error)) {
+      usageFailed.value = true
+      appStore.showError(t('keys.failedToLoadUsage'))
+    }
+  } finally {
+    if (!signal.aborted && abortController === controller && !disposed) usageLoading.value = false
   }
 }
 
@@ -1971,6 +1996,8 @@ const loadPublicSettings = async () => {
     publicSettings.value = await authAPI.getPublicSettings()
   } catch (error) {
     console.error('Failed to load public settings:', error)
+  } finally {
+    publicSettingsLoading.value = false
   }
 }
 
@@ -2358,6 +2385,33 @@ const resetRateLimitUsage = async () => {
     const errorMsg = error.response?.data?.detail || t('keys.failedToResetRateLimit')
     appStore.showError(errorMsg)
   }
+}
+
+const importToMagpie = (row: ApiKey) => {
+  const settings = publicSettings.value
+  if (!settings) {
+    appStore.showError(t('keys.magpieImport.settingsUnavailable'))
+    return
+  }
+  const result = buildMagpieImportLink({
+    dashboardOrigin: window.location.origin,
+    baseUrl: settings.api_base_url,
+    siteName: settings.site_name,
+    row
+  })
+  if ('error' in result) {
+    appStore.showError(t(`keys.magpieImport.${result.error}`))
+    return
+  }
+
+  // Launch from the click itself. Browsers cannot confirm whether the app opened.
+  try {
+    window.open(result.url, '_self')
+  } catch {
+    appStore.showError(t('keys.magpieImport.openHelp'))
+    return
+  }
+  appStore.showInfo(t('keys.magpieImport.openHelp'), 6500)
 }
 
 const importToCcswitch = (row: ApiKey) => {

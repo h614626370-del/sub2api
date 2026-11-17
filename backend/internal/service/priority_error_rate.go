@@ -242,7 +242,21 @@ func (s *OpenAIGatewayService) observePriorityAttempt(req *http.Request, account
 }
 
 // Used by HTTP adapters whose physical sends bypass the native proxy pipeline.
-func (s *OpenAIGatewayService) doPriorityObservedHTTP(req *http.Request, proxy string, account *Account) (*http.Response, error) {
+func (s *OpenAIGatewayService) doPriorityObservedHTTP(req *http.Request, proxy string, account *Account) (result *http.Response, resultErr error) {
+	if route, ok := openAIRequestProxyFromContext(req.Context(), account.ID); ok {
+		if !account.OpenAIRequestProxyEnabled() {
+			return nil, denyOpenAITurn("account_binding_changed")
+		}
+		if _, err := ValidateOpenAIRequestProxyEgress(req.Context(), account.ID, proxy); err != nil {
+			return nil, err
+		}
+		var err error
+		req, err = route.bind(req)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { route.track(result) }()
+	}
 	if s.excelOAuthReauth != nil {
 		if err := s.excelOAuthReauth.validateAuthConnectionPolicy(req.Context(), account); err != nil {
 			return nil, err
@@ -533,16 +547,6 @@ func priorityErrorEndpoint(req OpenAIAccountScheduleRequest) string {
 		return "/v1/chat/completions"
 	}
 	return "/v1/responses"
-}
-func (s *defaultOpenAIAccountScheduler) priorityErrorEvidence(req OpenAIAccountScheduleRequest, c PrioritySchedulingConfig, id int64, now time.Time) PriorityErrorEvidence {
-	key := priorityRequestAttemptKey(req, id)
-	if s.stats == nil {
-		return PriorityErrorEvidence{WindowMinutes: c.ErrorRateWindowMinutes, PriorSamples: max(1, c.ErrorRatePriorSamples), ObservedAt: now, Endpoint: key.endpoint}
-	}
-	return s.stats.attempts.snapshot(key, now, c.ErrorRateWindowMinutes, c.ErrorRatePriorSamples)
-}
-func priorityErrorPenalty(c PrioritySchedulingConfig, e PriorityErrorEvidence) float64 {
-	return math.Max(.1, 1-c.ErrorRateWeight/100*clamp01(e.SmoothedRate))
 }
 
 // Called only for a known upstream watchdog or protocol-validation failure.

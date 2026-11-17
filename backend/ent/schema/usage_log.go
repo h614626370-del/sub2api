@@ -31,6 +31,8 @@ func (UsageLog) Annotations() []schema.Annotation {
 // Fields 定义使用日志实体的所有字段。
 func (UsageLog) Fields() []ent.Field {
 	return []ent.Field{
+		// Historical provider snapshot. NULL remains unknown; never backfill from mutable entities.
+		field.String("platform").MaxLen(50).Optional().Nillable(),
 		// 关联字段
 		field.Int64("user_id"),
 		field.Int64("api_key_id"),
@@ -87,6 +89,10 @@ func (UsageLog) Fields() []ent.Field {
 		field.Int("cache_creation_5m_tokens").
 			Default(0),
 		field.Int("cache_creation_1h_tokens").
+			Default(0),
+		field.Int("cache_creation_30m_tokens").
+			Default(0),
+		field.Int("cache_creation_12h_tokens").
 			Default(0),
 
 		// 成本字段
@@ -184,6 +190,8 @@ func (UsageLog) Fields() []ent.Field {
 		// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
 		field.Bool("cache_ttl_overridden").
 			Default(false),
+
+		field.JSON("customer_cost_details", map[string]any{}).Optional().Immutable().Comment("Request-time Standard customer cost display snapshot; NULL is unknown history"),
 
 		field.JSON("queue_timing", map[string]any{}).Optional().Comment("Explicit measured server/forward boundaries; NULL means unknown"),
 

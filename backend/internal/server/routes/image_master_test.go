@@ -55,7 +55,7 @@ func TestImageMasterGatewayEnforcesLongContextBeforeConversion(t *testing.T) {
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, req)
 			require.Equal(t, 400, response.Code, response.Body.String())
-			require.Contains(t, response.Body.String(), "context_unverifiable")
+			require.Contains(t, response.Body.String(), "context_length_exceeded")
 		})
 	}
 }

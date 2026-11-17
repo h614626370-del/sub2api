@@ -31,6 +31,10 @@ var DefaultModels = []Model{
 	{ID: "gpt-6-sol", Object: "model", Created: 1790035200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Sol"},
 	{ID: "gpt-6-luna", Object: "model", Created: 1790035200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Luna"},
 	{ID: "gpt-6-astra", Object: "model", Created: 1788480000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Astra"},
+	// Created records the local catalog addition date, not an upstream release date.
+	{ID: "gpt-6.2-astra", Object: "model", Created: 1794787200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Astra", ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-6.2-astra-pro", Object: "model", Created: 1794787200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Astra Pro", ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-6.2-sol", Object: "model", Created: 1794787200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Sol", ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
 	{ID: "codex-auto-review", Object: "model", Created: 1776902400, OwnedBy: "openai", Type: "model", DisplayName: "Codex Auto Review"},
 	{ID: "gpt-image-2", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2"},
 	{ID: "gpt-image-2.5-flare", Object: "model", Created: 1788825600, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2.5 Flare"},
@@ -213,6 +217,8 @@ func IsGPT61SolModelSpelling(model string) bool {
 	}
 }
 
+// IsGPT61TerraModelSpelling also recognizes invalid effort suffixes so request
+// validation can reject them before alias normalization loses the selection.
 func IsGPT61TerraModelSpelling(model string) bool {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	if canonical == "gpt-6.1-terra" {
@@ -223,7 +229,7 @@ func IsGPT61TerraModelSpelling(model string) bool {
 		return false
 	}
 	switch suffix {
-	case "none", "low", "medium", "high", "xhigh", "max", "openai-compact":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
 		return true
 	default:
 		return false
@@ -244,4 +250,22 @@ func ValidateGPT61SolReasoningEffort(model, effort string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateGPT61TerraReasoningEffort rejects the unpublished minimal level;
+// GPT-6.1 Terra accepts none through max.
+func ValidateGPT61TerraReasoningEffort(model, effort string) error {
+	if IsGPT61TerraModelSpelling(model) && strings.EqualFold(strings.TrimSpace(effort), "minimal") {
+		return fmt.Errorf("gpt-6.1-terra does not support reasoning effort %q; use none, low, medium, high, xhigh or max", effort)
+	}
+	return nil
+}
+
+// ValidateGPT61ReasoningEffort applies the published effort scale of each
+// GPT-6.1 model.
+func ValidateGPT61ReasoningEffort(model, effort string) error {
+	if err := ValidateGPT61SolReasoningEffort(model, effort); err != nil {
+		return err
+	}
+	return ValidateGPT61TerraReasoningEffort(model, effort)
 }

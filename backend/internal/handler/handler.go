@@ -56,6 +56,7 @@ type AdminHandlers struct {
 // Handlers contains all HTTP handlers
 type Handlers struct {
 	ImageMaster      *imagemaster.Manager
+	QQBot            *QQBotHandler
 	Lottery          *LotteryHandler
 	Auth             *AuthHandler
 	User             *UserHandler

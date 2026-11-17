@@ -4,21 +4,22 @@ import "time"
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
-	ConcurrencyLimit int                      `json:"concurrency_limit"`
-	Version          int                      `json:"version"`
-	APIKeyID         int64                    `json:"api_key_id"`
-	UserID           int64                    `json:"user_id"`
-	GroupIDs         []int64                  `json:"group_ids,omitempty"`
-	GroupID          *int64                   `json:"group_id,omitempty"`
-	Name             string                   `json:"name"`
-	Status           string                   `json:"status"`
-	ModelMapping     map[string]string        `json:"model_mapping,omitempty"`
-	ReasoningEffort  string                   `json:"reasoning_effort,omitempty"`
-	AllowLongContext bool                     `json:"allow_long_context"`
-	IPWhitelist      []string                 `json:"ip_whitelist,omitempty"`
-	IPBlacklist      []string                 `json:"ip_blacklist,omitempty"`
-	User             APIKeyAuthUserSnapshot   `json:"user"`
-	Group            *APIKeyAuthGroupSnapshot `json:"group,omitempty"`
+	ConcurrencyLimit  int                      `json:"concurrency_limit"`
+	Version           int                      `json:"version"`
+	APIKeyID          int64                    `json:"api_key_id"`
+	UserID            int64                    `json:"user_id"`
+	GroupIDs          []int64                  `json:"group_ids,omitempty"`
+	GroupID           *int64                   `json:"group_id,omitempty"`
+	Name              string                   `json:"name"`
+	Status            string                   `json:"status"`
+	ModelMapping      map[string]string        `json:"model_mapping,omitempty"`
+	ReasoningEffort   string                   `json:"reasoning_effort,omitempty"`
+	ContextTokenLimit int                      `json:"context_token_limit"`
+	AllowLongContext  bool                     `json:"allow_long_context"`
+	IPWhitelist       []string                 `json:"ip_whitelist,omitempty"`
+	IPBlacklist       []string                 `json:"ip_blacklist,omitempty"`
+	User              APIKeyAuthUserSnapshot   `json:"user"`
+	Group             *APIKeyAuthGroupSnapshot `json:"group,omitempty"`
 
 	// Quota fields for API Key independent quota feature
 	Quota     float64 `json:"quota"`      // Quota limit in USD (0 = unlimited)
@@ -117,6 +118,7 @@ type APIKeyAuthGroupSnapshot struct {
 	AllowLive                   bool                              `json:"allow_live"`
 	ForceOpenAIFast             bool                              `json:"force_openai_fast"`
 	FreeOpenAIFast              bool                              `json:"free_openai_fast"`
+	FreeOpenAIUltrafast         bool                              `json:"free_openai_ultrafast"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
 	ModelAllowlist              GroupModelAllowlist               `json:"model_allowlist,omitempty"`

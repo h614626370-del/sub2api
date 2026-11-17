@@ -135,7 +135,7 @@ func openAIUsagePricingAt(input *OpenAIRecordUsageInput) time.Time {
 }
 
 func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTier string) bool {
-	if apiKey == nil || apiKey.Group == nil || !apiKey.Group.FreeOpenAIFast {
+	if apiKey == nil || apiKey.Group == nil {
 		return false
 	}
 	if account == nil || !account.IsOpenAI() {
@@ -146,7 +146,9 @@ func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTie
 	}
 	switch normalizeBillingServiceTier(serviceTier) {
 	case "priority", "fast":
-		return true
+		return apiKey.Group.FreeOpenAIFast
+	case "ultrafast":
+		return apiKey.Group.FreeOpenAIUltrafast
 	default:
 		return false
 	}
@@ -190,10 +192,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
 	cacheCreationTokens := result.Usage.CacheCreationInputTokens
+	cache30m, cache12h := result.Usage.CacheCreation30mInputTokens, result.Usage.CacheCreation12hInputTokens
 	if excelBPSCacheCreationBilledAsInput(account, result) {
 		// Total input already includes cache creation. Retain those tokens in the
 		// ordinary input bucket without changing the original upstream usage.
 		cacheCreationTokens = 0
+		cache30m, cache12h = 0, 0
 	}
 	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - cacheCreationTokens
 	if actualInputTokens < 0 {
@@ -202,13 +206,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// Calculate cost
 	tokens := UsageTokens{
-		InputTokens:          actualInputTokens,
-		ImageInputTokens:     max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
-		ImageCacheReadTokens: result.Usage.ImageCacheReadTokens,
-		OutputTokens:         result.Usage.OutputTokens,
-		CacheCreationTokens:  cacheCreationTokens,
-		CacheReadTokens:      result.Usage.CacheReadInputTokens,
-		ImageOutputTokens:    result.Usage.ImageOutputTokens,
+		InputTokens:            actualInputTokens,
+		ImageInputTokens:       max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
+		ImageCacheReadTokens:   result.Usage.ImageCacheReadTokens,
+		OutputTokens:           result.Usage.OutputTokens,
+		CacheCreationTokens:    cacheCreationTokens,
+		CacheReadTokens:        result.Usage.CacheReadInputTokens,
+		ImageOutputTokens:      result.Usage.ImageOutputTokens,
+		CacheCreation30mTokens: cache30m,
+		CacheCreation12hTokens: cache12h,
 	}
 
 	// Keep candidate fallback, response-model selection and Free Fast on one policy snapshot.
@@ -341,9 +347,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
-	// Free Fast changes only the customer charge. Keep priority TotalCost and
+	// Free Fast/UltraFast changes only the customer charge. Keep actual-tier TotalCost and
 	// service_tier for upstream accounting, but evaluate ActualCost once more at
 	// the Standard tier using the same channel, peak, and long-context policy.
+	var customerCostDetails *CustomerCostDetails
 	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) {
 		standardCost, standardErr := s.calculateOpenAIRecordUsageCost(
 			ctx,
@@ -367,6 +374,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		// usage row instead of dropping it on the Standard re-evaluation.
 		if standardErr == nil && cost != nil && standardCost != nil {
 			cost.ActualCost = standardCost.ActualCost
+			customerCostDetails = newFreeFastCustomerCostDetails(standardCost, multiplier*costModelBillingMultiplier(standardCost))
+			if customerCostDetails != nil && normalizeBillingServiceTier(serviceTier) == "ultrafast" {
+				customerCostDetails.FreeFast = false
+				customerCostDetails.FreeUltrafast = true
+			}
 		}
 	}
 
@@ -432,6 +444,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		s.excelOAuthReauth.recordConnectionUsage(ctx, account.ID, apiKey.ID, result.AuthConnectionID, requestID)
 	}
 	usageLog := &UsageLog{
+		CustomerCostDetails:      customerCostDetails,
+		Platform:                 account.Platform,
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
@@ -450,6 +464,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		InputTokens:              actualInputTokens,
 		OutputTokens:             result.Usage.OutputTokens,
 		CacheCreationTokens:      cacheCreationTokens,
+		CacheCreation30mTokens:   cache30m,
+		CacheCreation12hTokens:   cache12h,
 		CacheReadTokens:          result.Usage.CacheReadInputTokens,
 		ImageInputTokens:         result.Usage.ImageInputTokens,
 		ImageOutputTokens:        result.Usage.ImageOutputTokens,
@@ -478,6 +494,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		factor := float64(1 + result.HeaderTimeoutRetries)
 		cost.TotalCost *= factor
 		cost.ActualCost *= factor
+		if customerCostDetails != nil {
+			customerCostDetails.Multiplier *= factor
+			customerCostDetails.ActualCost *= factor
+		}
 	}
 	if cost != nil {
 		usageLog.InputCost = cost.InputCost
@@ -1086,7 +1106,7 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 	// Helper to parse float64 from header
 	parseFloat := func(key string) *float64 {
 		if v := headers.Get(key); v != "" {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
+			if f, err := strconv.ParseFloat(v, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 				return &f
 			}
 		}
@@ -1137,7 +1157,9 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		hasData = true
 	}
 
-	if !hasData {
+	_, weeklyPresent, weeklyValid := openAI429WeeklyParsedHeaderUsage(headers, snapshot)
+	snapshot.invalidWeekly429 = weeklyPresent && !weeklyValid
+	if !hasData && !snapshot.invalidWeekly429 {
 		return nil
 	}
 
@@ -1178,6 +1200,11 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 
 	baseTime := codexSnapshotBaseTime(snapshot, fallbackNow)
 	updates := make(map[string]any)
+	if snapshot.invalidWeekly429 {
+		updates[openAI429WeeklyInvalidAtKey] = baseTime.Format(time.RFC3339Nano)
+	} else if evidence := openAI429SnapshotWeeklyEvidence(snapshot, baseTime); evidence != nil {
+		updates[openAI429WeeklyEvidenceKey] = evidence
+	}
 
 	// 保存原始 primary/secondary 字段，便于排查问题
 	if snapshot.PrimaryUsedPercent != nil {

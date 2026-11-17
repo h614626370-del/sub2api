@@ -1,7 +1,5 @@
 name: Upstream channel entities regression
 on:
-  push:
-    branches: [feat/profit-url-channel-remarks]
   pull_request:
     paths:
       - '**/upstream_channels*'
@@ -139,7 +137,7 @@ jobs:
             ${{ runner.temp }}/entity-*.log
             ${{ runner.temp }}/entity-cohort-provenance.json
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
@@ -160,6 +158,7 @@ jobs:
       - run: pnpm --dir frontend run build
       - name: Install isolated browser
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/upstream-channel-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/upstream-channel-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Exact profit page browser with synthetic data

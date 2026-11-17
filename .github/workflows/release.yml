@@ -89,6 +89,8 @@ jobs:
   build-frontend:
     needs: prepare
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v6
         with:
@@ -143,7 +145,7 @@ jobs:
           check-latest: false
           cache: false
       - name: Verify Go version
-        run: go version | grep -q 'go1.27.3'
+        run: go version | grep -q 'go1.27.4'
       - name: Restore target-specific Go cache
         id: go-cache
         uses: actions/cache/restore@v6

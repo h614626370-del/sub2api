@@ -25,6 +25,7 @@ type UserWithConcurrency struct {
 	dto.AdminUser
 	AutoCreditOutstanding string `json:"auto_credit_outstanding"`
 	CurrentConcurrency    int    `json:"current_concurrency"`
+	CurrentRPM            *int   `json:"current_rpm"`
 }
 
 // UserHandler handles admin user management
@@ -210,6 +211,7 @@ func (h *UserHandler) List(c *gin.Context) {
 		out[i] = UserWithConcurrency{
 			AdminUser:             *dto.UserFromServiceAdmin(&users[i]),
 			AutoCreditOutstanding: debt[users[i].ID],
+			CurrentRPM:            users[i].CurrentRPM,
 		}
 		if info := loadInfo[users[i].ID]; info != nil {
 			out[i].CurrentConcurrency = info.CurrentConcurrency
@@ -510,7 +512,7 @@ func (h *UserHandler) GetUserUsage(c *gin.Context) {
 // GetBalanceHistory handles getting user's balance/concurrency change history
 // GET /api/v1/admin/users/:id/balance-history
 // Query params:
-//   - type: filter by record type (balance, affiliate_balance, admin_balance, concurrency, admin_concurrency, subscription)
+//   - type: filter by record type (balance, affiliate_balance, admin_balance, auto_credit, concurrency, admin_concurrency, subscription)
 func (h *UserHandler) GetBalanceHistory(c *gin.Context) {
 	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

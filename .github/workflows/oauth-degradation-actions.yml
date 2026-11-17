@@ -1,7 +1,20 @@
 name: OAuth degradation actions
 on:
+  workflow_dispatch:
   push:
-    branches: [production, feat/oauth-degradation-actions-20261109]
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*oauth*'
+      - 'backend/internal/repository/*oauth*'
+      - 'backend/internal/repository/*timezone*'
+      - '.github/workflows/oauth-degradation-actions.yml'
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*oauth*'
+      - 'backend/internal/repository/*oauth*'
+      - 'backend/internal/repository/*timezone*'
+      - '.github/workflows/oauth-degradation-actions.yml'
 permissions:
   contents: read
 jobs:
@@ -178,6 +191,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
           path: candidate
+      - name: Use Ubuntu HTTPS mirror for CI dependencies
+        run: bash candidate/.github/scripts/ci-ubuntu-mirrors.sh
       - uses: actions/checkout@v6
         with:
           ref: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
@@ -254,12 +269,14 @@ jobs:
           name: oauth-degradation-integration-race-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/
   ui:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Use Ubuntu HTTPS mirror for CI dependencies
+        run: bash .github/scripts/ci-ubuntu-mirrors.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 9

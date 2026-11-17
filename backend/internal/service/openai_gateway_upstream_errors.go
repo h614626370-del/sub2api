@@ -459,6 +459,10 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe
 		upstreamMsg,
 		retryableOnSameAccount || oauth429Retry,
 	)
+	if shouldDisable && account != nil && account.Platform == PlatformOpenAI && failoverErr.RequestScopedTransient {
+		// A configured model cooldown takes precedence over capacity-shed replay.
+		failoverErr.RetryableOnSameAccount = false
+	}
 	if oauth429Retry {
 		failoverErr.SameAccountRetryDeadline = s.openAIOAuth429RetryDeadline(account)
 		failoverErr.SameAccountRetryDelay = openAIOAuth429SameAccountRetryDelay(responseHeaders, failoverErr.SameAccountRetryDeadline)
@@ -822,6 +826,11 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 	}
 
+	if code, message, ok := OpenAIUpstreamRecoveryRateLimit(resp.StatusCode, body); ok {
+		setOpsUpstreamError(c, resp.StatusCode, message, "")
+		c.JSON(resp.StatusCode, gin.H{"error": gin.H{"type": "rate_limit_error", "code": code, "message": message}})
+		return nil, fmt.Errorf("upstream owner rate limited: %d", resp.StatusCode)
+	}
 	// Return appropriate error response
 	var errType, errMsg string
 	var statusCode int
@@ -993,7 +1002,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		modelForCooldown = requestedModel[0]
 	}
 	shouldDisable := s.handleOpenAIAccountUpstreamError(
-		c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
+		openAICompatTempUnschedContext(c, resp, account), account, resp.StatusCode, resp.Header, body, modelForCooldown,
 	)
 	kind := "http_error"
 	if shouldDisable {

@@ -7,7 +7,6 @@ on:
       - 'frontend/src/api/admin/__tests__/aiOps*'
       - 'frontend/src/components/admin/operations/SmartOpsNav.vue'
       - 'frontend/src/i18n/locales/*/aiOps*'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/router/index.ts'
       - 'backend/internal/**/ai_ops*'
       - 'backend/internal/**/ops_ai*'
@@ -22,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -44,6 +43,7 @@ jobs:
         run: pnpm --dir frontend run typecheck
       - name: Install isolated synthetic browser
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/ai-ops-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/ai-ops-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Actual AI operations pages with synthetic data
@@ -86,6 +86,7 @@ jobs:
           docker version > ../evidence/docker-version.txt
           docker info > ../evidence/docker-info.txt
           if ! command -v gdb >/dev/null; then
+            bash ../.github/scripts/ci-ubuntu-mirrors.sh
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends gdb
           fi

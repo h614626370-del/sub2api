@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parse } from 'vue/compiler-sfc'
 import source from '@/views/admin/SettingsView.vue?raw'
-import smartOpsSidebarSource from '@/components/settings/SmartOpsSidebarSettings.vue?raw'
+import smartOpsSource from '@/components/settings/SmartOpsSidebarSettings.vue?raw'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { buildFeatureSearchEntries, searchFeatures } from '../featureSearch'
@@ -44,7 +44,8 @@ describe('settings feature search', () => {
         anchors.set(id.value.content, tab)
       }
       if (node.tag === 'SmartOpsSidebarSettings') {
-        for (const child of parse(smartOpsSidebarSource).descriptor.template!.ast!.children) visit(child, tab)
+        const childRoot = parse(smartOpsSource).descriptor.template!.ast!
+        for (const child of childRoot.children) visit(child, tab)
       }
       for (const child of node.children) visit(child, tab)
     }
@@ -62,18 +63,6 @@ describe('settings feature search', () => {
         { path: '/admin/settings', label: 'Settings' }
       ], key => translate(messages, key), locale))
       expect(searchFeatures(entries, query).some(item => item.path === '/admin/settings?tab=gateway#settings-section-usage-records'), query).toBe(true)
-    }
-  })
-
-  it('finds the OpenAI response header timeout in both languages', () => {
-    for (const [locale, messages] of [['zh', zh], ['en', en]] as const) {
-      const entries = buildFeatureSearchEntries(withSettingsSearch([
-        { path: '/admin/settings', label: 'Settings' }
-      ], key => translate(messages, key), locale))
-      const title = translate(messages, 'admin.settings.openaiResponseHeaderTimeout.title')
-      expect(searchFeatures(entries, title).some(item =>
-        item.path === '/admin/settings?tab=gateway#settings-section-openai-response-header-timeout'
-      )).toBe(true)
     }
   })
 

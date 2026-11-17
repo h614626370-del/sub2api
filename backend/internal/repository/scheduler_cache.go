@@ -1415,6 +1415,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// Usage settlement can receive an account from this projection. Preserve
 		// the explicit response-tier billing contract through scheduler caches.
 		service.OpenAIResponseTierBillingEnabledKey,
+		service.OpenAIOAuthRelayFastBillingKey,
 		// Priority scoring runs on candidate metadata before full hydration.
 		// Dropping saved procurement cost silently substitutes the 0.1 default.
 		service.AccountCostMultiplierExtraKey,
@@ -1469,6 +1470,11 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_passthrough",
 		"openai_oauth_passthrough",
 		"openai_excel_bps",
+		service.ExcelBPSProxyModeKey,
+		service.ExcelBPSProxyIDsKey,
+		service.OpenAIProxyModeKey,
+		service.OpenAIProxyIDsKey,
+		"openai_excel_bps_proxy_source",
 		"openai_excel_bps_auto_disable_on_403",
 		service.ExcelBPSAutoRecoverOn403Key,
 		service.ExcelBPS403RecoveryIntervalMinutesKey,
@@ -1505,7 +1511,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
-		if value, ok := extra[key]; ok && (value != nil || key == "openai_excel_bps_models") {
+		if value, ok := extra[key]; ok && (value != nil || key == "openai_excel_bps_models" || key == service.OpenAIProxyModeKey) {
 			if key == service.UpstreamBillingProbeExtraKey {
 				filteredProbe := filterSchedulerUpstreamBillingProbe(value)
 				if filteredProbe == nil {

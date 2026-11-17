@@ -2,19 +2,57 @@ name: Security Scan
 
 on:
   push:
+    branches: [production]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
   schedule:
     - cron: '0 3 * * 1'
 
+# PR updates replace older runs; other events keep a separate group per commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
+  actions: read
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend-security: ${{ steps.select.outputs['backend-security'] }}
+      frontend-security: ${{ steps.select.outputs['frontend-security'] }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install selector dependency
+        run: python3 -m pip install PyYAML==6.0.3
+      - name: Select affected checks
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/ci/select_jobs.py security-scan.yml
+
   backend-security:
+    needs: changes
+    if: needs.changes.outputs['backend-security'] == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -23,7 +61,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.27.3'
+          go version | grep -q 'go1.27.4'
       - name: Run govulncheck
         working-directory: backend
         run: |
@@ -31,9 +69,15 @@ jobs:
           govulncheck ./...
 
   frontend-security:
-    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs['frontend-security'] == 'true'
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:

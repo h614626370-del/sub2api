@@ -54,7 +54,13 @@ export interface PaymentConfig {
   stripe_publishable_key: string
 }
 
-export interface MethodLimit {
+export interface MethodFeeRates {
+  fee_rate: number
+  fee_rate_min?: number
+  fee_rate_max?: number
+}
+
+export interface MethodLimit extends MethodFeeRates {
   currency?: string
   display_name?: string
   daily_limit: number
@@ -64,6 +70,7 @@ export interface MethodLimit {
   single_max: number
   fee_rate: number
   available: boolean
+  sub_methods?: Record<string, MethodFeeRates>
 }
 
 /** Response from /payment/limits API */
@@ -102,6 +109,7 @@ export interface CheckoutInfoResponse {
 // ==================== Orders ====================
 
 export interface PaymentOrder {
+  coupon?: { id: number; name: string; discount_amount: number; bonus_amount: number; review_required: boolean }
   id: number
   user_id: number
   amount: number
@@ -182,6 +190,10 @@ export interface ProviderInstance {
   payment_mode: string
   refund_enabled: boolean
   allow_user_refund: boolean
+  /** null / absent inherits the global fee; zero explicitly disables fees. */
+  fee_rate?: number | null
+  /** Keys omitted from this map inherit the instance default. */
+  method_fee_rates?: Record<string, number>
   limits: string
   sort_order: number
 }
@@ -189,8 +201,10 @@ export interface ProviderInstance {
 // ==================== Request / Response ====================
 
 export interface CreateOrderRequest {
+  coupon_id?: number
   amount: number
   payment_type: string
+  payment_subtype?: string
   order_type: string
   plan_id?: number
   renewal_mode?: SubscriptionRenewalMode
@@ -223,6 +237,7 @@ export interface WechatJSAPIPayload {
 
 export interface CreateOrderResult {
   order_id: number
+  payment_subtype?: string
   amount: number
   pay_url?: string
   qr_code?: string
