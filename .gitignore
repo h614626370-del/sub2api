@@ -136,6 +136,7 @@ vite.config.js
 user-traffic-pending/
 docs/*
 !docs/tutorials.md
+!docs/account-platform-edit.md
 !docs/openai-totp-factor-recovery.md
 !docs/ai-ops-codex.md
 !docs/reauth-identity-validation.md
