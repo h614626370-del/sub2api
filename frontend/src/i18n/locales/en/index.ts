@@ -1,4 +1,5 @@
 import tutorials from './tutorials'
+import homepage from './homepage'
 import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
 import coupon from './coupon'
@@ -48,6 +49,7 @@ import autoConfig from './autoConfig'
 export default {
   tutorials,
   subscriptionConversion,
+  homepage,
   imageMaster,
   coupon,
   ...qqbot,

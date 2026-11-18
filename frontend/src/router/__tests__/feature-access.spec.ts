@@ -144,6 +144,18 @@ describe('feature route guard', () => {
     expect(result.next).toHaveBeenCalledWith({ path: '/login', query: { redirect: '/admin/tutorials' } })
   })
 
+  it('limits homepage management to admins', async () => {
+    const route = routerHarness.routes.find((r) => r.path === '/admin/homepage')!
+    expect(route.meta).toMatchObject({ requiresAuth: true, requiresAdmin: true })
+    const user = runGuard(route.meta!, route.path)
+    await user.navigation
+    expect(user.next).toHaveBeenCalledWith('/dashboard')
+    authStore.isAdmin = true
+    const admin = runGuard(route.meta!, route.path)
+    await admin.navigation
+    expect(admin.next).toHaveBeenCalledWith()
+  })
+
   it('allows observers own usage in backend mode without opening other user or admin pages', async () => {
     appStore.backendModeEnabled = true
     authStore.isObserver = true

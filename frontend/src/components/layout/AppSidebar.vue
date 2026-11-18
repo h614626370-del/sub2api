@@ -322,6 +322,7 @@ const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 const RequestCaptureIcon = { render: () => h(Icon, { name: 'requestCapture', size: 'sm' }) }
 const OpsMonitoringIcon = { render: () => h(Icon, { name: 'monitorPulse' }) }
 const SmartOpsIcon = { render: () => h(Icon, { name: 'cpu' }) }
+const HomepageIcon = { render: () => h(Icon, { name: 'home', size: 'sm' }) }
 const QualityOpsIcon = { render: () => h(Icon, { name: 'badge', size: 'sm' }) }
 const AccountOpsIcon = { render: () => h(Icon, { name: 'userCog', size: 'sm' }) }
 const TokenGuardIcon = { render: () => h(Icon, { name: 'shieldKey', size: 'sm' }) }
@@ -907,6 +908,7 @@ const adminNavItems = computed((): NavItem[] => {
       { path: '/admin/harvest-flow', label: t('nav.harvestFlow'), icon: FlowIcon },
     ] },
     { path: '/admin/my-operations', label: t('imageMaster.operations'), icon: AccountOpsIcon, expandOnly: true, children: [
+      { path: '/admin/homepage', label: t('homepage.title'), icon: HomepageIcon },
       { path: '/admin/tutorials', label: t('tutorials.manage'), icon: TutorialIcon },
       { path: '/admin/image-master', label: t('imageMaster.title'), icon: GalleryIcon },
       { path: '/admin/subscription-conversion', label: t('subscriptionConversion.title'), icon: CreditCardIcon },

@@ -607,6 +607,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/tutorials', name: 'Tutorials', component: () => import('@/views/user/TutorialsView.vue'), meta: { requiresAuth: false, titleKey: 'tutorials.title' } },
   { path: '/tutorials/:id(\\d+)', name: 'TutorialDetail', component: () => import('@/views/user/TutorialsView.vue'), meta: { requiresAuth: false, titleKey: 'tutorials.title' } },
   { path: '/admin/tutorials', name: 'AdminTutorials', component: () => import('@/views/admin/TutorialsView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'tutorials.manage' } },
+  { path: '/admin/homepage', name: 'AdminHomepage', component: () => import('@/views/admin/HomepageView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'homepage.title' } },
   { path: '/admin/tutorials/new', redirect: '/admin/tutorials/new/edit', meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/admin/tutorials/:id(new|\\d+)/edit', name: 'AdminTutorialEdit', component: () => import('@/views/admin/TutorialEditorView.vue'), meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'tutorials.edit' } },
   { path: '/admin/my-operations', redirect: '/admin/image-master', meta: { requiresAuth: true, requiresAdmin: true } },

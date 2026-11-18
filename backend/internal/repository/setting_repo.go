@@ -72,6 +72,31 @@ type settingRepository struct {
 	client *ent.Client
 }
 
+func (r *settingRepository) CompareAndSetHomepage(ctx context.Context, value, previous string) error {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	client := tx.Client()
+	now := time.Now()
+	if previous == "" {
+		if err := client.Setting.Create().SetKey(service.SettingKeyHomepage).SetValue("").SetUpdatedAt(now).
+			OnConflictColumns(setting.FieldKey).Ignore().Exec(ctx); err != nil {
+			return err
+		}
+	}
+	count, err := client.Setting.Update().Where(setting.KeyEQ(service.SettingKeyHomepage), setting.ValueEQ(previous)).
+		SetValue(value).SetUpdatedAt(now).Save(ctx)
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return service.ErrHomepageConflict
+	}
+	return tx.Commit()
+}
+
 func NewSettingRepository(client *ent.Client) service.SettingRepository {
 	return &settingRepository{client: client}
 }

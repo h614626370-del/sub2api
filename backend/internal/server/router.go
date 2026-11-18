@@ -82,6 +82,9 @@ func SetupRouter(
 	if settingService.IPRisk != nil {
 		r.Use(settingService.IPRisk.Middleware())
 	}
+	if cfg.Runtime.Role != config.RuntimeRoleGateway {
+		r.Use(routes.HomepageDocuments(settingService))
+	}
 
 	// Serve embedded frontend with settings injection if available
 	if cfg.RunsBackgroundJobs() && web.HasEmbeddedFrontend() {

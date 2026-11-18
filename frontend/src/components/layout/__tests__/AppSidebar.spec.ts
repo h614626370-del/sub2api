@@ -13,10 +13,12 @@ describe('AppSidebar image controller', () => {
   it('places My Operations after Smart Operations and before Plugins', () => {
     const smart = componentSource.indexOf("path: '/admin/smart-ops'")
     const own = componentSource.indexOf("path: '/admin/my-operations'")
+    const home = componentSource.indexOf("path: '/admin/homepage'")
     const image = componentSource.indexOf("path: '/admin/image-master'")
     const plugins = componentSource.indexOf("path: '/admin/plugins'")
     expect(own).toBeGreaterThan(smart)
-    expect(image).toBeGreaterThan(own)
+    expect(home).toBeGreaterThan(own)
+    expect(image).toBeGreaterThan(home)
     expect(plugins).toBeGreaterThan(image)
     expect(componentSource).toContain("label: t('imageMaster.operations')")
     expect(componentSource).toContain("label: t('imageMaster.title')")
