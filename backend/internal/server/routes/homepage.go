@@ -2,8 +2,11 @@ package routes
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/xml"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -11,8 +14,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// The standalone page cannot execute scripts, even if the panel CSP is off.
 const homepageCSP = "default-src 'none'; script-src 'none'; style-src 'self' https: 'unsafe-inline'; img-src 'self' https: data:; font-src 'self' https: data:; media-src 'self' https:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+
+const homepageSessionMarker = `<meta name="sub2api-redirect-signed-in" content="true">`
+
+// The SPA login route restores the session and chooses the appropriate console.
+const homepageSessionScript = `(() => {
+  try {
+    if (window.localStorage.getItem("auth_token") && window.localStorage.getItem("auth_user")) {
+      window.location.replace("/login");
+    }
+  } catch {
+    // The public homepage remains available if storage is disabled.
+  }
+})();`
+
+var homepageSessionCSP = func() string {
+	hash := sha256.Sum256([]byte(homepageSessionScript))
+	policy := strings.Replace(homepageCSP, "script-src 'none'", "script-src 'sha256-"+base64.StdEncoding.EncodeToString(hash[:])+"'", 1)
+	return policy + " allow-scripts"
+}()
 
 type homepageSiteReader interface {
 	PublicHomepage(context.Context) (service.HomepageConfig, bool, error)
@@ -50,8 +71,13 @@ func HomepageDocuments(reader homepageSiteReader) gin.HandlerFunc {
 		switch path {
 		case "/":
 			if active {
-				c.Header("Content-Security-Policy", homepageCSP)
-				homepageDocument(c, "text/html; charset=utf-8", []byte(cfg.HTML))
+				body, policy := cfg.HTML, homepageCSP
+				if c.Query("landing") != "1" && strings.Contains(body, homepageSessionMarker) {
+					body = strings.Replace(body, homepageSessionMarker, "<script>"+homepageSessionScript+"</script>", 1)
+					policy = homepageSessionCSP
+				}
+				c.Header("Content-Security-Policy", policy)
+				homepageDocument(c, "text/html; charset=utf-8", []byte(body))
 			}
 		case "/home", "/home/":
 			if active {

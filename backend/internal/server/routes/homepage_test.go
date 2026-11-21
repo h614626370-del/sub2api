@@ -2,6 +2,8 @@ package routes
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"net/http"
@@ -72,4 +74,34 @@ func TestHomepageDocuments(t *testing.T) {
 	stub.err = errors.New("database unavailable")
 	require.Equal(t, "SPA", request(http.MethodGet, "/").Body.String())
 	require.Equal(t, 503, request(http.MethodGet, "/robots.txt").Code)
+}
+
+func TestHomepageSessionRedirect(t *testing.T) {
+	stub := &homepageReaderStub{cfg: service.HomepageConfig{
+		Enabled:      true,
+		PublicOrigin: "https://public.example",
+		HTML:         "<!doctype html><head>" + homepageSessionMarker + "<script>custom()</script></head>",
+	}}
+	router := gin.New()
+	router.Use(HomepageDocuments(stub))
+	router.NoRoute(func(c *gin.Context) { c.String(200, "SPA") })
+
+	for _, tc := range []struct {
+		name, path, body, policy string
+	}{
+		{"signed-in routing", "/", "<!doctype html><head><script>" + homepageSessionScript + "</script><script>custom()</script></head>", homepageSessionCSP},
+		{"public preview", "/?landing=1", stub.cfg.HTML, homepageCSP},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRecorder()
+			router.ServeHTTP(r, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			require.Equal(t, http.StatusOK, r.Code)
+			require.Equal(t, tc.body, r.Body.String())
+			require.Equal(t, tc.policy, r.Header().Get("Content-Security-Policy"))
+			require.Equal(t, "no-store", r.Header().Get("Cache-Control"))
+		})
+	}
+	hash := sha256.Sum256([]byte(homepageSessionScript))
+	require.Contains(t, homepageSessionCSP, "script-src 'sha256-"+base64.StdEncoding.EncodeToString(hash[:])+"';")
+	require.Contains(t, homepageSessionCSP, "frame-ancestors 'none'")
 }

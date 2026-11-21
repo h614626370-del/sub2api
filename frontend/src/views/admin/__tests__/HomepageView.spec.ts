@@ -64,6 +64,7 @@ describe('Homepage editor', () => {
 
     expect(homepageAPI.save).toHaveBeenCalledWith({ enabled: true, public_origin: 'https://PUBLIC.example/', html }, 0)
     expect(wrapper.get('a[href="/sitemap.xml"]').exists()).toBe(true)
+    expect(wrapper.get('a[href="/?landing=1"]').text()).toBe('homepage.open')
     wrapper.unmount()
   })
 

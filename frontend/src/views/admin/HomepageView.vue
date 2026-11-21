@@ -3,7 +3,7 @@
     <main class="mx-auto max-w-5xl space-y-6">
       <header class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 pb-5 dark:border-dark-700">
         <h1 class="text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ t('homepage.title') }}</h1>
-        <a v-if="saved && !saved.backend_only" href="/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary gap-2">
+        <a v-if="saved && !saved.backend_only" :href="live ? '/?landing=1' : '/'" target="_blank" rel="noopener noreferrer" class="btn btn-secondary gap-2">
           <Icon name="externalLink" size="sm" />{{ t('homepage.open') }}
         </a>
       </header>
