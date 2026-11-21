@@ -2,6 +2,7 @@ import tutorials from './tutorials'
 import homepage from './homepage'
 import subscriptionConversion from './subscriptionConversion'
 import imageMaster from './imageMaster'
+import imageUsage from './imageUsage'
 import coupon from './coupon'
 import qqbot from './qqbot'
 import matureProviders from './matureProviders'
@@ -12,6 +13,7 @@ import lottery from './lottery'
 import accountTestTiming from './accountTestTiming'
 import openaiAuth from './openaiAuth'
 import upstreamEntities from './upstreamEntities'
+import channelConfig from './channelConfig'
 import profitOps from './profitOps'
 import upstreamOps from './upstreamOps'
 import channelOps from './channelOps'
@@ -26,7 +28,7 @@ import controlledExperiments from './controlledExperiments'
 import accountOps from './accountOps'
 import aiOps from './aiOps'
 import aiOpsControl from './aiOpsControl'
-import tokenGuard from './tokenGuard'
+import openaiRelogin from './openaiRelogin'
 import pelicanTests from './pelicanTests'
 import modelTrace from './modelTrace'
 import tokenGuardV2 from './tokenGuardV2'
@@ -51,6 +53,7 @@ export default {
   subscriptionConversion,
   homepage,
   imageMaster,
+  imageUsage,
   coupon,
   ...qqbot,
   matureProviders,
@@ -71,12 +74,13 @@ export default {
   qualityOps,
   channelOps,
   upstreamOps,
+  channelConfig,
   profitOps,
   controlledExperiments,
   accountOps,
   aiOps,
   aiOpsControl,
-  tokenGuard,
+  openaiRelogin,
   pelicanTests,
   modelTrace,
   tokenGuardV2,

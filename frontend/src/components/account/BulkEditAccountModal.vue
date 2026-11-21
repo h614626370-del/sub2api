@@ -402,12 +402,20 @@
           <input
             v-model="enableModelRestriction"
             id="bulk-edit-model-restriction-enabled"
+            :disabled="syncBusy"
             type="checkbox"
             aria-controls="bulk-edit-model-restriction-body"
             class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
           />
         </div>
 
+        <BatchUpstreamWhitelist
+          v-if="syncAdminId != null"
+          v-show="syncBusy || syncRows.length > 0 || (modelRestrictionMode === 'whitelist' && !isOpenAIModelRestrictionDisabled)"
+          :rows="syncRows" :busy="syncBusy" :valid="syncValid" :user-id="syncAdminId"
+          :disabled="submitting || checkingSubmit || showMixedChannelWarning"
+          @run="startWhitelistSync" @stop="stopSync"
+        />
         <div
           id="bulk-edit-model-restriction-body"
           :class="!enableModelRestriction && 'pointer-events-none opacity-50'"
@@ -1238,21 +1246,24 @@
           aria-labelledby="bulk-edit-openai-endpoint-capabilities-label"
         >
           <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <label
+            <div
               v-for="option in openAIEndpointCapabilityOptions"
               :key="option.value"
-              class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
+              class="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
             >
-              <input
-                type="checkbox"
-                :disabled="!enableOpenAIEndpointCapabilities"
-                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
-                :data-testid="`bulk-edit-openai-endpoint-capability-${option.value}`"
-                :checked="openAIEndpointCapabilities.includes(option.value)"
-                @change="toggleOpenAIEndpointCapability(option.value, $event)"
-              />
-              <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
-            </label>
+              <label class="flex flex-1 cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  :disabled="!enableOpenAIEndpointCapabilities"
+                  class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+                  :data-testid="`bulk-edit-openai-endpoint-capability-${option.value}`"
+                  :checked="openAIEndpointCapabilities.includes(option.value)"
+                  @change="toggleOpenAIEndpointCapability(option.value, $event)"
+                />
+                <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
+              </label>
+              <NewFeatureBadge v-if="option.value === 'videos'" :notice-id="NEW_FEATURE_NOTICES.openaiVideos" :user-id="authStore.user?.id" />
+            </div>
           </div>
         </div>
       </div>
@@ -1536,7 +1547,7 @@
         <button
           type="submit"
           form="bulk-edit-account-form"
-          :disabled="submitting"
+          :disabled="submitting || checkingSubmit || syncBusy"
           class="btn btn-primary"
         >
           <svg
@@ -1580,6 +1591,8 @@
 </template>
 
 <script setup lang="ts">
+import { useBatchUpstreamWhitelist } from '@/composables/useBatchUpstreamWhitelist'
+import BatchUpstreamWhitelist from './BatchUpstreamWhitelist.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
@@ -1640,6 +1653,7 @@ import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 interface Props {
   show: boolean
   accountIds: number[]
+  filteredPreview?: boolean
   selectedPlatforms: AccountPlatform[]
   selectedTypes: AccountType[]
   target?: {
@@ -1658,6 +1672,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   updated: []
+  whitelistsSaved: []
 }>()
 
 const { t } = useI18n()
@@ -1670,6 +1685,19 @@ const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetAccountIds = computed(() => props.target?.mode === 'selected'
   ? props.target.accountIds ?? props.accountIds
   : props.accountIds)
+const syncAdminId = computed(() => props.show && authStore.isAdmin && targetMode.value === 'selected' && !props.filteredPreview
+  ? authStore.user?.id ?? null : null)
+const { rows: syncRows, busy: syncBusy, valid: syncValid, run: runSync, stop: stopSync, leave: leaveSync } = useBatchUpstreamWhitelist(
+  () => syncAdminId.value,
+  () => props.target ? props.target.accountIds ?? [] : props.accountIds,
+  () => emit('whitelistsSaved')
+)
+function startWhitelistSync(retry: boolean) {
+  if (submitting.value || checkingSubmit.value || showMixedChannelWarning.value || syncBusy.value || !syncValid.value || syncAdminId.value == null) return
+  // A subsequent form submit must not overwrite individual results with the shared draft.
+  enableModelRestriction.value = false
+  void runSync(retry)
+}
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
@@ -1807,6 +1835,8 @@ const enableRpmLimit = ref(false)
 
 // State - field values
 const submitting = ref(false)
+const checkingSubmit = ref(false)
+let dialogGeneration = 0
 const showMixedChannelWarning = ref(false)
 const mixedChannelWarningMessage = ref('')
 const pendingUpdatesForConfirm = ref<Record<string, unknown> | null>(null)
@@ -1964,7 +1994,8 @@ const openAIEndpointCapabilityOptions = computed<
 >(() => [
   { value: 'chat_completions', label: openAITextEndpointCapabilityLabel.value },
   { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') },
-  { value: 'seedance', label: 'Seedance (Ark)' }
+  { value: 'seedance', label: 'Seedance (Ark)' },
+  { value: 'videos', label: 'OpenAI Videos' }
 ])
 const openAITextGenerationCapabilityEnabled = computed(() =>
   openAIEndpointCapabilities.value.includes('chat_completions')
@@ -1974,7 +2005,7 @@ const openAIResponsesModeApplicable = computed(
 )
 
 const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[]) => {
-  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings', 'seedance']
+  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings', 'seedance', 'videos']
   const selected = allowed.filter((value) => values.includes(value))
   return selected.length > 0 ? selected : ['chat_completions', 'embeddings'] as OpenAIEndpointCapability[]
 }
@@ -2209,7 +2240,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (applyOpenAIEndpointCapabilities) {
     credentials.openai_capabilities =
-      openAIEndpointCapabilities.value.length === 2 && !openAIEndpointCapabilities.value.includes('seedance')
+      openAIEndpointCapabilities.value.length === 2 && openAIEndpointCapabilities.value.includes('chat_completions') && openAIEndpointCapabilities.value.includes('embeddings')
         ? null
         : [...openAIEndpointCapabilities.value]
     credentialsChanged = true
@@ -2375,6 +2406,8 @@ const canPreCheck = () =>
   (targetSelectedPlatforms.value[0] === 'antigravity' || targetSelectedPlatforms.value[0] === 'anthropic')
 
 const handleClose = () => {
+  dialogGeneration++
+  leaveSync()
   showMixedChannelWarning.value = false
   mixedChannelWarningMessage.value = ''
   pendingUpdatesForConfirm.value = null
@@ -2386,12 +2419,14 @@ const handleClose = () => {
 const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise<boolean> => {
   if (!canPreCheck()) return true
   if (mixedChannelConfirmed.value) return true
+  const generation = dialogGeneration
 
   try {
     const result = await adminAPI.accounts.checkMixedChannelRisk({
       platform: targetSelectedPlatforms.value[0],
       group_ids: groupIds.value
     })
+    if (generation !== dialogGeneration || !props.show) return false
     if (!result.has_risk) return true
 
     pendingUpdatesForConfirm.value = built
@@ -2399,13 +2434,14 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
     showMixedChannelWarning.value = true
     return false
   } catch (error: any) {
+    if (generation !== dialogGeneration || !props.show) return false
     appStore.showError(error.message || t('admin.accounts.bulkEdit.failed'))
     return false
   }
 }
 
 const handleSubmit = async () => {
-  if (bpsDefaults.loading.value) return
+  if (bpsDefaults.loading.value || syncBusy.value || submitting.value || checkingSubmit.value) return
   if (targetMode.value === 'selected' && targetAccountIds.value.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
@@ -2497,10 +2533,15 @@ const handleSubmit = async () => {
     return
   }
 
-  const canContinue = await preCheckMixedChannelRisk(built)
-  if (!canContinue) return
-
-  await submitBulkUpdate(built)
+  checkingSubmit.value = true
+  const generation = dialogGeneration
+  try {
+    const canContinue = await preCheckMixedChannelRisk(built)
+    if (!canContinue || !props.show || generation !== dialogGeneration) return
+    await submitBulkUpdate(built)
+  } finally {
+    checkingSubmit.value = false
+  }
 }
 
 const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
@@ -2583,6 +2624,7 @@ const handleMixedChannelCancel = () => {
 watch(
   () => props.show,
   (newShow) => {
+    dialogGeneration++
     if (!newShow) {
       // Reset all enable flags
       enableBaseUrl.value = false

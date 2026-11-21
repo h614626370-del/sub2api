@@ -45,7 +45,7 @@ func ProvideAdminHandlers(
 	pelicanGroupTestHandler *admin.PelicanGroupTestHandler,
 	controlledExperimentHandler *admin.ControlledExperimentHandler,
 	accountOpsHandler *admin.AccountOpsHandler,
-	accountTokenGuardHandler *admin.AccountTokenGuardHandler,
+	openAIReloginHandler *admin.OpenAIReloginHandler,
 	accountTokenGuardV2Handler *admin.AccountTokenGuardV2Handler,
 	channelHandler *admin.ChannelHandler,
 	channelMonitorHandler *admin.ChannelMonitorHandler,
@@ -60,7 +60,6 @@ func ProvideAdminHandlers(
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	settingService *service.SettingService,
-	codexHarvest *service.CodexHarvestService,
 	openAIGatewayService *service.OpenAIGatewayService,
 	autoCredit service.AutoCreditRepository,
 ) *AdminHandlers {
@@ -68,7 +67,6 @@ func ProvideAdminHandlers(
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetCodexTicketSettings(settingService)
-	accountHandler.SetCodexHarvestService(codexHarvest)
 	accountHandler.SetOpenAIGatewayService(openAIGatewayService)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	accountHandler.SetOpenAIOAuthReauthService(openaiOAuthReauthService)
@@ -102,7 +100,7 @@ func ProvideAdminHandlers(
 		Plugin:                 pluginHandler,
 		APIKey:                 apiKeyHandler,
 		AccountOps:             accountOpsHandler,
-		AccountTokenGuard:      accountTokenGuardHandler,
+		OpenAIRelogin:          openAIReloginHandler,
 		AccountTokenGuardV2:    accountTokenGuardV2Handler,
 		ScheduledTest:          scheduledTestHandler,
 		PelicanGroupTest:       pelicanGroupTestHandler,
@@ -336,7 +334,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewPelicanGroupTestHandler,
 	admin.NewControlledExperimentHandler,
 	admin.NewAccountOpsHandler,
-	admin.NewAccountTokenGuardHandler,
+	admin.NewOpenAIReloginHandler,
 	admin.NewAccountTokenGuardV2Handler,
 	admin.ProvideMatureChannelHandler,
 	admin.NewChannelMonitorHandler,

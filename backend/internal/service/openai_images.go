@@ -626,9 +626,15 @@ func (s *OpenAIGatewayService) ForwardImages(
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
 ) (*OpenAIForwardResult, error) {
-
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
+	}
+	fields, ok := ctx.Value(imageBillingModelKey{}).(ChannelUsageFields)
+	if !ok {
+		fields = ChannelUsageFields{
+			OriginalModel: parsed.Model, ChannelMappedModel: channelMappedModel,
+			ChannelMappingApplied: channelMappedModel != "" && channelMappedModel != parsed.Model,
+		}
 	}
 	requestModel := strings.TrimSpace(parsed.Model)
 	if mapped := strings.TrimSpace(channelMappedModel); mapped != "" {
@@ -654,7 +660,7 @@ func (s *OpenAIGatewayService) ForwardImages(
 	ctx = s.withOpenAIImageResponseHeaderTimeout(ctx, c)
 	switch account.Type {
 	case AccountTypeAPIKey:
-		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)
+		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel, fields)
 	case AccountTypeOAuth, AccountTypeSetupToken:
 		return s.forwardOpenAIImagesOAuth(ctx, c, account, parsed, channelMappedModel)
 	default:
@@ -686,6 +692,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	body []byte,
 	parsed *OpenAIImagesRequest,
 	channelMappedModel string,
+	fields ChannelUsageFields,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 	requestModel := strings.TrimSpace(parsed.Model)
@@ -850,7 +857,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			return nil, err
 		}
 		usage = streamUsage
-		imageCount = resolveBillableImageCount(streamCount, 0, imageCountBillingEnabled(getAPIKeyFromContext(c)))
+		imageCount = resolveImageCountForBillingMode(c, fields, requestModel, upstreamModel, streamCount, 0)
 		imageOutputSizes := streamSizes
 		firstTokenMs = ttft
 		return &OpenAIForwardResult{
@@ -878,7 +885,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			return nil, err
 		}
 		usage = nonStreamUsage
-		imageCount = resolveBillableImageCount(nonStreamCount, parsed.N, imageCountBillingEnabled(getAPIKeyFromContext(c)))
+		imageCount = resolveImageCountForBillingMode(c, fields, requestModel, upstreamModel, nonStreamCount, parsed.N)
 		return &OpenAIForwardResult{
 			RequestID:        resp.Header.Get("x-request-id"),
 			UpstreamHeaders:  resp.Header,
