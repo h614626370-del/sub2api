@@ -879,6 +879,8 @@ func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		system.POST("/mihomo/nodes/static-proxies", h.Admin.System.AddMihomoNodesAsStaticProxies)
 		system.GET("/check-updates", h.Admin.System.CheckUpdates)
 		system.GET("/check-upstream-updates", h.Admin.System.CheckUpstreamUpdates)
+		system.GET("/auto-update", h.Admin.System.GetAutoUpdate)
+		system.PUT("/auto-update", h.Admin.System.SetAutoUpdateSchedule)
 		system.GET("/rollback-versions", h.Admin.System.GetRollbackVersions)
 		system.POST("/update", h.Admin.System.PerformUpdate)
 		system.POST("/rollback", h.Admin.System.Rollback)

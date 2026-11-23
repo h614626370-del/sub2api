@@ -115,7 +115,7 @@ func (s *Store) Neighbors(ctx context.Context, a *Article, access Access) error 
  ) ordered WHERE id=$1`, a.ID).Scan(&a.PreviousID, &a.NextID)
 }
 func (s *Store) List(ctx context.Context, access Access, search, status string, category int64, page, size int) ([]Article, int64, error) {
-	// User queries select the published snapshot only; draft metadata never participates in search.
+	// Reader searches are scoped to the published snapshot.
 	source := "published"
 	where := "published IS NOT NULL"
 	if access == AdminAccess {
@@ -126,7 +126,10 @@ func (s *Store) List(ctx context.Context, access Access, search, status string, 
 		where += ` AND ` + publicCondition
 	}
 	args := []any{strings.ToLower(search), category}
-	where += ` AND ($1='' OR strpos(lower(` + source + `->>'title'),$1)>0 OR strpos(lower(` + source + `->>'summary'),$1)>0)`
+	where += ` AND ($1=''
+		OR strpos(lower(` + source + `->>'title'),$1)>0
+		OR strpos(lower(` + source + `->>'summary'),$1)>0
+		OR strpos(lower(` + source + `->>'content'),$1)>0)`
 	where += ` AND ($2=0 OR (` + source + `->>'category_id')::bigint=$2)`
 	if access == AdminAccess && status == "draft" {
 		where += ` AND published IS NULL`

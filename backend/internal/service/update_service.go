@@ -185,6 +185,14 @@ func (s *UpdateService) checkUpdate(ctx context.Context, force bool, repo string
 // PerformUpdate downloads and applies the update
 // Uses atomic file replacement pattern for safe in-place updates
 func (s *UpdateService) PerformUpdate(ctx context.Context) error {
+	return s.performUpdate(ctx, false)
+}
+
+func (s *UpdateService) performVerifiedUpdate(ctx context.Context) error {
+	return s.performUpdate(ctx, true)
+}
+
+func (s *UpdateService) performUpdate(ctx context.Context, requireChecksum bool) error {
 	if err := s.checkRestartRequired(); err != nil {
 		return err
 	}
@@ -201,7 +209,11 @@ func (s *UpdateService) PerformUpdate(ctx context.Context) error {
 		return ErrNoUpdateAvailable
 	}
 
-	return s.applyReleaseAssets(ctx, info.ReleaseInfo.Assets)
+	requiredArchive := ""
+	if requireChecksum {
+		requiredArchive = fmt.Sprintf("sub2api_%s_%s.tar.gz", info.LatestVersion, s.getArchiveName())
+	}
+	return s.applyReleaseAssets(ctx, info.ReleaseInfo.Assets, requiredArchive)
 }
 
 // Check before release lookups so pending restarts take precedence over network
@@ -222,7 +234,7 @@ func (s *UpdateService) isRestartRequired() bool {
 // applyReleaseAssets downloads the platform archive from the given release assets,
 // verifies its checksum, and atomically swaps the running binary.
 // Shared by PerformUpdate (latest) and RollbackToVersion (specific older version).
-func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []Asset) error {
+func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []Asset, requiredArchive string) error {
 	s.installMu.Lock()
 	defer s.installMu.Unlock()
 	if s.restartRequired {
@@ -235,7 +247,11 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 	var checksumURL string
 
 	for _, asset := range releaseAssets {
-		if strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt") {
+		isArchive := strings.Contains(asset.Name, archiveName) && !strings.HasSuffix(asset.Name, ".txt")
+		if requiredArchive != "" {
+			isArchive = asset.Name == requiredArchive
+		}
+		if isArchive {
 			downloadURL = asset.DownloadURL
 		}
 		if asset.Name == "checksums.txt" {
@@ -245,6 +261,9 @@ func (s *UpdateService) applyReleaseAssets(ctx context.Context, releaseAssets []
 
 	if downloadURL == "" {
 		return fmt.Errorf("no compatible release found for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	if requiredArchive != "" && checksumURL == "" {
+		return fmt.Errorf("automatic update requires release checksums.txt")
 	}
 
 	// SECURITY: Validate download URL is from trusted domain
@@ -420,7 +439,7 @@ func (s *UpdateService) RollbackToVersion(ctx context.Context, version string) e
 		}
 	}
 
-	return s.applyReleaseAssets(ctx, assets)
+	return s.applyReleaseAssets(ctx, assets, "")
 }
 
 // fetchRollbackCandidates fetches recent releases and keeps the newest

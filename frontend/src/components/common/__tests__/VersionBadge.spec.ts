@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   versions: vi.fn(),
   rollback: vi.fn(),
-  restart: vi.fn()
+  restart: vi.fn(),
+  getSchedule: vi.fn(),
+  saveSchedule: vi.fn()
 }))
 vi.mock('@/stores', () => ({
   useAppStore: () => mocks.app,
@@ -20,7 +22,9 @@ vi.mock('@/api/admin/system', () => ({
   performUpdate: mocks.update,
   getRollbackVersions: mocks.versions,
   rollback: mocks.rollback,
-  restartService: mocks.restart
+  restartService: mocks.restart,
+  getAutoUpdate: mocks.getSchedule,
+  saveAutoUpdate: mocks.saveSchedule
 }))
 vi.mock('@/composables/useClipboard', () => ({
   useClipboard: () => ({ copied: false, copyToClipboard: vi.fn() })
@@ -46,6 +50,7 @@ describe('VersionBadge dual repositories', () => {
     mocks.versions.mockResolvedValue({
       versions: [{ version: '2.9.11.10', published_at: '2026-10-07T00:00:00Z' }]
     })
+    mocks.getSchedule.mockResolvedValue({ enabled: false, time: '04:00', timezone: 'Asia/Shanghai', supported: true })
   })
   afterEach(() => {
     wrapper?.unmount()
@@ -85,6 +90,52 @@ describe('VersionBadge dual repositories', () => {
     expect(wrapper.find('button').exists()).toBe(false)
     expect(mocks.app.fetchVersion).not.toHaveBeenCalled()
     expect(mocks.app.fetchUpstreamVersion).not.toHaveBeenCalled()
+    expect(mocks.getSchedule).not.toHaveBeenCalled()
+  })
+
+  it('saves the daily time and opt-in together, and can turn it off', async () => {
+    mocks.saveSchedule.mockImplementation(async schedule => ({
+      ...schedule, timezone: 'Asia/Shanghai', supported: true
+    }))
+    await open()
+    const form = element('auto-update') as HTMLFormElement
+    const toggle = form.querySelector<HTMLButtonElement>('[role="switch"]')!
+    const time = element('auto-update-time') as HTMLInputElement
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(time.value).toBe('04:00')
+    expect(form.textContent).toContain('Asia/Shanghai')
+    toggle.click()
+    time.value = '03:15'
+    time.dispatchEvent(new Event('input'))
+    await flushPromises()
+    expect(mocks.saveSchedule).not.toHaveBeenCalled()
+    await click('save-auto-update')
+    expect(mocks.saveSchedule).toHaveBeenNthCalledWith(1, { enabled: true, time: '03:15' })
+    expect(form.querySelector('[role="status"]')?.textContent).toContain('version.autoUpdateSaved')
+    toggle.click()
+    await flushPromises()
+    await click('save-auto-update')
+    expect(mocks.saveSchedule).toHaveBeenNthCalledWith(2, { enabled: false, time: '03:15' })
+  })
+
+  it('keeps the unsaved time on error and allows retry', async () => {
+    mocks.saveSchedule.mockRejectedValueOnce(new Error('Update already running'))
+    await open()
+    const time = element('auto-update-time') as HTMLInputElement
+    time.value = '02:00'
+    time.dispatchEvent(new Event('input'))
+    await flushPromises()
+    await click('save-auto-update')
+    expect(element('auto-update').querySelector('[role="alert"]')?.textContent).toContain('Update already running')
+    expect(time.value).toBe('02:00')
+    expect((element('save-auto-update') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('does not allow enabling automatic updates on an unsupported runtime', async () => {
+    mocks.getSchedule.mockResolvedValue({ enabled: false, time: '04:00', timezone: 'Asia/Shanghai', supported: false })
+    await open()
+    expect(element('auto-update').querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true)
+    expect(element('auto-update-time')).toBeNull()
   })
 
   it('upstream failure leaves custom installation available; custom warning blocks it', async () => {

@@ -46,3 +46,5 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 func HasEmbeddedFrontend() bool {
 	return false
 }
+
+func EmbeddedFrontendFileExists(string) bool { return false }

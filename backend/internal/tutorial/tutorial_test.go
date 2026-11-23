@@ -137,6 +137,18 @@ func TestTutorialLifecycle(t *testing.T) {
 	if err != nil || total != 0 {
 		t.Fatal("draft search leaked")
 	}
+	list, total, err = s.List(ctx, MemberAccess, "ORIGINAL BODY", "", category.ID, 1, 20)
+	if err != nil || total != 1 || len(list) != 1 || list[0].ID != a.ID || list[0].Content.Content != "" {
+		t.Fatalf("published body search returned unexpected results: total=%d, err=%v", total, err)
+	}
+	_, total, err = s.List(ctx, MemberAccess, "Draft body", "", 0, 1, 20)
+	if err != nil || total != 0 {
+		t.Fatal("draft body leaked to member search")
+	}
+	list, total, err = s.List(ctx, AdminAccess, "Draft body", "published", 0, 1, 20)
+	if err != nil || total != 1 || len(list) != 1 || list[0].ID != a.ID {
+		t.Fatalf("draft body did not match admin search: total=%d, err=%v", total, err)
+	}
 	if _, err = s.Change(ctx, a.ID, oldVersion, "save", in); err != ErrConflict {
 		t.Fatal("stale editor overwrote draft")
 	}
@@ -148,7 +160,7 @@ func TestTutorialLifecycle(t *testing.T) {
 	}
 	// Published and draft-only images must remain distinct.
 	key := "0123456789abcdef0123456789abcdef"
-	in.Content = "![image](tutorial-asset:" + key + ")"
+	in.Content = "正文关键词\n\n![image](tutorial-asset:" + key + ")"
 	a, err = s.Change(ctx, a.ID, a.Version, "save", in)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +190,7 @@ func TestTutorialLifecycle(t *testing.T) {
 	if err != nil || len(publicCategories) != 0 {
 		t.Fatal("private category leaked")
 	}
-	privateArticle, err := s.Create(ctx, 1, Content{Title: "Private neighbor", Content: "private", CategoryID: &category.ID})
+	privateArticle, err := s.Create(ctx, 1, Content{Title: "Private neighbor", Content: "Login-only keyword", CategoryID: &category.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +219,14 @@ func TestTutorialLifecycle(t *testing.T) {
 	_, publicTotal, err = s.List(ctx, PublicAccess, "Private neighbor", "", 0, 1, 20)
 	if err != nil || publicTotal != 0 {
 		t.Fatal("private search leaked")
+	}
+	_, publicTotal, err = s.List(ctx, PublicAccess, "Login-only keyword", "", 0, 1, 20)
+	if err != nil || publicTotal != 0 {
+		t.Fatal("login-only body leaked to public search")
+	}
+	publicItems, publicTotal, err = s.List(ctx, PublicAccess, "正文关键词", "", 0, 1, 20)
+	if err != nil || publicTotal != 1 || len(publicItems) != 1 || publicItems[0].ID != a.ID || publicItems[0].Content.Content != "" {
+		t.Fatalf("public body search returned unexpected results: total=%d, err=%v", publicTotal, err)
 	}
 	publicCategories, err = s.Categories(ctx, PublicAccess)
 	if err != nil || len(publicCategories) != 1 || publicCategories[0].ID != category.ID {
@@ -248,6 +268,10 @@ func TestTutorialLifecycle(t *testing.T) {
 	}
 	if _, err = s.Get(ctx, a.ID, PublicAccess); err != ErrNotFound {
 		t.Fatal("restricted article remained public")
+	}
+	_, publicTotal, err = s.List(ctx, PublicAccess, "正文关键词", "", 0, 1, 20)
+	if err != nil || publicTotal != 0 {
+		t.Fatal("restricted body remained searchable by the public")
 	}
 	if err = s.DeleteCategory(ctx, category.ID); err != nil {
 		t.Fatal(err)

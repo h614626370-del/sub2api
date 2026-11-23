@@ -23,6 +23,7 @@ import (
 type SystemHandler struct {
 	updateSvc   systemUpdateService
 	lockSvc     *service.SystemOperationLockService
+	autoUpdate  *service.SystemAutoUpdate
 	kernel      *mihomo.Manager
 	nodeChecker mihomoNodeChecker
 }
@@ -64,6 +65,37 @@ func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOper
 		lockSvc:   lockSvc,
 		kernel:    mihomo.New(filepath.Join(setup.GetDataDir(), "mihomo-codex")),
 	}
+}
+
+func (h *SystemHandler) SetAutoUpdate(autoUpdate *service.SystemAutoUpdate) {
+	h.autoUpdate = autoUpdate
+}
+
+func (h *SystemHandler) GetAutoUpdate(c *gin.Context) {
+	settings, err := h.autoUpdate.Get(c.Request.Context())
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, settings)
+}
+
+func (h *SystemHandler) SetAutoUpdateSchedule(c *gin.Context) {
+	var req struct {
+		Enabled *bool  `json:"enabled"`
+		Time    string `json:"time"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		response.BadRequest(c, "Expected enabled and time fields.")
+		return
+	}
+	settings, err := h.autoUpdate.Save(c.Request.Context(), service.SystemAutoUpdateSchedule{
+		Enabled: *req.Enabled,
+		Time:    req.Time,
+	})
+	if response.ErrorFrom(c, err) {
+		return
+	}
+	response.Success(c, settings)
 }
 
 // GetVersion returns the current version

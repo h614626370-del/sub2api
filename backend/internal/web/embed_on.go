@@ -29,6 +29,11 @@ const (
 //go:embed all:dist
 var frontendFS embed.FS
 
+func EmbeddedFrontendFileExists(name string) bool {
+	info, err := fs.Stat(frontendFS, "dist/"+name)
+	return err == nil && !info.IsDir()
+}
+
 // PublicSettingsProvider is an interface to fetch public settings
 type PublicSettingsProvider interface {
 	GetPublicSettingsForInjection(ctx context.Context) (any, error)

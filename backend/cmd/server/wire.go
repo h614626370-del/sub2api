@@ -33,6 +33,7 @@ type Application struct {
 	Server        *http.Server
 	PromptAudit   *securityaudit.PromptService
 	PluginManager *service.PluginManager
+	AutoUpdate    *service.SystemAutoUpdate
 	Cleanup       func()
 }
 
@@ -65,7 +66,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		provideCleanup,
 
 		// Application struct
-		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "Lifecycle", "Cleanup"),
+		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "AutoUpdate", "Lifecycle", "Cleanup"),
 	)
 	return nil, nil
 }

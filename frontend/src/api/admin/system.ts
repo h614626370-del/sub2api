@@ -48,6 +48,26 @@ export async function checkUpstreamUpdates(force = false): Promise<VersionInfo> 
   return data
 }
 
+export interface AutoUpdateSchedule {
+  enabled: boolean
+  time: string
+}
+
+export interface AutoUpdateSettings extends AutoUpdateSchedule {
+  timezone: string
+  supported: boolean
+}
+
+export async function getAutoUpdate(): Promise<AutoUpdateSettings> {
+  const { data } = await apiClient.get<AutoUpdateSettings>('/admin/system/auto-update')
+  return data
+}
+
+export async function saveAutoUpdate(schedule: AutoUpdateSchedule): Promise<AutoUpdateSettings> {
+  const { data } = await apiClient.put<AutoUpdateSettings>('/admin/system/auto-update', schedule)
+  return data
+}
+
 export interface UpdateResult {
   message: string
   need_restart: boolean
@@ -114,6 +134,8 @@ export const systemAPI = {
   getVersion,
   checkUpdates,
   checkUpstreamUpdates,
+  getAutoUpdate,
+  saveAutoUpdate,
   performUpdate,
   getRollbackVersions,
   rollback,

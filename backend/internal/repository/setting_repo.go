@@ -8,6 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // SetContentModerationConfig holds live group rows until the setting is written.
@@ -72,7 +73,7 @@ type settingRepository struct {
 	client *ent.Client
 }
 
-func (r *settingRepository) CompareAndSetHomepage(ctx context.Context, value, previous string) error {
+func (r *settingRepository) CompareAndSetHomepage(ctx context.Context, value, previous string, newAssets map[string][]byte, retained []string) error {
 	tx, err := r.client.Tx(ctx)
 	if err != nil {
 		return err
@@ -94,7 +95,34 @@ func (r *settingRepository) CompareAndSetHomepage(ctx context.Context, value, pr
 	if count != 1 {
 		return service.ErrHomepageConflict
 	}
+	for digest, data := range newAssets {
+		if _, err := client.ExecContext(ctx, `INSERT INTO homepage_assets (digest, data) VALUES ($1, $2) ON CONFLICT (digest) DO NOTHING`, digest, data); err != nil {
+			return err
+		}
+	}
+	if _, err := client.ExecContext(ctx, `DELETE FROM homepage_assets WHERE NOT (digest = ANY(COALESCE($1::text[], '{}')))`, pq.Array(retained)); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func (r *settingRepository) ReadHomepageAsset(ctx context.Context, digest string) ([]byte, error) {
+	rows, err := r.client.QueryContext(ctx, `SELECT data FROM homepage_assets WHERE digest = $1`, digest)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, service.ErrHomepageAssetNotFound
+	}
+	var data []byte
+	if err := rows.Scan(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func NewSettingRepository(client *ent.Client) service.SettingRepository {

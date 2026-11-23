@@ -210,7 +210,24 @@ func runMainServer() {
 	// 等待中断信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(quit)
+	updateCtx, stopUpdates := context.WithCancel(context.Background())
+	updatesDone := make(chan struct{})
+	go func() {
+		defer close(updatesDone)
+		app.AutoUpdate.Run(updateCtx, func() {
+			select {
+			case quit <- syscall.SIGTERM:
+			default:
+			}
+		})
+	}()
+	defer func() {
+		stopUpdates()
+		<-updatesDone
+	}()
 	<-quit
+	stopUpdates()
 
 	log.Println("Shutting down server...")
 

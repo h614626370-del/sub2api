@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -20,6 +21,47 @@ type homepageReaderStub struct {
 	backendOnly bool
 	err         error
 	reads       int
+	assets      map[string][]byte
+}
+
+func (s *homepageReaderStub) PublicHomepageAsset(_ context.Context, name string) (service.HomepageAsset, []byte, error) {
+	data, ok := s.assets[name]
+	if !ok {
+		return service.HomepageAsset{}, nil, service.ErrHomepageAssetNotFound
+	}
+	return service.HomepageAsset{Name: name, ContentType: "image/png", Digest: "asset-digest"}, data, nil
+}
+
+func TestHomepageAssetResponse(t *testing.T) {
+	data := []byte("image bytes")
+	stub := &homepageReaderStub{assets: map[string][]byte{"背景 图.png": data, "reserved.png": data, "routed.png": data}}
+	router := gin.New()
+	router.Use(HomepageDocuments(stub, func(name string) bool { return name == "reserved.png" }))
+	router.GET("/routed.png", func(c *gin.Context) { c.String(200, "route") })
+	router.NoRoute(func(c *gin.Context) { c.String(200, "SPA") })
+	request := func(method, path, etag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("If-None-Match", etag)
+		r := httptest.NewRecorder()
+		router.ServeHTTP(r, req)
+		return r
+	}
+	const path = "/homepage-assets/%E8%83%8C%E6%99%AF%20%E5%9B%BE.png"
+	got := request(http.MethodGet, path, "")
+	require.Equal(t, http.StatusOK, got.Code)
+	require.Equal(t, data, got.Body.Bytes())
+	require.Equal(t, "image/png", got.Header().Get("Content-Type"))
+	require.Equal(t, "nosniff", got.Header().Get("X-Content-Type-Options"))
+	require.Equal(t, "public, no-cache", got.Header().Get("Cache-Control"))
+	require.Empty(t, request(http.MethodHead, path, "").Body.String())
+	require.Equal(t, http.StatusNotModified, request(http.MethodGet, path, got.Header().Get("ETag")).Code)
+	require.Equal(t, http.StatusNotFound, request(http.MethodGet, "/homepage-assets/no.png", "").Code)
+	require.Equal(t, http.StatusNotFound, request(http.MethodGet, "/homepage-assets/../x.png", "").Code)
+	require.Equal(t, http.StatusMethodNotAllowed, request(http.MethodPost, path, "").Code)
+	require.Equal(t, data, request(http.MethodGet, strings.TrimPrefix(path, "/homepage-assets"), "").Body.Bytes())
+	require.Equal(t, "SPA", request(http.MethodGet, "/reserved.png", "").Body.String())
+	require.Equal(t, "SPA", request(http.MethodGet, "/unknown.png", "").Body.String())
+	require.Equal(t, "route", request(http.MethodGet, "/routed.png", "").Body.String())
 }
 
 func (s *homepageReaderStub) PublicHomepage(context.Context) (service.HomepageConfig, bool, error) {
@@ -32,7 +74,7 @@ func TestHomepageDocuments(t *testing.T) {
 		Enabled: true, PublicOrigin: "https://public.example", HTML: "<!doctype html><title>Published</title>",
 	}}
 	router := gin.New()
-	router.Use(HomepageDocuments(stub))
+	router.Use(HomepageDocuments(stub, nil))
 	router.NoRoute(func(c *gin.Context) { c.String(200, "SPA") })
 	request := func(method, path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, "http://untrusted-host.example"+path, nil)
@@ -83,7 +125,7 @@ func TestHomepageSessionRedirect(t *testing.T) {
 		HTML:         "<!doctype html><head>" + homepageSessionMarker + "<script>custom()</script></head>",
 	}}
 	router := gin.New()
-	router.Use(HomepageDocuments(stub))
+	router.Use(HomepageDocuments(stub, nil))
 	router.NoRoute(func(c *gin.Context) { c.String(200, "SPA") })
 
 	for _, tc := range []struct {

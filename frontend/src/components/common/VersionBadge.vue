@@ -31,13 +31,46 @@
         :style="panelStyle"
         class="fixed z-[100] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl dark:border-dark-700 dark:bg-dark-800"
       >
-        <header class="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700">
+        <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-gray-100 px-4 py-3 dark:border-dark-700">
           <div class="min-w-0">
             <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('version.repositories') }}</h2>
             <p class="mt-1 break-all text-xs text-gray-500 dark:text-dark-400">
               {{ t('version.currentVersion') }}: {{ currentVersion ? `v${currentVersion}` : '--' }}
             </p>
           </div>
+          <form v-if="autoUpdate" class="order-3 flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs min-[760px]:order-none min-[760px]:w-auto"
+            data-testid="auto-update" @submit.prevent="saveSchedule">
+            <div class="flex items-center gap-2">
+              <Toggle v-model="autoEnabled" :aria-label="t('version.autoUpdate')"
+                :disabled="scheduleLoading || scheduleSaving || (!autoUpdate.supported && !autoEnabled)" />
+              <span class="font-medium text-gray-800 dark:text-dark-100">{{ t('version.autoUpdate') }}</span>
+            </div>
+            <template v-if="autoUpdate.supported">
+              <label class="flex items-center gap-2 text-gray-600 dark:text-dark-300">
+                {{ t('version.autoUpdateTime') }}
+                <input v-model="autoTime" type="time" step="60" required data-testid="auto-update-time"
+                  class="input w-auto min-w-24 px-2 py-1 text-xs tabular-nums" :disabled="scheduleLoading || scheduleSaving" />
+              </label>
+              <button type="submit" class="btn btn-secondary px-2 py-1 text-xs"
+                data-testid="save-auto-update" :disabled="scheduleSaving || !scheduleChanged">
+                {{ t('common.save') }}
+              </button>
+              <span class="basis-full text-gray-600 dark:text-dark-300">{{ autoUpdate.timezone }}</span>
+            </template>
+            <template v-else>
+              <span class="text-gray-600 dark:text-dark-300">{{ t('version.autoUpdateUnsupported') }}</span>
+              <button v-if="scheduleChanged" type="submit" class="btn btn-secondary px-2 py-1 text-xs" :disabled="scheduleSaving">
+                {{ t('common.save') }}
+              </button>
+            </template>
+            <p v-if="scheduleError" role="alert" class="basis-full break-words text-red-700 dark:text-red-400">{{ scheduleError }}</p>
+            <p v-else-if="scheduleSaved && !scheduleChanged" role="status" class="basis-full text-green-700 dark:text-green-400">
+              {{ t('version.autoUpdateSaved') }}
+            </p>
+          </form>
+          <div v-else-if="scheduleLoading" role="status" :aria-label="t('common.loading')"
+            class="order-3 h-6 w-36 rounded bg-gray-100 min-[760px]:order-none dark:bg-dark-700"></div>
+          <p v-else-if="scheduleError" role="alert" class="order-3 w-full break-words text-xs text-red-700 dark:text-red-400">{{ scheduleError }}</p>
           <div class="flex shrink-0 gap-1">
             <button
               type="button"
@@ -181,9 +214,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, useAuthStore } from '@/stores'
-import { getRollbackVersions, performUpdate, restartService, rollback as rollbackAPI, type RollbackVersionInfo } from '@/api/admin/system'
+import { getAutoUpdate, getRollbackVersions, performUpdate, restartService, rollback as rollbackAPI, saveAutoUpdate, type AutoUpdateSettings, type RollbackVersionInfo } from '@/api/admin/system'
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
+import Toggle from '@/components/common/Toggle.vue'
 
 const CUSTOM_REPO = 'h614626370-del/sub2api'
 const UPSTREAM_REPO = 'ranxi2001/sub2api'
@@ -215,6 +249,15 @@ const rollingBack = ref(false)
 const restarting = ref(false)
 const busy = computed(() => updating.value || rollingBack.value || restarting.value)
 const operationError = ref('')
+const autoUpdate = ref<AutoUpdateSettings | null>(null)
+const autoEnabled = ref(false)
+const autoTime = ref('')
+const scheduleSaving = ref(false)
+const scheduleLoading = ref(false)
+const scheduleError = ref('')
+const scheduleSaved = ref(false)
+const scheduleChanged = computed(() => !!autoUpdate.value &&
+  (autoEnabled.value !== autoUpdate.value.enabled || autoTime.value !== autoUpdate.value.time))
 const updateSuccess = ref(false)
 const needRestart = computed(() => appStore.restartRequired)
 const alreadyUpToDate = ref(false)
@@ -262,8 +305,9 @@ async function toggleDropdown() {
   dropdownOpen.value = !dropdownOpen.value
   if (dropdownOpen.value) {
     positionPanel()
+    void loadSchedule()
     await nextTick()
-    dropdownRef.value?.querySelector<HTMLButtonElement>('button')?.focus()
+    dropdownRef.value?.querySelector<HTMLButtonElement>('[data-testid="refresh-versions"]')?.focus()
   }
 }
 function closeDropdown() {
@@ -279,7 +323,40 @@ async function refreshVersions() {
     selectedRollbackVersion.value = ''
     rollbackVersions.value = []
   }
-  await Promise.all([appStore.fetchVersion(true), appStore.fetchUpstreamVersion(true)])
+  await Promise.all([appStore.fetchVersion(true), appStore.fetchUpstreamVersion(true), loadSchedule()])
+}
+function setSchedule(settings: AutoUpdateSettings) {
+  autoUpdate.value = settings
+  autoEnabled.value = settings.enabled
+  autoTime.value = settings.time
+}
+async function loadSchedule() {
+  if (scheduleLoading.value || scheduleSaving.value || scheduleChanged.value) return
+  scheduleLoading.value = true
+  scheduleError.value = ''
+  scheduleSaved.value = false
+  try {
+    setSchedule(await getAutoUpdate())
+  } catch (error) {
+    autoUpdate.value = null
+    scheduleError.value = errorMessage(error, 'version.autoUpdateLoadFailed')
+  } finally {
+    scheduleLoading.value = false
+  }
+}
+async function saveSchedule() {
+  if (!autoUpdate.value || !scheduleChanged.value || scheduleSaving.value || scheduleLoading.value) return
+  scheduleSaving.value = true
+  scheduleError.value = ''
+  scheduleSaved.value = false
+  try {
+    setSchedule(await saveAutoUpdate({ enabled: autoEnabled.value, time: autoTime.value }))
+    scheduleSaved.value = true
+  } catch (error) {
+    scheduleError.value = errorMessage(error, 'version.autoUpdateSaveFailed')
+  } finally {
+    scheduleSaving.value = false
+  }
 }
 function errorMessage(error: unknown, fallback: string) {
   const err = error as { response?: { data?: { message?: string } }; message?: string }

@@ -16,7 +16,7 @@ export default {
   new: '新建教程',
   edit: '编辑教程',
   all: '全部教程',
-  search: '搜索标题和摘要',
+  search: '搜索标题、摘要和正文',
   allCategories: '全部分类',
   uncategorized: '未分类',
   categories: '教程分类',

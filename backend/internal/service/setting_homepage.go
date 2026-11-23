@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -27,9 +28,11 @@ var (
 )
 
 type HomepageConfig struct {
-	Enabled      bool   `json:"enabled"`
-	PublicOrigin string `json:"public_origin"`
-	HTML         string `json:"html"`
+	Enabled      bool            `json:"enabled"`
+	PublicOrigin string          `json:"public_origin"`
+	HTML         string          `json:"html"`
+	EntryFile    string          `json:"entry_file,omitempty"`
+	Assets       []HomepageAsset `json:"assets,omitempty"`
 }
 
 type HomepageState struct {
@@ -49,7 +52,7 @@ type homepageRecord struct {
 // Match the repository's optimistic-write pattern so two control-plane instances
 // cannot overwrite each other's publication or its rollback snapshot.
 type homepageCompareAndSetter interface {
-	CompareAndSetHomepage(ctx context.Context, value, previous string) error
+	CompareAndSetHomepage(ctx context.Context, value, previous string, newAssets map[string][]byte, retained []string) error
 }
 
 func (s *SettingService) readHomepage(ctx context.Context) (homepageRecord, string, bool, error) {
@@ -82,14 +85,18 @@ func (s *SettingService) GetHomepage(ctx context.Context) (HomepageState, error)
 }
 
 func (s *SettingService) SaveHomepage(ctx context.Context, revision int64, config HomepageConfig) (HomepageState, error) {
-	return s.mutateHomepage(ctx, revision, &config)
+	return s.SaveHomepageWithAssets(ctx, revision, config, nil)
+}
+
+func (s *SettingService) SaveHomepageWithAssets(ctx context.Context, revision int64, config HomepageConfig, assets *[]HomepageAssetInput) (HomepageState, error) {
+	return s.mutateHomepage(ctx, revision, &config, assets)
 }
 
 func (s *SettingService) RestoreHomepage(ctx context.Context, revision int64) (HomepageState, error) {
-	return s.mutateHomepage(ctx, revision, nil)
+	return s.mutateHomepage(ctx, revision, nil, nil)
 }
 
-func (s *SettingService) mutateHomepage(ctx context.Context, revision int64, next *HomepageConfig) (HomepageState, error) {
+func (s *SettingService) mutateHomepage(ctx context.Context, revision int64, next *HomepageConfig, assets *[]HomepageAssetInput) (HomepageState, error) {
 	record, previousRaw, backendOnly, err := s.readHomepage(ctx)
 	if err != nil {
 		return HomepageState{}, err
@@ -97,16 +104,31 @@ func (s *SettingService) mutateHomepage(ctx context.Context, revision int64, nex
 	if revision != record.Revision {
 		return HomepageState{}, ErrHomepageConflict
 	}
+	var uploads map[string][]byte
 	if next == nil {
 		if record.Previous == nil {
 			return HomepageState{}, ErrHomepageNoBackup
 		}
 		next = record.Previous
+	} else {
+		if next.EntryFile == "" && next.HTML == record.Current.HTML {
+			next.EntryFile = record.Current.EntryFile
+		}
+		if assets == nil {
+			next.Assets = record.Current.Assets
+		} else {
+			next.Assets, uploads, err = prepareHomepageAssets(record.Current.Assets, *assets)
+			if err != nil {
+				return HomepageState{}, err
+			}
+		}
 	}
 	if err := validateHomepage(next); err != nil {
 		return HomepageState{}, err
 	}
-	if record.Current == *next {
+	if record.Current.Enabled == next.Enabled && record.Current.PublicOrigin == next.PublicOrigin &&
+		record.Current.HTML == next.HTML && record.Current.EntryFile == next.EntryFile &&
+		slices.Equal(record.Current.Assets, next.Assets) {
 		return record.state(backendOnly), nil
 	}
 	previous := record.Current
@@ -121,7 +143,13 @@ func (s *SettingService) mutateHomepage(ctx context.Context, revision int64, nex
 	if !ok {
 		return HomepageState{}, fmt.Errorf("homepage settings repository does not support atomic writes")
 	}
-	if err := repo.CompareAndSetHomepage(ctx, string(value), previousRaw); err != nil {
+	var retained []string
+	for _, assets := range [][]HomepageAsset{record.Current.Assets, record.Previous.Assets} {
+		for _, asset := range assets {
+			retained = append(retained, asset.Digest)
+		}
+	}
+	if err := repo.CompareAndSetHomepage(ctx, string(value), previousRaw, uploads, retained); err != nil {
 		return HomepageState{}, err
 	}
 	return record.state(backendOnly), nil
@@ -161,6 +189,9 @@ func validateHomepage(cfg *HomepageConfig) error {
 	if len(cfg.HTML) > MaxHomepageBytes {
 		return infraerrors.BadRequest("HOMEPAGE_TOO_LARGE", "homepage HTML must not exceed 1 MiB")
 	}
+	if cfg.EntryFile != "" && cfg.EntryFile != "index.html" && cfg.EntryFile != "home.html" {
+		return infraerrors.BadRequest("HOMEPAGE_ENTRY_NAME", "use index.html or home.html")
+	}
 	if !utf8.ValidString(cfg.HTML) || strings.ContainsRune(cfg.HTML, 0) {
 		return infraerrors.BadRequest("HOMEPAGE_INVALID_HTML", "homepage HTML must be valid UTF-8")
 	}
@@ -169,6 +200,7 @@ func validateHomepage(cfg *HomepageConfig) error {
 	}
 	if strings.TrimSpace(cfg.HTML) == "" {
 		cfg.HTML = ""
+		cfg.EntryFile = ""
 		return nil
 	}
 	complete, _ := inspectHomepage(*cfg)

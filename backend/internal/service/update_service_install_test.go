@@ -3,9 +3,13 @@
 package service
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -23,6 +27,9 @@ type updateInstallClient struct {
 	latestErr    error
 	latestCalls  int
 	recentCalls  int
+	archive      []byte
+	checksums    []byte
+	downloadURL  string
 }
 
 func (c *updateInstallClient) FetchLatestRelease(ctx context.Context, repo string) (*GitHubRelease, error) {
@@ -38,11 +45,19 @@ func (c *updateInstallClient) FetchRecentReleases(ctx context.Context, repo stri
 	return c.updateServiceGitHubClientStub.FetchRecentReleases(ctx, repo, limit)
 }
 
-func (c *updateInstallClient) DownloadFile(_ context.Context, _, dest string, _ int64) error {
+func (c *updateInstallClient) DownloadFile(_ context.Context, url, dest string, _ int64) error {
+	c.downloadURL = url
 	if c.failDownload {
 		return errors.New("download unavailable")
 	}
+	if c.archive != nil {
+		return os.WriteFile(dest, c.archive, 0600)
+	}
 	return os.WriteFile(dest, []byte("downloaded release"), 0600)
+}
+
+func (c *updateInstallClient) FetchChecksumFile(context.Context, string) ([]byte, error) {
+	return c.checksums, nil
 }
 
 func TestUpdateServicePendingRestartPrecedesReleaseLookup(t *testing.T) {
@@ -91,6 +106,21 @@ func TestUpdateServiceCachedCheckReportsPendingRestart(t *testing.T) {
 	require.Zero(t, client.latestCalls)
 }
 
+func TestUpdateServiceAutomaticInstallRequiresChecksums(t *testing.T) {
+	client := &updateInstallClient{failDownload: true}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "2.0.0", "release")
+	client.release = &GitHubRelease{
+		TagName: "v2.1.0",
+		Assets: []GitHubAsset{{
+			Name:               "sub2api_2.1.0_" + svc.getArchiveName() + ".tar.gz",
+			BrowserDownloadURL: "https://github.com/" + githubRepo + "/releases/download/v2.1.0/sub2api.tar.gz",
+		}},
+	}
+	require.ErrorContains(t, svc.performVerifiedUpdate(context.Background()), "requires release checksums.txt")
+	require.Empty(t, client.downloadURL)
+	require.False(t, svc.isRestartRequired())
+}
+
 func TestUpdateServiceRequiresRestartBeforeNextMutation(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("in-place executable replacement requires Unix rename semantics")
@@ -101,7 +131,7 @@ func TestUpdateServiceRequiresRestartBeforeNextMutation(t *testing.T) {
 		return
 	}
 
-	for _, scenario := range []string{"update-update", "update-rollback", "rollback-update", "rollback-rollback", "failed-update-retry"} {
+	for _, scenario := range []string{"update-update", "update-rollback", "rollback-update", "rollback-rollback", "failed-update-retry", "automatic-update"} {
 		t.Run(scenario, func(t *testing.T) {
 			// Never rename the parent test runner: only the disposable child copy.
 			executable, err := os.Executable()
@@ -139,6 +169,38 @@ func runUpdateInstallScenario(t *testing.T, scenario string) {
 		}},
 	}
 	update := func() error { return svc.PerformUpdate(context.Background()) }
+	if scenario == "automatic-update" {
+		payload := []byte("new release binary")
+		var archive bytes.Buffer
+		gzipWriter := gzip.NewWriter(&archive)
+		tarWriter := tar.NewWriter(gzipWriter)
+		require.NoError(t, tarWriter.WriteHeader(&tar.Header{Name: "sub2api", Mode: 0755, Size: int64(len(payload))}))
+		_, err := tarWriter.Write(payload)
+		require.NoError(t, err)
+		require.NoError(t, tarWriter.Close())
+		require.NoError(t, gzipWriter.Close())
+		client.archive = archive.Bytes()
+		name := "sub2api_2.0.0_" + svc.getArchiveName() + ".tar.gz"
+		baseURL := "https://github.com/" + githubRepo + "/releases/download/v2.0.0/"
+		reauth := "sub2api-reauth_2.0.0_" + svc.getArchiveName() + ".tar.gz"
+		client.release.Assets = []GitHubAsset{
+			{Name: name, BrowserDownloadURL: baseURL + name},
+			{Name: "checksums.txt", BrowserDownloadURL: baseURL + "checksums.txt"},
+			{Name: reauth, BrowserDownloadURL: baseURL + reauth},
+		}
+		update = func() error { return svc.performVerifiedUpdate(context.Background()) }
+		client.checksums = []byte(fmt.Sprintf("%064d  %s\n", 0, name))
+		require.ErrorContains(t, update(), "checksum mismatch")
+		require.NoFileExists(t, executable+".backup")
+		client.checksums = []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(client.archive), name))
+		require.NoError(t, update())
+		require.Equal(t, baseURL+name, client.downloadURL)
+		installed, err := os.ReadFile(executable)
+		require.NoError(t, err)
+		require.Equal(t, payload, installed)
+		require.FileExists(t, executable+".backup")
+		return
+	}
 	if scenario == "failed-update-retry" {
 		client.failDownload = true
 		require.ErrorContains(t, update(), "download unavailable")

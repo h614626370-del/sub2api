@@ -335,7 +335,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	updateService := service.ProvideUpdateService(updateCache, gitHubReleaseClient, serviceBuildInfo)
 	idempotencyRepository := repository.NewIdempotencyRepository(client, db)
 	systemOperationLockService := service.ProvideSystemOperationLockService(idempotencyRepository, configConfig)
-	systemHandler := handler.ProvideSystemHandler(updateService, systemOperationLockService, adminService)
+	systemAutoUpdate := service.ProvideSystemAutoUpdate(settingRepository, systemOperationLockService, updateService, configConfig)
+	systemHandler := handler.ProvideSystemHandler(updateService, systemOperationLockService, systemAutoUpdate, adminService)
 	adminSubscriptionHandler := admin.NewSubscriptionHandler(subscriptionService)
 	usageCleanupRepository := repository.NewUsageCleanupRepository(client, db)
 	usageCleanupService := service.ProvideUsageCleanupService(usageCleanupRepository, timingWheelService, dashboardAggregationService, configConfig)
@@ -472,6 +473,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		Server:        httpServer,
 		PromptAudit:   promptService,
 		PluginManager: pluginManager,
+		AutoUpdate:    systemAutoUpdate,
 		Lifecycle:     lifecycle,
 		Cleanup:       v,
 	}
@@ -485,6 +487,7 @@ type Application struct {
 	Server        *http.Server
 	PromptAudit   *securityaudit.PromptService
 	PluginManager *service.PluginManager
+	AutoUpdate    *service.SystemAutoUpdate
 	Cleanup       func()
 }
 

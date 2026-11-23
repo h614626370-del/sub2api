@@ -19,7 +19,7 @@ export default {
   new: 'New tutorial',
   edit: 'Edit tutorial',
   all: 'All tutorials',
-  search: 'Search titles and summaries',
+  search: 'Search titles, summaries, and body text',
   allCategories: 'All categories',
   uncategorized: 'Uncategorized',
   categories: 'Categories',

@@ -13,21 +13,103 @@ type homepageRepoStub struct {
 	SettingRepository
 	raw, backend string
 	writeError   error
+	assets       map[string][]byte
 }
 
 func (s *homepageRepoStub) GetMultiple(context.Context, []string) (map[string]string, error) {
 	return map[string]string{SettingKeyHomepage: s.raw, SettingKeyBackendModeEnabled: s.backend}, nil
 }
 
-func (s *homepageRepoStub) CompareAndSetHomepage(_ context.Context, value, old string) error {
+func (s *homepageRepoStub) CompareAndSetHomepage(_ context.Context, value, old string, uploads map[string][]byte, retained []string) error {
 	if s.writeError != nil {
 		return s.writeError
 	}
 	if s.raw != old {
 		return ErrHomepageConflict
 	}
+	next := make(map[string][]byte)
+	for _, digest := range retained {
+		if data, ok := uploads[digest]; ok {
+			next[digest] = data
+		} else {
+			next[digest] = s.assets[digest]
+		}
+	}
+	s.assets = next
 	s.raw = value
 	return nil
+}
+
+func (s *homepageRepoStub) ReadHomepageAsset(_ context.Context, digest string) ([]byte, error) {
+	if data, ok := s.assets[digest]; ok {
+		return data, nil
+	}
+	return nil, ErrHomepageAssetNotFound
+}
+
+func TestHomepageAssetsFollowPublishedSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := &homepageRepoStub{}
+	svc := &SettingService{settingRepo: repo}
+	page := HomepageConfig{Enabled: true, PublicOrigin: "https://public.example", HTML: "<!doctype html><title>Home</title>", EntryFile: "index.html"}
+	first := []HomepageAssetInput{
+		{Name: "hero.jpg", Data: []byte{0xff, 0xd8, 0xff, 0xe0}},
+		{Name: "home.css", Data: []byte("body { color: black }")},
+	}
+	saved, err := svc.SaveHomepageWithAssets(ctx, 0, page, &first)
+	require.NoError(t, err)
+	require.Len(t, saved.Assets, 2)
+	require.Equal(t, "index.html", saved.EntryFile)
+	asset, data, err := svc.PublicHomepageAsset(ctx, "hero.jpg")
+	require.NoError(t, err)
+	require.Equal(t, "image/jpeg", asset.ContentType)
+	require.Equal(t, first[0].Data, data)
+
+	replacement := []HomepageAssetInput{{Name: "hero.jpg", Data: []byte{0xff, 0xd8, 0xff, 0xe1}}}
+	page.EntryFile = "home.html"
+	saved, err = svc.SaveHomepageWithAssets(ctx, 1, page, &replacement)
+	require.NoError(t, err)
+	require.Equal(t, "home.html", saved.EntryFile)
+	require.Len(t, saved.Assets, 1)
+	_, data, err = svc.PublicHomepageAsset(ctx, "hero.jpg")
+	require.NoError(t, err)
+	require.Equal(t, replacement[0].Data, data)
+	_, _, err = svc.PublicHomepageAsset(ctx, "home.css")
+	require.ErrorIs(t, err, ErrHomepageAssetNotFound)
+	saved, err = svc.RestoreHomepage(ctx, 2)
+	require.NoError(t, err)
+	require.Equal(t, "index.html", saved.EntryFile)
+	_, data, err = svc.PublicHomepageAsset(ctx, "hero.jpg")
+	require.NoError(t, err)
+	require.Equal(t, first[0].Data, data)
+	_, _, err = svc.PublicHomepageAsset(ctx, "home.css")
+	require.NoError(t, err)
+
+	page.Enabled = false
+	page.EntryFile = ""
+	saved, err = svc.SaveHomepage(ctx, 3, page)
+	require.NoError(t, err)
+	require.Equal(t, "index.html", saved.EntryFile)
+	require.Len(t, saved.Assets, 2)
+	require.Len(t, repo.assets, 2)
+	_, _, err = svc.PublicHomepageAsset(ctx, "hero.jpg")
+	require.ErrorIs(t, err, ErrHomepageAssetNotFound)
+}
+
+func TestHomepageRejectsInvalidAssets(t *testing.T) {
+	for _, file := range []HomepageAssetInput{
+		{Name: "../logo.png", Data: []byte("invalid")},
+		{Name: "logo.svg", Data: []byte("<svg></svg>")},
+		{Name: "logo.png", Data: []byte("<html>")},
+		{Name: "logo.png"},
+	} {
+		t.Run(file.Name, func(t *testing.T) {
+			_, _, err := prepareHomepageAssets(nil, []HomepageAssetInput{file})
+			require.ErrorIs(t, err, ErrHomepageAssetInvalid)
+		})
+	}
+	_, _, err := prepareHomepageAssets(nil, []HomepageAssetInput{{Name: "large.jpg", Data: make([]byte, MaxHomepageAssetBytes+1)}})
+	require.ErrorIs(t, err, ErrHomepageAssetsTooLarge)
 }
 
 func TestHomepageSaveRestore(t *testing.T) {
