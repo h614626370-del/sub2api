@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RouteRecordRaw } from 'vue-router'
 
 type NavigationGuard = (
   to: Record<string, any>,
@@ -8,7 +9,7 @@ type NavigationGuard = (
 
 const routerHarness = vi.hoisted(() => ({
   guard: null as NavigationGuard | null,
-  routes: [] as Array<{ path: string; meta?: Record<string, unknown> }>,
+  routes: [] as RouteRecordRaw[],
 }))
 
 const authStore = vi.hoisted(() => ({
@@ -131,10 +132,17 @@ describe('feature route guard', () => {
 
   it('allows guest tutorial reading while keeping management behind authentication', async () => {
     authStore.isAuthenticated = false
-    for (const path of ['/tutorials', '/tutorials/:id(\\d+)']) {
-      const route = routerHarness.routes.find((r) => r.path === path)!
-      expect(route.meta?.requiresAuth).toBe(false)
-      const result = runGuard(route.meta!, path === '/tutorials' ? path : '/tutorials/42')
+    const { createRouter, createMemoryHistory } = await vi.importActual<typeof import('vue-router')>('vue-router')
+    const router = createRouter({ history: createMemoryHistory(), routes: routerHarness.routes })
+    for (const [path, name] of [
+      ['/tutorials', 'Tutorials'],
+      ['/tutorials/42', 'TutorialDetail'],
+      ['/tutorials/codex-cli-setup', 'TutorialDetail'],
+    ]) {
+      const route = router.resolve(path)
+      expect(route.name).toBe(name)
+      expect(route.meta.requiresAuth).toBe(false)
+      const result = runGuard(route.meta, path)
       await result.navigation
       expect(result.next).toHaveBeenCalledWith()
     }

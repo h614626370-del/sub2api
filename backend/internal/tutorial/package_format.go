@@ -133,7 +133,7 @@ func readTutorialPackage(src io.ReaderAt, size int64) (*tutorialPackage, error) 
 				var title strings.Builder
 				_ = ast.Walk(heading, func(child ast.Node, entering bool) (ast.WalkStatus, error) {
 					if part, ok := child.(*ast.Text); entering && ok {
-						title.WriteString(part.Value.Value(body))
+						_, _ = title.WriteString(part.Value.Value(body))
 					}
 					return ast.WalkContinue, nil
 				})
@@ -361,11 +361,11 @@ func rewritePackageImages(doc ast.Node, source []byte, replace func(string) (str
 		if edit.Start < offset || edit.Stop > len(source) {
 			return "", fmt.Errorf("overlapping tutorial image destinations")
 		}
-		result.Write(source[offset:edit.Start])
-		result.WriteString(edit.replacement)
+		_, _ = result.Write(source[offset:edit.Start])
+		_, _ = result.WriteString(edit.replacement)
 		offset = edit.Stop
 	}
-	result.Write(source[offset:])
+	_, _ = result.Write(source[offset:])
 	return result.String(), nil
 }
 
@@ -375,7 +375,7 @@ func rewritePackageHTML(indices []text.Index, source []byte, edits map[text.Inde
 	}
 	var raw bytes.Buffer
 	for _, index := range indices {
-		raw.Write(source[index.Start:index.Stop])
+		_, _ = raw.Write(source[index.Start:index.Stop])
 	}
 	tokenizer := html.NewTokenizer(bytes.NewReader(raw.Bytes()))
 	segment, segmentOffset, offset := 0, 0, 0
