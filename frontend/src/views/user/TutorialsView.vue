@@ -1,6 +1,9 @@
 <template>
-  <TutorialReaderLayout>
-    <div class="mx-auto max-w-[1500px]">
+  <TutorialReaderLayout :wide="Boolean(articleId)">
+    <div
+      class="tutorial-reader-page mx-auto"
+      :class="articleId ? 'max-w-[1776px]' : 'max-w-[1500px]'"
+    >
       <header class="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <RouterLink
@@ -34,19 +37,22 @@
             @keydown.enter="openSearch"
         /></label>
       </header>
-      <div class="tutorial-reader-layout" :class="{ 'has-article': articleId }">
+      <div
+        class="tutorial-reader-layout"
+        :class="{ 'has-article': articleId, 'has-toc': headings.length }"
+      >
         <aside class="min-w-0">
           <button
             type="button"
-            class="btn btn-secondary mb-3 w-full justify-between lg:hidden"
+            class="tutorial-nav-toggle btn btn-secondary w-full justify-between"
             :aria-expanded="navigationOpen"
             @click="navigationOpen = !navigationOpen"
           >
             {{ t('tutorials.articles') }}<Icon name="chevronDown" size="sm" />
           </button>
           <nav
-            class="space-y-1 lg:sticky lg:top-6"
-            :class="navigationOpen ? 'block' : 'hidden lg:block'"
+            class="tutorial-nav space-y-1"
+            :class="{ 'is-open mt-3': navigationOpen }"
             :aria-label="t('tutorials.categories')"
           >
             <button
@@ -79,9 +85,9 @@
               <RouterLink
                 v-for="a in items"
                 :key="a.id"
-                :to="`/tutorials/${a.id}`"
+                :to="tutorialPath(a.id, a.route_slug)"
                 class="tutorial-category !text-sm"
-                :class="{ selected: a.id === articleId }"
+                :class="{ selected: a.id === article?.id }"
                 @click="navigationOpen = false"
                 >{{ a.title }}</RouterLink
               >
@@ -163,9 +169,9 @@
             </div>
             <article
               v-else-if="article"
-              class="rounded-xl border border-gray-200 bg-white px-5 py-7 md:px-10 md:py-9 dark:border-dark-700 dark:bg-dark-900"
+              class="min-w-0 rounded-lg border border-gray-200 bg-white px-4 py-6 sm:px-6 md:py-8 dark:border-dark-700 dark:bg-dark-900"
             >
-              <div class="mx-auto max-w-[72ch]">
+              <header class="max-w-[72ch]">
                 <div
                   class="mb-4 flex flex-wrap items-center gap-3 text-xs text-gray-600 dark:text-dark-300"
                 >
@@ -180,7 +186,8 @@
                   >
                 </div>
                 <h1
-                  class="mb-4 break-words text-2xl font-semibold leading-snug text-gray-900 md:text-3xl dark:text-white"
+                  :id="titleAnchor"
+                  class="mb-5 scroll-mt-28 break-words text-2xl font-semibold leading-snug text-gray-900 md:text-3xl dark:text-white"
                 >
                   {{ article.title }}
                 </h1>
@@ -190,56 +197,58 @@
                 >
                   {{ article.summary }}
                 </p>
-                <div
-                  v-if="headings.length"
-                  class="mb-7 border-y border-gray-200 py-3 xl:hidden dark:border-dark-700"
+              </header>
+              <div
+                v-if="headings.length"
+                class="tutorial-toc-inline mb-7 max-w-[72ch] border-y border-gray-200 dark:border-dark-700"
+              >
+                <button
+                  type="button"
+                  class="tutorial-focus flex min-h-11 w-full items-center justify-between text-sm font-medium text-gray-700 dark:text-dark-200"
+                  :aria-expanded="tocOpen"
+                  @click="tocOpen = !tocOpen"
                 >
-                  <button
-                    class="flex w-full items-center justify-between text-sm font-medium text-gray-700 dark:text-dark-200"
-                    :aria-expanded="tocOpen"
-                    @click="tocOpen = !tocOpen"
-                  >
-                    {{ t('tutorials.toc')
-                    }}<Icon name="chevronDown" size="sm" />
-                  </button>
-                  <nav
-                    v-if="tocOpen"
-                    class="mt-3 space-y-2"
-                    :aria-label="t('tutorials.toc')"
-                  >
-                    <a
-                      v-for="h in headings"
-                      :key="h.id"
-                      :href="`#${h.id}`"
-                      class="block text-sm text-gray-600 hover:text-primary-700 dark:text-dark-300"
-                      @click.prevent="goHeading(h.id)"
-                      >{{ h.text }}</a
-                    >
-                  </nav>
-                </div>
-                <TutorialMarkdown
-                  :key="article.id"
-                  :content="article.content"
-                  :article-id="article.id"
-                  @headings="headings = $event"
-                />
-                <footer
-                  class="mt-12 flex items-center justify-between gap-4 border-t border-gray-200 pt-6 text-sm dark:border-dark-700"
+                  {{ t('tutorials.toc') }}<Icon name="chevronDown" size="sm" />
+                </button>
+                <nav
+                  v-if="tocOpen"
+                  class="space-y-2 pb-4 pt-1"
+                  :aria-label="t('tutorials.toc')"
                 >
-                  <RouterLink
-                    v-if="article.previous_id"
-                    :to="`/tutorials/${article.previous_id}`"
-                    class="tutorial-focus text-primary-800 hover:underline dark:text-primary-200"
-                    >← {{ t('tutorials.previous') }}</RouterLink
-                  ><span v-else />
-                  <RouterLink
-                    v-if="article.next_id"
-                    :to="`/tutorials/${article.next_id}`"
-                    class="tutorial-focus text-primary-800 hover:underline dark:text-primary-200"
-                    >{{ t('tutorials.next') }} →</RouterLink
+                  <a
+                    v-for="h in headings"
+                    :key="h.id"
+                    :href="`#${h.id}`"
+                    class="tutorial-focus block break-words text-sm text-gray-600 hover:text-primary-700 dark:text-dark-300"
+                    @click.prevent="goHeading(h.id)"
+                    >{{ h.text }}</a
                   >
-                </footer>
+                </nav>
               </div>
+              <TutorialMarkdown
+                :key="article.id"
+                class="tutorial-reading-body"
+                :content="article.content"
+                :article-id="article.id"
+                :article-title="article.title"
+                @headings="setHeadings"
+              />
+              <footer
+                class="mt-12 flex items-center justify-between gap-4 border-t border-gray-200 pt-6 text-sm dark:border-dark-700"
+              >
+                <RouterLink
+                  v-if="article.previous_id"
+                  :to="tutorialPath(article.previous_id, article.previous_slug)"
+                  class="tutorial-focus text-primary-800 hover:underline dark:text-primary-200"
+                  >← {{ t('tutorials.previous') }}</RouterLink
+                ><span v-else />
+                <RouterLink
+                  v-if="article.next_id"
+                  :to="tutorialPath(article.next_id, article.next_slug)"
+                  class="tutorial-focus text-primary-800 hover:underline dark:text-primary-200"
+                  >{{ t('tutorials.next') }} →</RouterLink
+                >
+              </footer>
             </article>
           </template>
           <template v-else>
@@ -285,7 +294,7 @@
               <RouterLink
                 v-for="a in items"
                 :key="a.id"
-                :to="`/tutorials/${a.id}`"
+                :to="tutorialPath(a.id, a.route_slug)"
                 class="tutorial-focus group block border-b border-gray-100 px-5 py-6 last:border-b-0 hover:bg-gray-50 md:px-7 dark:border-dark-800 dark:hover:bg-dark-800/60"
               >
                 <div
@@ -342,9 +351,8 @@
             </div>
           </template>
         </div>
-        <aside v-if="articleId" class="hidden min-w-0 xl:block">
+        <aside v-if="articleId && headings.length" class="tutorial-toc-aside min-w-0">
           <nav
-            v-if="headings.length"
             class="sticky top-6 space-y-3"
             :aria-label="t('tutorials.toc')"
           >
@@ -375,6 +383,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   tutorialAPI,
+  tutorialPath,
   type Tutorial,
   type TutorialCategory,
 } from '@/api/tutorials'
@@ -387,7 +396,7 @@ const { t, locale } = useI18n(),
   auth = useAuthStore(),
   route = useRoute(),
   router = useRouter()
-const articleId = computed(() => Number(route.params.id) || 0)
+const articleId = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
 const search = ref(String(route.query.search || '')),
   category = ref<number | ''>(''),
   page = ref(1),
@@ -396,7 +405,8 @@ const search = ref(String(route.query.search || '')),
 const categories = ref<TutorialCategory[]>([]),
   items = ref<Tutorial[]>([]),
   article = ref<Tutorial>(),
-  headings = ref<TutorialHeading[]>([])
+  headings = ref<TutorialHeading[]>([]),
+  titleAnchor = ref<string>()
 const loading = ref(true),
   articleLoading = ref(false),
   error = ref(''),
@@ -446,6 +456,7 @@ async function loadList() {
 async function loadArticle() {
   const current = ++articleGeneration
   headings.value = []
+  titleAnchor.value = undefined
   article.value = undefined
   articleError.value = ''
   tocOpen.value = false
@@ -453,12 +464,13 @@ async function loadArticle() {
   articleLoading.value = true
   try {
     const result = await tutorialAPI.get(articleId.value)
-    if (current === articleGeneration) {
-      article.value = result
-      await nextTick()
-      if (/^#tutorial-section-\d+$/.test(route.hash))
-        document.getElementById(route.hash.slice(1))?.scrollIntoView()
+    if (current !== articleGeneration) return
+    const path = tutorialPath(result.id, result.route_slug)
+    if (route.path !== path) {
+      await router.replace({ path, query: route.query, hash: route.hash })
+      return
     }
+    article.value = result
   } catch (e) {
     if (current === articleGeneration)
       articleError.value =
@@ -466,6 +478,14 @@ async function loadArticle() {
   } finally {
     if (current === articleGeneration) articleLoading.value = false
   }
+}
+function setHeadings(value: TutorialHeading[], titleId?: string) {
+  headings.value = value
+  titleAnchor.value = titleId
+  void nextTick(() => {
+    if (/^#tutorial-section-\d+$/.test(route.hash))
+      document.getElementById(route.hash.slice(1))?.scrollIntoView()
+  })
 }
 async function reload() {
   let categoryError = false
@@ -523,10 +543,27 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.tutorial-reader-page {
+  container: tutorial-reader / inline-size;
+}
 .tutorial-reader-layout {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 28px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+.tutorial-nav,
+.tutorial-toc-aside {
+  display: none;
+}
+.tutorial-nav:where(.is-open) {
+  display: block;
+}
+.tutorial-reading-body :deep(.tutorial-prose > :is(h1, h2, h3, h4, ul, ol, blockquote, p:not(:has(img)))) {
+  max-inline-size: 72ch;
+}
+.tutorial-reading-body :deep(.tutorial-prose > p > img:only-child) {
+  display: block;
+  margin-block: 0;
 }
 .tutorial-category {
   display: block;
@@ -560,16 +597,33 @@ onBeforeUnmount(() => {
   color: #99f6e4;
   background: #134e4a;
 }
-@media (min-width: 1280px) {
+@container tutorial-reader (min-width: 58rem) {
+  .tutorial-reader-layout {
+    grid-template-columns: 12.5rem minmax(0, 1fr);
+    gap: 1.5rem;
+  }
   .tutorial-reader-layout.has-article {
-    grid-template-columns: 180px minmax(0, 1fr) 160px;
-    gap: 24px;
+    grid-template-columns: 11rem minmax(0, 1fr);
+  }
+  .tutorial-nav-toggle {
+    display: none;
+  }
+  .tutorial-nav {
+    display: block;
+    position: sticky;
+    top: 1.5rem;
+    margin-top: 0;
   }
 }
-@media (max-width: 1023px) {
-  .tutorial-reader-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
+@container tutorial-reader (min-width: 75rem) {
+  .tutorial-reader-layout.has-article.has-toc {
+    grid-template-columns: 11rem minmax(0, 1fr) 11rem;
+  }
+  .tutorial-toc-aside {
+    display: block;
+  }
+  .tutorial-toc-inline {
+    display: none;
   }
 }
 </style>

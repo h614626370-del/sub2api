@@ -6,7 +6,11 @@ export interface TutorialHeading {
   text: string
   level: number
 }
-export function renderTutorial(markdown: string, copyLabel: string) {
+export function renderTutorial(
+  markdown: string,
+  copyLabel: string,
+  articleTitle?: string,
+) {
   const source = markdown.replace(
     /tutorial-asset:([a-f0-9]{32})\b/g,
     '/__tutorial_asset/$1',
@@ -35,8 +39,19 @@ export function renderTutorial(markdown: string, copyLabel: string) {
   )
   const doc = new DOMParser().parseFromString(safe, 'text/html')
   const headings: TutorialHeading[] = []
+  let titleId: string | undefined
   doc.querySelectorAll('h1,h2,h3,h4').forEach((h, index) => {
     h.id = `tutorial-section-${index}`
+    if (
+      h.tagName === 'H1' &&
+      h === doc.body.firstElementChild &&
+      articleTitle?.trim() === h.textContent?.trim() &&
+      !h.querySelector('a,img')
+    ) {
+      titleId = h.id
+      h.remove()
+      return
+    }
     headings.push({
       id: h.id,
       text: h.textContent || '',
@@ -71,5 +86,5 @@ export function renderTutorial(markdown: string, copyLabel: string) {
     button.className = 'tutorial-copy'
     pre.append(button)
   })
-  return { html: doc.body.innerHTML, headings }
+  return { html: doc.body.innerHTML, headings, titleId }
 }

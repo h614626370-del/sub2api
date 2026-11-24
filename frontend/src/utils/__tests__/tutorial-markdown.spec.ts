@@ -12,6 +12,17 @@ describe('tutorial Markdown', () => {
     expect(result.html).toContain('data-copy="true"')
     expect(result.html).toContain('<table>')
   })
+  it('shows a matching lead title once and preserves existing section anchors', () => {
+    const markdown = '# **Getting started**\n\n## Config\n\n# Getting started'
+    const result = renderTutorial(markdown, 'Copy', 'Getting started')
+    expect(result.titleId).toBe('tutorial-section-0')
+    expect(result.headings.map((heading) => heading.id)).toEqual([
+      'tutorial-section-1',
+      'tutorial-section-2',
+    ])
+    expect(result.html).not.toContain('tutorial-section-0')
+    expect(renderTutorial(markdown, 'Copy').headings).toHaveLength(3)
+  })
   it('leaves uploaded images inert until authenticated blob loading', () => {
     const key = '0123456789abcdef0123456789abcdef'
     const result = renderTutorial(

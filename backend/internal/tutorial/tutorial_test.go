@@ -43,6 +43,9 @@ func TestAssetReferences(t *testing.T) {
 	if referencesAsset("tutorial-asset:"+key+"ab", key) {
 		t.Fatal("partial reference accepted")
 	}
+	if referencesAsset("```md\n![example](tutorial-asset:"+key+")\n```", key) {
+		t.Fatal("code example is not an image reference")
+	}
 	if assetIDPattern.MatchString("../../etc/passwd") {
 		t.Fatal("path accepted")
 	}
@@ -89,12 +92,14 @@ func tutorialTestDB(t *testing.T) *sql.DB {
 	if _, err = db.Exec(`CREATE TABLE users(id BIGINT PRIMARY KEY);INSERT INTO users VALUES(1)`); err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../migrations/383_tutorial_center.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(string(migration)); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"383_tutorial_center.sql", "395_tutorial_routes_and_asset_cleanup.sql"} {
+		migration, err := os.ReadFile("../../migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return db
 }
@@ -304,11 +309,12 @@ func testTutorialAccessLifecycle(t *testing.T, db *sql.DB) {
 	if _, err = s.Get(ctx, a.ID, MemberAccess); err != ErrNotFound {
 		t.Fatal("unpublished article readable")
 	}
-	a, err = s.Change(ctx, a.ID, a.Version, "delete", Content{})
+	_, err = s.Change(ctx, a.ID, a.Version, "delete", Content{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(a.DeletedAssets) != 1 || a.DeletedAssets[0] != key {
+	var garbage string
+	if err := db.QueryRow(`SELECT id FROM tutorial_asset_garbage`).Scan(&garbage); err != nil || garbage != key {
 		t.Fatal("deleted asset cleanup missing")
 	}
 	var assets int

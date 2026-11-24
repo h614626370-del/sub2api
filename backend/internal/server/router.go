@@ -84,6 +84,9 @@ func SetupRouter(
 	}
 	if cfg.Runtime.Role != config.RuntimeRoleGateway {
 		r.Use(routes.HomepageDocuments(settingService, web.EmbeddedFrontendFileExists))
+		if handlers.Tutorial != nil {
+			r.Use(handlers.Tutorial.RedirectPublicTutorial)
+		}
 	}
 
 	// Serve embedded frontend with settings injection if available

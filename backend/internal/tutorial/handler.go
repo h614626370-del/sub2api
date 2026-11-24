@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -25,7 +26,6 @@ import (
 const maxAssetBytes = 5 << 20
 
 var assetIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
-var assetReferencePattern = regexp.MustCompile(`tutorial-asset:([a-f0-9]{32})\b`)
 
 type Handler struct {
 	store    *Store
@@ -118,11 +118,17 @@ func (h *Handler) list(access Access) gin.HandlerFunc {
 }
 func (h *Handler) get(access Access) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, ok := idParam(c, "id")
-		if !ok {
+		var a *Article
+		var e error
+		key := c.Param("id")
+		if id, err := strconv.ParseInt(key, 10, 64); err == nil && id > 0 {
+			a, e = h.store.Get(c.Request.Context(), id, access)
+		} else if access != AdminAccess {
+			a, e = h.store.GetBySlug(c.Request.Context(), key, access)
+		} else {
+			response.BadRequest(c, "Invalid tutorial ID")
 			return
 		}
-		a, e := h.store.Get(c.Request.Context(), id, access)
 		if e == nil && access != AdminAccess {
 			e = h.store.Neighbors(c.Request.Context(), a, access)
 			if e == sql.ErrNoRows {
@@ -131,6 +137,32 @@ func (h *Handler) get(access Access) gin.HandlerFunc {
 		}
 		respond(c, a, e)
 	}
+}
+
+func (h *Handler) RedirectPublicTutorial(c *gin.Context) {
+	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+		return
+	}
+	key, ok := strings.CutPrefix(c.Request.URL.Path, "/tutorials/")
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSuffix(key, "/"), 10, 64)
+	if err != nil || id < 1 {
+		return
+	}
+	var slug string
+	err = h.store.db.QueryRowContext(c.Request.Context(), `SELECT route_slug FROM tutorials
+ WHERE id=$1 AND route_slug<>'' AND published IS NOT NULL AND `+publicCondition, id).Scan(&slug)
+	if err != nil || !validSlug(slug) {
+		return
+	}
+	location := "/tutorials/" + slug
+	if query := c.Request.URL.RawQuery; query != "" {
+		location += "?" + query
+	}
+	c.Redirect(http.StatusMovedPermanently, location)
+	c.Abort()
 }
 func (h *Handler) create(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2<<20)
@@ -163,10 +195,8 @@ func (h *Handler) change(action string) gin.HandlerFunc {
 			return
 		}
 		a, e := h.store.Change(c.Request.Context(), id, in.Version, action, in.Content)
-		if e == nil && action == "delete" {
-			for _, key := range a.DeletedAssets {
-				_ = os.Remove(filepath.Join(h.assetDir, key))
-			}
+		if e == nil && action != "save" {
+			h.collectAssetGarbage()
 		}
 		respond(c, a, e)
 	}
@@ -325,12 +355,7 @@ func (h *Handler) writeAsset(id string, raw []byte) (string, error) {
 	return filename, nil
 }
 func referencesAsset(content, key string) bool {
-	for _, m := range assetReferencePattern.FindAllStringSubmatch(content, -1) {
-		if m[1] == key {
-			return true
-		}
-	}
-	return false
+	return imageReferences(content)[key]
 }
 func (h *Handler) asset(access Access) gin.HandlerFunc {
 	return func(c *gin.Context) {

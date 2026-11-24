@@ -8,7 +8,8 @@
       class="border-b border-gray-200 bg-white dark:border-dark-800 dark:bg-dark-900"
     >
       <div
-        class="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8"
+        class="mx-auto flex items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8"
+        :class="shellWidth"
       >
         <RouterLink to="/home" class="flex min-w-0 items-center gap-3">
           <img
@@ -33,7 +34,7 @@
         </nav>
       </div>
     </header>
-    <main class="mx-auto max-w-[1600px] p-4 md:p-6 lg:p-8"><slot /></main>
+    <main class="mx-auto p-4 md:p-6 lg:p-8" :class="shellWidth"><slot /></main>
   </div>
 </template>
 
@@ -44,6 +45,10 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores'
 import AppLayout from '@/components/layout/AppLayout.vue'
+const props = defineProps<{ wide?: boolean }>()
+const shellWidth = computed(() =>
+  props.wide ? 'max-w-[1840px]' : 'max-w-[1600px]',
+)
 const auth = useAuthStore(),
   app = useAppStore(),
   route = useRoute()

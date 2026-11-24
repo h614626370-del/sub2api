@@ -15,7 +15,7 @@
             type="button"
             class="btn btn-secondary"
             :disabled="importing"
-            @click="packageInput?.click()"
+            @click="choosePackage()"
           >
             <Icon name="upload" size="sm" class="mr-2" />
             {{ t(importing ? 'tutorials.importingPackage' : 'tutorials.importPackage') }}
@@ -288,9 +288,18 @@
                       v-if="a.published"
                       type="button"
                       class="tutorial-focus text-gray-600 hover:underline dark:text-dark-300"
-                      @click="copyLink(a.id)"
+                      @click="copyLink(a)"
                     >
                       {{ t('tutorials.copyLink') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="tutorial-focus text-gray-600 hover:underline disabled:opacity-50 dark:text-dark-300"
+                      :disabled="importing || busy"
+                      :aria-label="`${t('tutorials.overwritePackage')}: ${a.title}`"
+                      @click="choosePackage(a)"
+                    >
+                      {{ t('tutorials.overwritePackage') }}
                     </button>
                     <button
                       v-if="a.published"
@@ -366,6 +375,16 @@
       @confirm="confirmAction"
       @cancel="confirmation = null"
     />
+    <ConfirmDialog
+      :show="!!pendingOverwrite"
+      :title="t('tutorials.overwritePackage')"
+      :message="t('tutorials.overwritePackageConfirm', { title: pendingOverwrite?.target.title, file: pendingOverwrite?.file.name })"
+      :confirm-text="t('tutorials.overwritePackage')"
+      :cancel-text="t('tutorials.cancel')"
+      danger
+      @confirm="overwritePackage"
+      @cancel="pendingOverwrite = null"
+    />
   </AppLayout>
 </template>
 
@@ -376,6 +395,7 @@ import { useRouter } from 'vue-router'
 import {
   maxTutorialPackageBytes,
   tutorialAPI,
+  tutorialPath,
   type Tutorial,
   type TutorialCategory,
 } from '@/api/tutorials'
@@ -389,6 +409,8 @@ const { t, locale } = useI18n(),
   app = useAppStore(),
   router = useRouter()
 const packageInput = ref<HTMLInputElement>()
+const pendingOverwrite = ref<{ target: Tutorial; file: File } | null>(null)
+let packageTarget: Tutorial | undefined
 const importing = ref(false)
 const packageError = ref('')
 let disposed = false
@@ -423,24 +445,44 @@ const formatDate = (date: string) =>
   })
 const message = (e: unknown) =>
   (e as { message?: string })?.message || t('tutorials.loadFailed')
-async function importPackage(event: Event) {
+function choosePackage(target?: Tutorial) {
+  packageTarget = target
+  packageInput.value?.click()
+}
+function importPackage(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
+  const target = packageTarget
+  packageTarget = undefined
   input.value = ''
   if (!file || importing.value) return
   if (file.size > maxTutorialPackageBytes) {
     packageError.value = t('tutorials.packageErrors.zipSize')
     return
   }
-  importing.value = true
   packageError.value = ''
+  if (target) pendingOverwrite.value = { target, file }
+  else void uploadPackage(file)
+}
+function overwritePackage() {
+  const pending = pendingOverwrite.value
+  pendingOverwrite.value = null
+  if (pending) void uploadPackage(pending.file, pending.target)
+}
+async function uploadPackage(file: File, target?: Tutorial) {
+  if (importing.value) return
+  importing.value = true
   try {
-    const draft = await tutorialAPI.importPackage(file)
+    const draft = await tutorialAPI.importPackage(file, target)
     if (disposed) return
     app.showSuccess(t('tutorials.importSuccess'))
     await router.push({ path: `/admin/tutorials/${draft.id}/edit`, query: { preview: '1' } })
   } catch (e) {
-    if (!disposed) packageError.value = tutorialPackageError(t, e, t('tutorials.importFailed'))
+    if (!disposed) {
+      const conflict = (e as { reason?: string }).reason === 'TUTORIAL_CONFLICT'
+      packageError.value = conflict ? t('tutorials.overwriteConflict') : tutorialPackageError(t, e, t('tutorials.importFailed'))
+      if (conflict) void load()
+    }
   } finally {
     importing.value = false
   }
@@ -534,9 +576,9 @@ async function confirmAction() {
     busy.value = false
   }
 }
-async function copyLink(id: number) {
+async function copyLink(article: Tutorial) {
   try {
-    await navigator.clipboard.writeText(`${location.origin}/tutorials/${id}`)
+    await navigator.clipboard.writeText(location.origin + tutorialPath(article.id, article.route_slug))
     app.showSuccess(t('tutorials.linkCopied'))
   } catch {
     app.showError(t('tutorials.copyFailed'))

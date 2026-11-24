@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"mime/multipart"
@@ -153,6 +154,8 @@ func TestTutorialPackageLifecycle(t *testing.T) {
 	ctx := context.Background()
 	h := &Handler{store: &Store{db: db}, assetDir: t.TempDir()}
 	router := gin.New()
+	router.Use(h.RedirectPublicTutorial)
+	router.GET("/tutorials/:key", func(c *gin.Context) { c.Status(http.StatusOK) })
 	secured := router.Group("/admin")
 	secured.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1})
@@ -201,10 +204,17 @@ func TestTutorialPackageLifecycle(t *testing.T) {
 	a := importedArticle(importRequest("/admin/import", raw))
 	require.False(t, a.Published)
 	require.NotNil(t, a.CategoryID)
-	assets := assetReferencePattern.FindStringSubmatch(a.Content.Content)
-	require.Len(t, assets, 2)
+	assets := imageReferences(a.Content.Content)
+	require.Len(t, assets, 1)
+	var oldAsset string
+	for key := range assets {
+		oldAsset = key
+	}
 	id := strconv.FormatInt(a.ID, 10)
-	require.Equal(t, http.StatusNotFound, get("/public/"+id+"/assets/"+assets[1]).Code)
+	require.Equal(t, http.StatusNotFound, get("/public/"+id+"/assets/"+oldAsset).Code)
+	files, err = os.ReadDir(h.assetDir)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
 	out = get("/admin/" + id + "/export")
 	require.Equal(t, http.StatusOK, out.Code)
 	require.Equal(t, "application/zip", out.Header().Get("Content-Type"))
@@ -212,7 +222,7 @@ func TestTutorialPackageLifecycle(t *testing.T) {
 	exported := bytes.Clone(out.Body.Bytes())
 	pkg, err := readTutorialPackage(bytes.NewReader(exported), int64(len(exported)))
 	require.NoError(t, err)
-	require.Len(t, pkg.images, 2)
+	require.Len(t, pkg.images, 1)
 	require.Equal(t, "Imported category", pkg.metadata.Category)
 	require.Equal(t, 8, pkg.metadata.CategorySortOrder)
 	copy := importedArticle(importRequest("/admin/import", exported))
@@ -225,27 +235,66 @@ func TestTutorialPackageLifecycle(t *testing.T) {
 	require.NotEqual(t, a.Content.Content, copy.Content.Content)
 	require.False(t, copy.Published)
 
-	published, err := h.store.Change(ctx, a.ID, a.Version, "publish", Content{})
+	a.Slug = "quick-start"
+	draft, err := h.store.Change(ctx, a.ID, a.Version, "save", a.Content)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, get("/public/"+id+"/assets/"+assets[1]).Code)
+	require.Equal(t, http.StatusNotFound, get("/public/quick-start").Code)
+	require.Equal(t, http.StatusOK, get("/tutorials/"+id).Code)
+	_, err = h.store.Create(ctx, 1, a.Content)
+	require.ErrorIs(t, err, ErrSlugUsed)
+	published, err := h.store.Change(ctx, a.ID, draft.Version, "publish", Content{})
+	require.NoError(t, err)
+	redirect := get("/tutorials/" + id + "?source=test")
+	require.Equal(t, http.StatusMovedPermanently, redirect.Code)
+	require.Equal(t, "/tutorials/quick-start?source=test", redirect.Header().Get("Location"))
+	require.Equal(t, a.ID, importedArticle(get("/public/quick-start")).ID)
+	require.Equal(t, http.StatusOK, get("/public/"+id+"/assets/"+oldAsset).Code)
+	renamed := a.Content
+	renamed.Slug = "different-address"
+	_, err = h.store.Change(ctx, a.ID, published.Version, "save", renamed)
+	require.ErrorIs(t, err, ErrSlugLock)
 	updatedZip := makeTutorialTestZip(t, strings.ReplaceAll(strings.ReplaceAll(testPackageMarkdown, "Quick start", "Replacement"), "visibility: public", "visibility: login"), map[string][]byte{"images/a b.png": img})
 	stale := importRequest("/admin/"+id+"/import?version="+strconv.FormatInt(a.Version, 10), updatedZip)
 	require.Equal(t, http.StatusConflict, stale.Code)
 	updated := importedArticle(importRequest("/admin/"+id+"/import?version="+strconv.FormatInt(published.Version, 10), updatedZip))
 	require.True(t, updated.HasChanges)
+	require.Equal(t, a.ID, updated.ID)
+	require.Equal(t, "quick-start", updated.Slug)
 	require.Equal(t, "Replacement", updated.Title)
 	require.Equal(t, "login", updated.Visibility)
 	view := importedArticle(get("/public/" + id))
 	require.Equal(t, "Quick start", view.Title)
-	newAsset := assetReferencePattern.FindStringSubmatch(updated.Content.Content)[1]
+	var newAsset string
+	for key := range imageReferences(updated.Content.Content) {
+		newAsset = key
+	}
 	require.Equal(t, http.StatusOK, get("/admin/"+id+"/assets/"+newAsset).Code)
 	require.Equal(t, http.StatusNotFound, get("/public/"+id+"/assets/"+newAsset).Code)
 	require.Equal(t, http.StatusNotFound, get("/public/"+id+"/export").Code)
+	require.Equal(t, http.StatusOK, get("/public/"+id+"/assets/"+oldAsset).Code)
 
 	require.NoError(t, os.Remove(filepath.Join(h.assetDir, newAsset)))
 	out = get("/admin/" + id + "/export")
 	require.Equal(t, http.StatusBadRequest, out.Code)
 	require.Contains(t, out.Body.String(), "TUTORIAL_PACKAGE_IMAGE_MISSING")
+	// A second import discards the superseded draft file and keeps the live file.
+	require.NoError(t, os.WriteFile(filepath.Join(h.assetDir, newAsset), img, 0600))
+	finalZip := makeTutorialTestZip(t, "# Final version\n\n![new](images/new.png)", map[string][]byte{"images/new.png": img})
+	updated = importedArticle(importRequest("/admin/"+id+"/import?version="+strconv.FormatInt(updated.Version, 10), finalZip))
+	require.Equal(t, "login", updated.Visibility)
+	require.NoFileExists(t, filepath.Join(h.assetDir, newAsset))
+	require.FileExists(t, filepath.Join(h.assetDir, oldAsset))
+	request := httptest.NewRequest(http.MethodPost, "/admin/"+id+"/publish", strings.NewReader(fmt.Sprintf(`{"version":%d}`, updated.Version)))
+	request.Header.Set("Content-Type", "application/json")
+	out = httptest.NewRecorder()
+	router.ServeHTTP(out, request)
+	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
+	require.NoFileExists(t, filepath.Join(h.assetDir, oldAsset))
+	require.Equal(t, http.StatusNotFound, get("/public/quick-start").Code)
+	require.Equal(t, http.StatusOK, get("/tutorials/"+id).Code)
+	var countForArticle int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM tutorial_assets WHERE tutorial_id=$1`, a.ID).Scan(&countForArticle))
+	require.Equal(t, 1, countForArticle)
 
 	// Force a filesystem failure after the category and draft have been written in the transaction.
 	blocked := filepath.Join(h.assetDir, "blocked")

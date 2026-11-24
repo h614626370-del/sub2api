@@ -70,6 +70,9 @@ func (h *Handler) importPackage(c *gin.Context) {
 		return
 	}
 	article, err := h.saveImportedPackage(c.Request.Context(), pkg, subject.UserID, id, version)
+	if err == nil {
+		h.collectAssetGarbage()
+	}
 	respond(c, article, err)
 }
 
@@ -82,9 +85,14 @@ func (h *Handler) saveImportedPackage(ctx context.Context, pkg *tutorialPackage,
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(8348201)`); err != nil {
 		return nil, err
 	}
+	in := pkg.content
+	refs := imageReferences(in.Content)
 	if id != 0 {
 		var current int64
-		err = tx.QueryRowContext(ctx, `SELECT version FROM tutorials WHERE id=$1 FOR UPDATE`, id).Scan(&current)
+		var published []byte
+		var visibility string
+		err = tx.QueryRowContext(ctx, `SELECT version,COALESCE(NULLIF(route_slug,''),draft->>'slug',''),published,
+ COALESCE(draft->>'visibility','login') FROM tutorials WHERE id=$1 FOR UPDATE`, id).Scan(&current, &in.Slug, &published, &visibility)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -94,19 +102,22 @@ func (h *Handler) saveImportedPackage(ctx context.Context, pkg *tutorialPackage,
 		if current != version {
 			return nil, ErrConflict
 		}
-		var count, size int64
-		err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(sum(size),0) FROM tutorial_assets WHERE tutorial_id=$1`, id).Scan(&count, &size)
-		if err != nil {
+		if pkg.metadata.Visibility == "" {
+			in.Visibility = visibility
+		}
+		if len(published) != 0 {
+			var live Content
+			if err := json.Unmarshal(published, &live); err != nil {
+				return nil, err
+			}
+			for key := range imageReferences(live.Content) {
+				refs[key] = true
+			}
+		}
+		if err := queueUnusedAssets(ctx, tx, id, refs); err != nil {
 			return nil, err
 		}
-		for _, asset := range pkg.images {
-			size += int64(len(asset.data))
-		}
-		if count+int64(len(pkg.images)) > maxAssetCount || size > maxAssetTotal {
-			return nil, packageError("IMAGE_QUOTA", "Import would exceed the tutorial image quota (200 images / 50 MiB)", "")
-		}
 	}
-	in := pkg.content
 	if name := pkg.metadata.Category; name != "" {
 		var categoryID int64
 		err = tx.QueryRowContext(ctx, `SELECT id FROM tutorial_categories WHERE name=$1`, name).Scan(&categoryID)
@@ -142,6 +153,9 @@ func (h *Handler) saveImportedPackage(ctx context.Context, pkg *tutorialPackage,
 		}
 	}()
 	for _, asset := range pkg.images {
+		if !refs[asset.id] {
+			continue
+		}
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -200,6 +214,7 @@ func (h *Handler) buildTutorialPackage(ctx context.Context, id int64) ([]byte, e
 		}
 	}
 	source := []byte(article.Content.Content)
+	referenced := imageReferences(article.Content.Content)
 	var data bytes.Buffer
 	archive := zip.NewWriter(&data)
 	if _, err := archive.Create("images/"); err != nil {
@@ -217,6 +232,9 @@ func (h *Handler) buildTutorialPackage(ctx context.Context, id int64) ([]byte, e
 		var size int64
 		if err := rows.Scan(&key, &mime, &size); err != nil {
 			return nil, err
+		}
+		if !referenced[key] {
+			continue
 		}
 		if !assetIDPattern.MatchString(key) {
 			return nil, packageError("IMAGE_PATH", "Invalid stored tutorial asset ID", truncatePath(key))

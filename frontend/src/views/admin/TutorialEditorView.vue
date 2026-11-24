@@ -138,6 +138,27 @@
                 maxlength="160"
                 :placeholder="t('tutorials.titlePlaceholder')"
             /></label>
+            <label class="block max-w-xl">
+              <span class="mb-1.5 block text-sm text-gray-600 dark:text-dark-300">{{ t('tutorials.slug') }}</span>
+              <span class="flex items-center gap-2">
+                <span class="shrink-0 font-mono text-xs text-gray-600 dark:text-dark-300" aria-hidden="true">/tutorials/</span>
+                <input
+                  v-model.trim="form.slug"
+                  class="input min-w-0"
+                  :readonly="Boolean(article?.route_slug) || publishing"
+                  :aria-invalid="Boolean(slugError)"
+                  aria-describedby="tutorial-slug-hint"
+                  :placeholder="String(article?.id ?? 'codex-cli-setup')"
+                  maxlength="80"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  autocomplete="off"
+                />
+              </span>
+              <span id="tutorial-slug-hint" class="mt-1.5 block text-xs" :class="slugError ? 'text-red-700 dark:text-red-300' : 'text-gray-600 dark:text-dark-300'">
+                {{ slugError || t(article?.route_slug ? 'tutorials.slugLocked' : 'tutorials.slugHint') }}
+              </span>
+            </label>
             <div class="flex flex-wrap items-end justify-between gap-4">
               <label class="min-w-48">
                 <span
@@ -476,6 +497,8 @@ const snapshot = () => JSON.stringify(form)
 const saved = ref(snapshot()),
   savedAt = ref('')
 const dirty = computed(() => snapshot() !== saved.value)
+const slugError = ref('')
+watch(() => form.slug, () => { slugError.value = '' })
 const uploads = ref(0),
   uploadProgress = ref(0),
   failedUpload = ref<File | null>(null)
@@ -599,6 +622,7 @@ async function load() {
 }
 function pickContent(a: Tutorial): TutorialContent {
   return {
+    slug: a.slug || '',
     visibility: a.visibility || 'login',
     title: a.title,
     summary: a.summary,
@@ -614,6 +638,11 @@ function save(silent = true): Promise<boolean> {
     return inFlight.then((ok) => (ok && dirty.value ? save(silent) : ok))
   if (conflict.value || loading.value || importing.value || disposed) return Promise.resolve(false)
   if (!dirty.value && article.value) return Promise.resolve(true)
+  const slug = form.slug || ''
+  if (slug && (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) || !/[a-z]/.test(slug) || slug === 'categories' || slug.length > 80)) {
+    slugError.value = t('tutorials.slugInvalid')
+    return Promise.resolve(false)
+  }
   const captured = snapshot()
   const current = editorEpoch
   saving.value = true
@@ -632,6 +661,7 @@ function save(silent = true): Promise<boolean> {
       article.value = result
       saved.value = captured
       error.value = ''
+      if (form.slug === content.slug) slugError.value = ''
       savedAt.value = new Date().toLocaleTimeString(locale.value, {
         hour: '2-digit',
         minute: '2-digit',
@@ -646,6 +676,12 @@ function save(silent = true): Promise<boolean> {
     } catch (e) {
       if (disposed || current !== editorEpoch) return false
       const code = (e as { reason?: string }).reason
+      if (code === 'TUTORIAL_SLUG_USED' || code === 'TUTORIAL_SLUG_INVALID' || code === 'TUTORIAL_SLUG_LOCKED') {
+        const slugErrorKey = code === 'TUTORIAL_SLUG_USED' ? 'slugUsed'
+          : code === 'TUTORIAL_SLUG_LOCKED' ? 'slugLocked' : 'slugInvalid'
+        if (form.slug === slug) slugError.value = t(`tutorials.${slugErrorKey}`)
+        return false
+      }
       conflict.value =
         (e as { status?: number }).status === 409 ||
         code === 'TUTORIAL_CONFLICT'
@@ -656,7 +692,7 @@ function save(silent = true): Promise<boolean> {
     } finally {
       saving.value = false
       inFlight = null
-      if (!disposed && dirty.value && !error.value && !publishing.value)
+      if (!disposed && dirty.value && !error.value && !slugError.value && !publishing.value)
         timer = setTimeout(() => void save(), 1600)
     }
   })()
@@ -761,7 +797,7 @@ async function publish() {
       : (e as Error).message
   } finally {
     publishing.value = false
-    if (dirty.value && !error.value) timer = setTimeout(() => void save(), 1600)
+    if (dirty.value && !error.value && !slugError.value) timer = setTimeout(() => void save(), 1600)
   }
 }
 async function upload(file: File) {

@@ -5,7 +5,7 @@
       class="tutorial-prose"
       v-html="rendered.html"
       @click="interact"
-      @keydown.enter="interact"
+      @keydown.enter.space="interact"
     />
     <p
       v-if="assetError"
@@ -39,11 +39,16 @@ import { renderTutorial } from '@/utils/tutorial-markdown'
 import '@/styles/tutorials.css'
 
 const props = withDefaults(
-  defineProps<{ content: string; articleId?: number; admin?: boolean }>(),
+  defineProps<{
+    content: string
+    articleId?: number
+    admin?: boolean
+    articleTitle?: string
+  }>(),
   { admin: false },
 )
 const emit = defineEmits<{
-  headings: [value: ReturnType<typeof renderTutorial>['headings']]
+  headings: [value: ReturnType<typeof renderTutorial>['headings'], titleId?: string]
 }>()
 const { t } = useI18n()
 const body = ref<HTMLElement>()
@@ -52,7 +57,7 @@ const zoom = ref(''),
   zoomAlt = ref(''),
   assetError = ref(false)
 const rendered = computed(() =>
-  renderTutorial(props.content, t('tutorials.copyCode')),
+  renderTutorial(props.content, t('tutorials.copyCode'), props.articleTitle),
 )
 let generation = 0
 let controller = new AbortController()
@@ -107,7 +112,7 @@ function closeImage() {
 async function interact(event: Event) {
   const target = event.target as HTMLElement
   const button = target.closest<HTMLButtonElement>('button[data-copy]')
-  if (button) {
+  if (button && event.type === 'click') {
     try {
       await navigator.clipboard.writeText(
         button.closest('pre')?.querySelector('code')?.textContent || '',
@@ -122,6 +127,7 @@ async function interact(event: Event) {
     target.dataset.asset &&
     target.src
   ) {
+    event.preventDefault()
     zoom.value = target.src
     zoomAlt.value = target.alt
     await nextTick()
@@ -132,7 +138,7 @@ watch(() => [props.articleId, props.admin], clear, { flush: 'sync' })
 watch(
   rendered,
   (value) => {
-    emit('headings', value.headings)
+    emit('headings', value.headings, value.titleId)
     void loadAssets()
   },
   { immediate: true, flush: 'post' },

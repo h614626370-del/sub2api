@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 const readBase = () =>
   useAuthStore().isAuthenticated ? '/tutorials' : '/public/tutorials'
 export interface TutorialContent {
+  slug?: string
   visibility: 'login' | 'public'
   title: string
   summary: string
@@ -13,7 +14,10 @@ export interface TutorialContent {
 }
 export interface Tutorial extends TutorialContent {
   previous_id?: number
+  previous_slug?: string
   next_id?: number
+  next_slug?: string
+  route_slug?: string
   id: number
   version: number
   published: boolean
@@ -40,6 +44,7 @@ export interface TutorialPackageError {
   metadata?: { file?: string }
 }
 export const emptyTutorial = (): TutorialContent => ({
+  slug: '',
   visibility: 'login',
   title: '',
   summary: '',
@@ -48,6 +53,8 @@ export const emptyTutorial = (): TutorialContent => ({
   pinned: false,
   sort_order: 0,
 })
+export const tutorialPath = (id: number, slug?: string) => `/tutorials/${slug || id}`
+
 export const tutorialAPI = {
   async list(
     admin: boolean,
@@ -64,10 +71,10 @@ export const tutorialAPI = {
       )
     ).data
   },
-  async get(id: number, admin = false) {
+  async get(id: number | string, admin = false) {
     return (
       await apiClient.get<Tutorial>(
-        `${admin ? '/admin/tutorials' : readBase()}/${id}`,
+        `${admin ? '/admin/tutorials' : readBase()}/${encodeURIComponent(id)}`,
       )
     ).data
   },

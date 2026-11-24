@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,9 +18,15 @@ var (
 	ErrNotFound = apperrors.NotFound("TUTORIAL_NOT_FOUND", "tutorial not found")
 	ErrConflict = apperrors.Conflict("TUTORIAL_CONFLICT", "This tutorial has changed. Reload before saving.")
 	ErrInvalid  = apperrors.BadRequest("TUTORIAL_INVALID", "Invalid tutorial content or category")
+	ErrSlug     = apperrors.BadRequest("TUTORIAL_SLUG_INVALID", "Use up to 80 lowercase letters, digits and hyphens, including at least one letter")
+	ErrSlugUsed = apperrors.BadRequest("TUTORIAL_SLUG_USED", "This tutorial address is already in use")
+	ErrSlugLock = apperrors.BadRequest("TUTORIAL_SLUG_LOCKED", "The published tutorial address is fixed")
 )
 
+var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
 type Content struct {
+	Slug       string `json:"slug,omitempty"`
 	Visibility string `json:"visibility"`
 	Title      string `json:"title"`
 	Summary    string `json:"summary"`
@@ -29,10 +36,12 @@ type Content struct {
 	SortOrder  int    `json:"sort_order"`
 }
 type Article struct {
-	ID            int64    `json:"id"`
-	PreviousID    *int64   `json:"previous_id,omitempty"`
-	NextID        *int64   `json:"next_id,omitempty"`
-	DeletedAssets []string `json:"-"`
+	ID           int64   `json:"id"`
+	RouteSlug    string  `json:"route_slug,omitempty"`
+	PreviousID   *int64  `json:"previous_id,omitempty"`
+	PreviousSlug *string `json:"previous_slug,omitempty"`
+	NextID       *int64  `json:"next_id,omitempty"`
+	NextSlug     *string `json:"next_slug,omitempty"`
 	Content
 	Version          int64      `json:"version"`
 	PublishedVersion *int64     `json:"published_version,omitempty"`
@@ -58,12 +67,12 @@ const (
 
 const publicCondition = `COALESCE(published->>'visibility','login')='public'`
 
-const articleColumns = `id, draft, published, version, published_version, updated_at, published_at`
+const articleColumns = `id, draft, published, version, published_version, updated_at, published_at, route_slug`
 
 func scanArticle(row interface{ Scan(...any) error }, access Access) (*Article, error) {
 	var a Article
 	var draft, published []byte
-	if err := row.Scan(&a.ID, &draft, &published, &a.Version, &a.PublishedVersion, &a.UpdatedAt, &a.PublishedAt); err != nil {
+	if err := row.Scan(&a.ID, &draft, &published, &a.Version, &a.PublishedVersion, &a.UpdatedAt, &a.PublishedAt, &a.RouteSlug); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -90,17 +99,31 @@ func scanArticle(row interface{ Scan(...any) error }, access Access) (*Article, 
 	if a.Visibility == "" {
 		a.Visibility = "login"
 	}
+	if a.RouteSlug != "" {
+		a.Slug = a.RouteSlug
+	}
 	return &a, nil
 }
 func (s *Store) Get(ctx context.Context, id int64, access Access) (*Article, error) {
-	query := `SELECT ` + articleColumns + ` FROM tutorials WHERE id=$1`
+	return s.getBy(ctx, "id", id, access)
+}
+
+func (s *Store) GetBySlug(ctx context.Context, slug string, access Access) (*Article, error) {
+	if !validSlug(slug) {
+		return nil, ErrNotFound
+	}
+	return s.getBy(ctx, "route_slug", slug, access)
+}
+
+func (s *Store) getBy(ctx context.Context, column string, value any, access Access) (*Article, error) {
+	query := `SELECT ` + articleColumns + ` FROM tutorials WHERE ` + column + `=$1`
 	if access != AdminAccess {
 		query += ` AND published IS NOT NULL`
 	}
 	if access == PublicAccess {
 		query += ` AND ` + publicCondition
 	}
-	return scanArticle(s.db.QueryRowContext(ctx, query, id), access)
+	return scanArticle(s.db.QueryRowContext(ctx, query, value), access)
 }
 
 func (s *Store) Neighbors(ctx context.Context, a *Article, access Access) error {
@@ -108,11 +131,12 @@ func (s *Store) Neighbors(ctx context.Context, a *Article, access Access) error 
 	if access == PublicAccess {
 		where += ` AND ` + publicCondition
 	}
-	return s.db.QueryRowContext(ctx, `SELECT previous_id,next_id FROM (
- SELECT id,lag(id) OVER w AS previous_id,lead(id) OVER w AS next_id
+	return s.db.QueryRowContext(ctx, `SELECT previous_id,previous_slug,next_id,next_slug FROM (
+ SELECT id,lag(id) OVER w AS previous_id,lag(NULLIF(route_slug,'')) OVER w AS previous_slug,
+ lead(id) OVER w AS next_id,lead(NULLIF(route_slug,'')) OVER w AS next_slug
  FROM tutorials WHERE `+where+`
  WINDOW w AS (ORDER BY (published->>'pinned')::boolean DESC,(published->>'sort_order')::int,published_at DESC,id DESC)
- ) ordered WHERE id=$1`, a.ID).Scan(&a.PreviousID, &a.NextID)
+ ) ordered WHERE id=$1`, a.ID).Scan(&a.PreviousID, &a.PreviousSlug, &a.NextID, &a.NextSlug)
 }
 func (s *Store) List(ctx context.Context, access Access, search, status string, category int64, page, size int) ([]Article, int64, error) {
 	// Reader searches are scoped to the published snapshot.
@@ -159,6 +183,10 @@ func (s *Store) List(ctx context.Context, access Access, search, status string, 
 	return items, total, rows.Err()
 }
 func validateContent(in *Content, publish bool) error {
+	in.Slug = strings.TrimSpace(in.Slug)
+	if in.Slug != "" && !validSlug(in.Slug) {
+		return ErrSlug
+	}
 	if in.Visibility == "" {
 		in.Visibility = "login"
 	}
@@ -178,6 +206,25 @@ func validateContent(in *Content, publish bool) error {
 	}
 	return nil
 }
+
+func validSlug(slug string) bool {
+	return len(slug) <= 80 && slug != "categories" && slugPattern.MatchString(slug) &&
+		strings.ContainsAny(slug, "abcdefghijklmnopqrstuvwxyz")
+}
+
+func checkSlug(ctx context.Context, tx *sql.Tx, id int64, slug string) error {
+	if slug == "" {
+		return nil
+	}
+	var exists bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM tutorials
+ WHERE id<>$1 AND (route_slug=$2 OR draft->>'slug'=$2))`, id, slug).Scan(&exists)
+	if err == nil && exists {
+		return ErrSlugUsed
+	}
+	return err
+}
+
 func (s *Store) Create(ctx context.Context, author int64, in Content) (*Article, error) {
 	if err := validateContent(&in, false); err != nil {
 		return nil, err
@@ -192,6 +239,9 @@ func (s *Store) Create(ctx context.Context, author int64, in Content) (*Article,
 		return nil, err
 	}
 	if err = validCategory(ctx, tx, in.CategoryID); err != nil {
+		return nil, err
+	}
+	if err = checkSlug(ctx, tx, 0, in.Slug); err != nil {
 		return nil, err
 	}
 	raw, err := json.Marshal(in)
@@ -238,7 +288,16 @@ func (s *Store) Change(ctx context.Context, id, version int64, action string, in
 	}
 	switch action {
 	case "save":
+		if a.RouteSlug != "" {
+			if in.Slug != "" && strings.TrimSpace(in.Slug) != a.RouteSlug {
+				return nil, ErrSlugLock
+			}
+			in.Slug = a.RouteSlug
+		}
 		if err = validateContent(&in, false); err != nil {
+			return nil, err
+		}
+		if err = checkSlug(ctx, tx, id, in.Slug); err != nil {
 			return nil, err
 		}
 		if err = validCategory(ctx, tx, in.CategoryID); err != nil {
@@ -253,35 +312,31 @@ func (s *Store) Change(ctx context.Context, id, version int64, action string, in
 		if err = validateContent(&a.Content, true); err != nil {
 			return nil, err
 		}
-		for _, ref := range assetReferencePattern.FindAllStringSubmatch(a.Content.Content, -1) {
+		refs := imageReferences(a.Content.Content)
+		for key := range refs {
 			var exists bool
-			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tutorial_assets WHERE id=$1 AND tutorial_id=$2)`, ref[1], id).Scan(&exists); err != nil {
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tutorial_assets WHERE id=$1 AND tutorial_id=$2)`, key, id).Scan(&exists); err != nil {
 				return nil, err
 			}
 			if !exists {
 				return nil, ErrInvalid
 			}
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE tutorials SET published=draft,published_version=version+1,version=version+1,published_at=NOW(),updated_at=NOW() WHERE id=$1`, id)
+		if err = checkSlug(ctx, tx, id, a.Slug); err != nil {
+			return nil, err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE tutorials SET published=draft,route_slug=$2,published_version=version+1,version=version+1,published_at=NOW(),updated_at=NOW() WHERE id=$1`, id, a.Slug)
+		if err == nil {
+			err = queueUnusedAssets(ctx, tx, id, refs)
+		}
 	case "unpublish":
 		_, err = tx.ExecContext(ctx, `UPDATE tutorials SET published=NULL,published_version=NULL,version=version+1,published_at=NULL,updated_at=NOW() WHERE id=$1`, id)
+		if err == nil {
+			err = queueUnusedAssets(ctx, tx, id, imageReferences(a.Content.Content))
+		}
 	case "delete":
-		rows, e := tx.QueryContext(ctx, `SELECT id FROM tutorial_assets WHERE tutorial_id=$1`, id)
-		if e != nil {
-			return nil, e
-		}
-		for rows.Next() {
-			var key string
-			if e = rows.Scan(&key); e != nil {
-				_ = rows.Close()
-				return nil, e
-			}
-			a.DeletedAssets = append(a.DeletedAssets, key)
-		}
-		e = rows.Err()
-		_ = rows.Close()
-		if e != nil {
-			return nil, e
+		if err = queueUnusedAssets(ctx, tx, id, nil); err != nil {
+			return nil, err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM tutorials WHERE id=$1`, id)
 	default:
