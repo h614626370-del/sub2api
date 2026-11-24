@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 const testPackageMarkdown = "---\ntitle: Quick start\nsummary: A summary\ncategory: Imported category\ncategory_sort_order: 8\nvisibility: public\npinned: true\nsort_order: -5\n---\n" +
@@ -74,6 +75,47 @@ func TestReadTutorialPackage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Fallback title", pkg.content.Title)
 	require.Equal(t, "login", pkg.content.Visibility)
+}
+
+func TestReadTutorialPackageGBKNames(t *testing.T) {
+	const title = "Codex CLI \u914d\u7f6e\u6559\u7a0b"
+	const imagePath = "images/\u622a\u56fe.png"
+	png := tutorialTestPNG(t)
+	for _, duplicate := range []bool{false, true} {
+		var raw bytes.Buffer
+		archive := zip.NewWriter(&raw)
+		for _, file := range []struct {
+			name string
+			data []byte
+		}{
+			{title + ".md", []byte("![Preview](./" + imagePath + ")")},
+			{imagePath, png},
+		} {
+			name, err := simplifiedchinese.GBK.NewEncoder().String(file.name)
+			require.NoError(t, err)
+			entry, err := archive.CreateHeader(&zip.FileHeader{Name: name, NonUTF8: true})
+			require.NoError(t, err)
+			_, err = entry.Write(file.data)
+			require.NoError(t, err)
+		}
+		if duplicate {
+			entry, err := archive.Create(imagePath)
+			require.NoError(t, err)
+			_, err = entry.Write(png)
+			require.NoError(t, err)
+		}
+		require.NoError(t, archive.Close())
+		pkg, err := readTutorialPackage(bytes.NewReader(raw.Bytes()), int64(raw.Len()))
+		if duplicate {
+			require.Error(t, err)
+			require.Equal(t, "TUTORIAL_PACKAGE_PATH_INVALID", apperrors.FromError(err).Reason)
+			continue
+		}
+		require.NoError(t, err)
+		require.Equal(t, title, pkg.content.Title)
+		require.Contains(t, pkg.images, imagePath)
+		require.Contains(t, pkg.content.Content, assetScheme+pkg.images[imagePath].id)
+	}
 }
 
 func TestTutorialPackageInvalid(t *testing.T) {

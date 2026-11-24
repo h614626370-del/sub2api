@@ -20,6 +20,7 @@ import (
 	"github.com/yuin/goldmark/v2/parser"
 	"github.com/yuin/goldmark/v2/text"
 	"golang.org/x/net/html"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"gopkg.in/yaml.v3"
 )
 
@@ -76,7 +77,16 @@ func readTutorialPackage(src io.ReaderAt, size int64) (*tutorialPackage, error) 
 	seen := make(map[string]bool, len(archive.File))
 	markdown := ""
 	for _, entry := range archive.File {
-		name := strings.TrimSuffix(entry.Name, "/")
+		name := entry.Name
+		// Some Windows ZIP tools write GBK names without a UTF-8 flag.
+		if entry.NonUTF8 && !utf8.ValidString(name) {
+			decoded, err := simplifiedchinese.GBK.NewDecoder().String(name)
+			if err != nil || strings.ContainsRune(decoded, utf8.RuneError) {
+				return nil, packageError("PATH_INVALID", "Invalid ZIP entry filename encoding", truncatePath(name))
+			}
+			name = decoded
+		}
+		name = strings.TrimSuffix(name, "/")
 		key := strings.ToLower(name)
 		if !packagePathValid(name) || seen[key] {
 			return nil, packageError("PATH_INVALID", "Unsafe or duplicate ZIP entry", name)
