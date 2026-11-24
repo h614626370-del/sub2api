@@ -32,6 +32,13 @@ export interface TutorialPage {
   pages: number
   page: number
 }
+export const maxTutorialPackageBytes = 52 * 1024 * 1024
+export interface TutorialPackageError {
+  status?: number
+  reason?: string
+  message?: string
+  metadata?: { file?: string }
+}
 export const emptyTutorial = (): TutorialContent => ({
   visibility: 'login',
   title: '',
@@ -66,6 +73,40 @@ export const tutorialAPI = {
   },
   async create(content: TutorialContent) {
     return (await apiClient.post<Tutorial>('/admin/tutorials', content)).data
+  },
+  async importPackage(file: File, target?: Pick<Tutorial, 'id' | 'version'>) {
+    const form = new FormData()
+    form.append('file', file)
+    const path = target
+      ? `/admin/tutorials/${target.id}/import`
+      : '/admin/tutorials/import'
+    return (
+      await apiClient.post<Tutorial>(path, form, {
+        params: target ? { version: target.version } : undefined,
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120_000,
+      })
+    ).data
+  },
+  async exportPackage(id: number) {
+    const { data } = await apiClient.get<ArrayBuffer>(
+      `/admin/tutorials/${id}/export`,
+      {
+        responseType: 'arraybuffer',
+        timeout: 120_000,
+        transformResponse: [(data, headers) => {
+          if (String(headers['content-type']).includes('application/json')) {
+            try {
+              return JSON.parse(new TextDecoder().decode(data))
+            } catch {
+              return data
+            }
+          }
+          return data
+        }],
+      },
+    )
+    return new Blob([data], { type: 'application/zip' })
   },
   async save(id: number, version: number, content: TutorialContent) {
     return (

@@ -50,6 +50,12 @@ func TestAssetReferences(t *testing.T) {
 
 // The opt-in database test creates a fresh schema, independent of application data.
 func TestTutorialLifecycle(t *testing.T) {
+	db := tutorialTestDB(t)
+	testTutorialAccessLifecycle(t, db)
+}
+
+func tutorialTestDB(t *testing.T) *sql.DB {
+	t.Helper()
 	dsn := os.Getenv("TUTORIAL_TEST_DSN")
 	if dsn == "" {
 		t.Skip("TUTORIAL_TEST_DSN is not configured")
@@ -58,16 +64,16 @@ func TestTutorialLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = root.Close() }()
+	t.Cleanup(func() { _ = root.Close() })
 	schema := fmt.Sprintf("tutorial_test_%d", time.Now().UnixNano())
 	if _, err = root.Exec(`CREATE SCHEMA ` + schema); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		if _, e := root.Exec(`DROP SCHEMA ` + schema + ` CASCADE`); e != nil {
 			t.Error(e)
 		}
-	}()
+	})
 	parsed, err := url.Parse(dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +85,7 @@ func TestTutorialLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = db.Close() }()
+	t.Cleanup(func() { _ = db.Close() })
 	if _, err = db.Exec(`CREATE TABLE users(id BIGINT PRIMARY KEY);INSERT INTO users VALUES(1)`); err != nil {
 		t.Fatal(err)
 	}
@@ -90,6 +96,10 @@ func TestTutorialLifecycle(t *testing.T) {
 	if _, err = db.Exec(string(migration)); err != nil {
 		t.Fatal(err)
 	}
+	return db
+}
+
+func testTutorialAccessLifecycle(t *testing.T, db *sql.DB) {
 	s := &Store{db: db}
 	ctx := context.Background()
 	category, err := s.SaveCategory(ctx, 0, Category{Name: "快速开始", SortOrder: 2})

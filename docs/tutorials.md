@@ -25,6 +25,30 @@
 - 下架后用户无法获取文章和配图；草稿保留，可再次发布。
 - 阅读页支持搜索标题、摘要和正文，并提供正文目录、代码复制、图片放大和上下篇导航。
 
+## 教程包
+
+在教程管理列表选择“导入教程包”可新建草稿。在编辑器导入会替换当前草稿，完成后进入预览。已发布版本在再次发布时更新。在编辑器选择“导出教程包”可下载当前草稿及该教程的全部已存配图。导出以图片资源编号作为文件名。
+
+ZIP 根目录放一个 UTF-8 Markdown 文件（`.md` 或 `.markdown`），配图放在 `images/` 下。导出的 `tutorial.md` 顶部包含以下 YAML 信息，分隔线后是原 Markdown 正文。
+
+```markdown
+---
+title: 快速开始
+summary: 连接客户端的第一步。
+category: 入门
+visibility: login
+pinned: false
+sort_order: 10
+---
+## 配置客户端
+
+![设置页面](./images/settings.png)
+```
+
+`visibility` 可填 `login` 或 `public`，默认 `login`。分类按名称匹配，目标站点没有该分类时会创建。没有 YAML 信息的文件使用首个一级标题或文件名作为标题。
+
+教程包最大 52 MiB，Markdown 正文最大 1 MiB。配图支持 PNG、JPEG、GIF，单张最大 5 MiB、2400 万像素，每篇最多 200 张、合计 50 MiB。导入现有教程时，已有图片也计入额度。
+
 ## 存储
 
 迁移 `383_tutorial_center.sql` 创建独立的分类、文章和图片记录表。

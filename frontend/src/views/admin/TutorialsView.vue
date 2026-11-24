@@ -10,12 +10,27 @@
             {{ t('tutorials.description') }}
           </p>
         </div>
-        <RouterLink to="/admin/tutorials/new" class="btn btn-primary"
-          ><Icon name="plus" size="sm" class="mr-2" />{{
-            t('tutorials.new')
-          }}</RouterLink
-        >
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="importing"
+            @click="packageInput?.click()"
+          >
+            <Icon name="upload" size="sm" class="mr-2" />
+            {{ t(importing ? 'tutorials.importingPackage' : 'tutorials.importPackage') }}
+          </button>
+          <input ref="packageInput" type="file" accept=".zip,application/zip" hidden @change="importPackage" />
+          <RouterLink to="/admin/tutorials/new" class="btn btn-primary">
+            <Icon name="plus" size="sm" class="mr-2" />{{ t('tutorials.new') }}
+          </RouterLink>
+        </div>
       </header>
+      <p
+        v-if="packageError"
+        class="break-words rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300"
+        role="alert"
+      >{{ packageError }}</p>
       <div class="flex flex-wrap items-center gap-3">
         <label class="min-w-52 flex-1"
           ><span class="sr-only">{{ t('tutorials.search') }}</span
@@ -357,7 +372,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
+  maxTutorialPackageBytes,
   tutorialAPI,
   type Tutorial,
   type TutorialCategory,
@@ -366,9 +383,15 @@ import { useAppStore } from '@/stores'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import { tutorialPackageError } from '@/utils/tutorial-package'
 import '@/styles/tutorials.css'
 const { t, locale } = useI18n(),
-  app = useAppStore()
+  app = useAppStore(),
+  router = useRouter()
+const packageInput = ref<HTMLInputElement>()
+const importing = ref(false)
+const packageError = ref('')
+let disposed = false
 const search = ref(''),
   category = ref<number | ''>(''),
   status = ref(''),
@@ -400,6 +423,28 @@ const formatDate = (date: string) =>
   })
 const message = (e: unknown) =>
   (e as { message?: string })?.message || t('tutorials.loadFailed')
+async function importPackage(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || importing.value) return
+  if (file.size > maxTutorialPackageBytes) {
+    packageError.value = t('tutorials.packageErrors.zipSize')
+    return
+  }
+  importing.value = true
+  packageError.value = ''
+  try {
+    const draft = await tutorialAPI.importPackage(file)
+    if (disposed) return
+    app.showSuccess(t('tutorials.importSuccess'))
+    await router.push({ path: `/admin/tutorials/${draft.id}/edit`, query: { preview: '1' } })
+  } catch (e) {
+    if (!disposed) packageError.value = tutorialPackageError(t, e, t('tutorials.importFailed'))
+  } finally {
+    importing.value = false
+  }
+}
 async function load() {
   controller?.abort()
   const request = new AbortController()
@@ -507,6 +552,7 @@ watch([search, category, status], () => {
 watch(page, () => void load())
 onMounted(reload)
 onBeforeUnmount(() => {
+  disposed = true
   controller?.abort()
   clearTimeout(timer)
 })

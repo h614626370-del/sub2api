@@ -22,11 +22,32 @@
             >{{ saveStatus }}</span
           >
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            v-if="article && !loading"
+            type="button"
+            class="btn btn-secondary"
+            :disabled="packageBusy || publishing || uploads > 0 || conflict"
+            @click="packageInput?.click()"
+          >
+            <Icon name="upload" size="sm" class="mr-2" />
+            {{ t(importing ? 'tutorials.importingPackage' : 'tutorials.importPackage') }}
+          </button>
+          <input ref="packageInput" type="file" accept=".zip,application/zip" hidden @change="pickPackage" />
+          <button
+            v-if="article && !loading"
+            type="button"
+            class="btn btn-secondary"
+            :disabled="packageBusy || publishing || uploads > 0 || conflict"
+            @click="exportPackage"
+          >
+            <Icon name="download" size="sm" class="mr-2" />
+            {{ t(exporting ? 'tutorials.exportingPackage' : 'tutorials.exportPackage') }}
+          </button>
           <button
             type="button"
             class="btn btn-secondary"
-            :disabled="loading || saving || conflict || !dirty"
+            :disabled="loading || saving || conflict || packageBusy || !dirty"
             @click="save(false)"
           >
             {{ t('tutorials.save') }}
@@ -34,7 +55,7 @@
           <button
             type="button"
             class="btn btn-secondary"
-            :disabled="loading"
+            :disabled="loading || importing"
             @click="mode = mode === 'preview' ? 'split' : 'preview'"
           >
             {{
@@ -48,6 +69,7 @@
               loading ||
               saving ||
               publishing ||
+              packageBusy ||
               uploads > 0 ||
               !!failedUpload ||
               conflict
@@ -78,7 +100,12 @@
           {{ t('tutorials.retry') }}
         </button>
       </div>
-      <template v-else>
+      <div v-else class="space-y-5" :inert="importing">
+        <p
+          v-if="packageError"
+          class="break-words rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
+          role="alert"
+        >{{ packageError }}</p>
         <div
           v-if="error"
           class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
@@ -365,8 +392,16 @@
             {{ t('tutorials.imageHint') }}
           </footer>
         </section>
-      </template>
+      </div>
     </div>
+    <ConfirmDialog
+      :show="!!pendingPackage"
+      :title="t('tutorials.replaceDraft')"
+      :message="t('tutorials.replaceDraftConfirm')"
+      :confirm-text="t('tutorials.importPackage')"
+      @confirm="importPackage"
+      @cancel="pendingPackage = null"
+    />
   </AppLayout>
 </template>
 
@@ -387,8 +422,10 @@ import {
   useRouter,
 } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { saveAs } from 'file-saver'
 import {
   emptyTutorial,
+  maxTutorialPackageBytes,
   tutorialAPI,
   type Tutorial,
   type TutorialCategory,
@@ -397,7 +434,9 @@ import {
 import { useAppStore } from '@/stores'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import TutorialMarkdown from '@/components/tutorials/TutorialMarkdown.vue'
+import { tutorialPackageError } from '@/utils/tutorial-package'
 
 const { t, locale } = useI18n(),
   route = useRoute(),
@@ -414,7 +453,13 @@ const loading = ref(true),
   conflict = ref(false),
   settings = ref(false)
 const textarea = ref<HTMLTextAreaElement>(),
-  imageInput = ref<HTMLInputElement>()
+  imageInput = ref<HTMLInputElement>(),
+  packageInput = ref<HTMLInputElement>()
+const pendingPackage = ref<File | null>(null)
+const importing = ref(false),
+  exporting = ref(false),
+  packageError = ref('')
+const packageBusy = computed(() => importing.value || exporting.value)
 const mode = ref<'edit' | 'split' | 'preview'>(
   route.query.preview
     ? 'preview'
@@ -541,6 +586,8 @@ async function load() {
     history.value = [form.content]
     historyIndex.value = 0
     error.value = ''
+    packageError.value = ''
+    pendingPackage.value = null
     conflict.value = false
     savedAt.value = ''
   } catch (e) {
@@ -565,7 +612,7 @@ function save(silent = true): Promise<boolean> {
   clearTimeout(timer)
   if (inFlight)
     return inFlight.then((ok) => (ok && dirty.value ? save(silent) : ok))
-  if (conflict.value || loading.value || disposed) return Promise.resolve(false)
+  if (conflict.value || loading.value || importing.value || disposed) return Promise.resolve(false)
   if (!dirty.value && article.value) return Promise.resolve(true)
   const captured = snapshot()
   const current = editorEpoch
@@ -615,8 +662,79 @@ function save(silent = true): Promise<boolean> {
   })()
   return inFlight
 }
+function pickPackage(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || packageBusy.value) return
+  if (file.size > maxTutorialPackageBytes) {
+    packageError.value = t('tutorials.packageErrors.zipSize')
+    return
+  }
+  packageError.value = ''
+  pendingPackage.value = file
+}
+async function importPackage() {
+  const file = pendingPackage.value
+  pendingPackage.value = null
+  if (!file || !article.value || packageBusy.value || publishing.value || uploads.value || conflict.value) return
+  const current = editorEpoch
+  importing.value = true
+  clearTimeout(timer)
+  try {
+    if (inFlight && !(await inFlight)) return
+    if (disposed || current !== editorEpoch || !article.value) return
+    const draft = await tutorialAPI.importPackage(file, article.value)
+    if (disposed || current !== editorEpoch) return
+    article.value = draft
+    Object.assign(form, pickContent(draft))
+    saved.value = snapshot()
+    savedAt.value = new Date(draft.updated_at).toLocaleTimeString(locale.value, {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    history.value = [form.content]
+    historyIndex.value = 0
+    failedUpload.value = null
+    error.value = ''
+    mode.value = 'preview'
+    app.showSuccess(t('tutorials.importSuccess'))
+    try {
+      const updatedCategories = await tutorialAPI.categories(true)
+      if (!disposed && current === editorEpoch) categories.value = updatedCategories
+    } catch {
+      if (!disposed && current === editorEpoch) packageError.value = t('tutorials.categoryRefreshFailed')
+    }
+  } catch (e) {
+    if (disposed || current !== editorEpoch) return
+    conflict.value = (e as { status?: number }).status === 409
+    if (conflict.value) error.value = t('tutorials.conflict')
+    else packageError.value = tutorialPackageError(t, e, t('tutorials.importFailed'))
+  } finally {
+    importing.value = false
+    if (!disposed && dirty.value && !error.value && !conflict.value)
+      timer = setTimeout(() => void save(), 1600)
+  }
+}
+async function exportPackage() {
+  if (!article.value || packageBusy.value || publishing.value || uploads.value || conflict.value) return
+  const current = editorEpoch
+  exporting.value = true
+  packageError.value = ''
+  try {
+    if (!(await save()) || disposed || current !== editorEpoch || !article.value) return
+    const id = article.value.id
+    const zip = await tutorialAPI.exportPackage(id)
+    if (!disposed && current === editorEpoch) saveAs(zip, `tutorial-${id}.zip`)
+  } catch (e) {
+    if (!disposed && current === editorEpoch)
+      packageError.value = tutorialPackageError(t, e, t('tutorials.exportFailed'))
+  } finally {
+    exporting.value = false
+  }
+}
 async function publish() {
-  if (publishing.value || uploads.value || failedUpload.value || conflict.value)
+  if (publishing.value || packageBusy.value || uploads.value || failedUpload.value || conflict.value)
     return
   if (!form.title.trim() || !form.content.trim()) {
     error.value = t('tutorials.required')
@@ -647,7 +765,7 @@ async function publish() {
   }
 }
 async function upload(file: File) {
-  if (uploads.value || conflict.value) return
+  if (uploads.value || importing.value || conflict.value) return
   if (
     !['image/png', 'image/jpeg', 'image/gif'].includes(file.type) ||
     file.size > 5 * 1024 * 1024
@@ -728,7 +846,7 @@ function applyTemplate(e: Event) {
   }
 }
 function beforeUnload(e: BeforeUnloadEvent) {
-  if (dirty.value || uploads.value) {
+  if (dirty.value || uploads.value || importing.value) {
     e.preventDefault()
     e.returnValue = ''
   }
@@ -740,14 +858,14 @@ function adaptEditor() {
 onBeforeRouteLeave(
   () =>
     internalNavigation ||
-    (!dirty.value && !uploads.value) ||
+    (!dirty.value && !uploads.value && !importing.value) ||
     window.confirm(t('tutorials.leaveConfirm')),
 )
 onBeforeRouteUpdate(
   (to, from) =>
     to.params.id === from.params.id ||
     internalNavigation ||
-    (!dirty.value && !uploads.value) ||
+    (!dirty.value && !uploads.value && !importing.value) ||
     window.confirm(t('tutorials.leaveConfirm')),
 )
 watch(
@@ -760,7 +878,7 @@ watch(
   form,
   () => {
     clearTimeout(timer)
-    if (!loading.value && !conflict.value && !publishing.value && dirty.value)
+    if (!loading.value && !conflict.value && !publishing.value && !importing.value && dirty.value)
       timer = setTimeout(() => void save(), 1600)
   },
   { deep: true },

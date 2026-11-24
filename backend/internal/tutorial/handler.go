@@ -44,6 +44,7 @@ func (h *Handler) RegisterAdmin(r *gin.RouterGroup) {
 	r.Use(private)
 	r.GET("", h.list(AdminAccess))
 	r.POST("", h.create)
+	r.POST("/import", h.importPackage)
 	r.GET("/categories", h.categories(AdminAccess))
 	r.POST("/categories", h.saveCategory)
 	r.PUT("/categories/:category", h.saveCategory)
@@ -51,6 +52,8 @@ func (h *Handler) RegisterAdmin(r *gin.RouterGroup) {
 	r.GET("/:id", h.get(AdminAccess))
 	r.PUT("/:id", h.change("save"))
 	r.DELETE("/:id", h.change("delete"))
+	r.POST("/:id/import", h.importPackage)
+	r.GET("/:id/export", h.exportPackage)
 	r.POST("/:id/publish", h.change("publish"))
 	r.POST("/:id/unpublish", h.change("unpublish"))
 	r.POST("/:id/assets", h.upload)
@@ -261,42 +264,26 @@ func (h *Handler) upload(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if count >= 200 || size+int64(len(raw)) > 50<<20 {
+	if count >= maxAssetCount || size+int64(len(raw)) > maxAssetTotal {
 		response.BadRequest(c, "Tutorial image quota exceeded (200 images / 50 MB)")
 		return
 	}
-	var key [16]byte
-	if _, err = rand.Read(key[:]); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	assetID := hex.EncodeToString(key[:])
-	if err = os.MkdirAll(h.assetDir, 0700); err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	path := filepath.Join(h.assetDir, assetID)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	assetID, err := newAssetID()
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	_, writeErr := f.Write(raw)
-	closeErr := f.Close()
+	filename, err := h.writeAsset(assetID, raw)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	keep := false
 	defer func() {
 		if !keep {
-			_ = os.Remove(path)
+			_ = os.Remove(filename)
 		}
 	}()
-	if writeErr != nil {
-		response.ErrorFrom(c, writeErr)
-		return
-	}
-	if closeErr != nil {
-		response.ErrorFrom(c, closeErr)
-		return
-	}
 	_, err = tx.ExecContext(c.Request.Context(), `INSERT INTO tutorial_assets(id,tutorial_id,mime,size) VALUES($1,$2,$3,$4)`, assetID, id, mime, len(raw))
 	if err == nil {
 		err = tx.Commit()
@@ -306,7 +293,36 @@ func (h *Handler) upload(c *gin.Context) {
 		return
 	}
 	keep = true
-	response.Success(c, gin.H{"id": assetID, "reference": "tutorial-asset:" + assetID})
+	response.Success(c, gin.H{"id": assetID, "reference": assetScheme + assetID})
+}
+
+func newAssetID() (string, error) {
+	var key [16]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(key[:]), nil
+}
+
+func (h *Handler) writeAsset(id string, raw []byte) (string, error) {
+	if err := os.MkdirAll(h.assetDir, 0700); err != nil {
+		return "", err
+	}
+	filename := filepath.Join(h.assetDir, id)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := f.Write(raw)
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = os.Remove(filename)
+		if writeErr != nil {
+			return "", writeErr
+		}
+		return "", closeErr
+	}
+	return filename, nil
 }
 func referencesAsset(content, key string) bool {
 	for _, m := range assetReferencePattern.FindAllStringSubmatch(content, -1) {
