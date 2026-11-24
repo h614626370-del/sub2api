@@ -56,14 +56,11 @@ class ReleaseMatrixTest(unittest.TestCase):
         for target in release.targets(simple):
             name = release.archive_name(version, target)
             archive = directory / name
-            if target['goos'] == 'linux':
-                with tarfile.open(archive, 'w:gz') as out:
-                    info = tarfile.TarInfo('sub2api')
-                    info.size = 7
-                    info.mode = 0o755
-                    out.addfile(info, io.BytesIO(b'fixture'))
-            else:
-                archive.write_bytes(b'fixture archive')
+            with tarfile.open(archive, 'w:gz') as out:
+                info = tarfile.TarInfo('sub2api')
+                info.size = 7
+                info.mode = 0o755
+                out.addfile(info, io.BytesIO(b'fixture'))
             metadata = {'version': version, 'sha': 'a' * 40, 'target': target,
                         'archive': name, 'sha256': release.sha256(archive)}
             (directory / f"manifest-{target['goos']}-{target['goarch']}.json").write_text(json.dumps(metadata))
@@ -79,11 +76,21 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertEqual(release.VERSION_FILE.read_text(), '9.8.7.10\n')
         release.verify(self.fixture_artifacts(version='9.8.7.10'))
 
-    def test_full_and_simple_matrix_match_existing_targets(self):
-        full = release.targets()
-        self.assertEqual(full, [{'goos': goos, 'goarch': 'amd64'}
-                                for goos in ('linux', 'windows', 'darwin')])
-        self.assertEqual(release.targets(True), [{'goos': 'linux', 'goarch': 'amd64'}])
+    def test_full_and_simple_matrix_only_build_linux_amd64(self):
+        expected = [{'goos': 'linux', 'goarch': 'amd64'}]
+        for simple in (False, True):
+            self.assertEqual(release.config(simple)['builds'][0]['goos'], ['linux'])
+            self.assertEqual(release.targets(simple), expected)
+
+    def test_older_release_config_cannot_select_non_linux_targets(self):
+        old_config = release.config()
+        old_config['builds'][0]['goos'].extend(['windows', 'darwin'])
+        release.FULL_CONFIG.write_text(yaml.safe_dump(old_config))
+        self.assertEqual(release.targets(), [{'goos': 'linux', 'goarch': 'amd64'}])
+        for goos in ('windows', 'darwin'):
+            with self.subTest(goos=goos), self.assertRaisesRegex(ValueError, 'unsupported build target'):
+                release.generate_config(argparse.Namespace(mode='build', simple=False, goos=goos,
+                                                           goarch='amd64', output='leaf.yaml'))
 
     def test_runtime_and_image_release_targets_are_amd64_only(self):
         for filename, job in (('release.yml', 'build-reauth-runtime'), ('reauth-runtime.yml', 'package')):
@@ -103,9 +110,9 @@ class ReleaseMatrixTest(unittest.TestCase):
 
     def test_leaf_keeps_packaging_and_selects_only_one_target(self):
         original = release.config()
-        release.generate_config(argparse.Namespace(mode='build', simple=False, goos='darwin', goarch='amd64', output='leaf.yaml'))
+        release.generate_config(argparse.Namespace(mode='build', simple=False, goos='linux', goarch='amd64', output='leaf.yaml'))
         leaf = yaml.safe_load(Path('leaf.yaml').read_text())
-        self.assertEqual(leaf['builds'][0]['goos'], ['darwin'])
+        self.assertEqual(leaf['builds'][0]['goos'], ['linux'])
         self.assertEqual(leaf['builds'][0]['goarch'], ['amd64'])
         self.assertEqual(leaf['builds'][0]['ignore'], [])
         self.assertEqual(leaf['archives'], original['archives'])
@@ -129,6 +136,7 @@ class ReleaseMatrixTest(unittest.TestCase):
                     self.assertTrue(data['release']['skip_upload'])
                 else:
                     self.assertEqual(data['checksum']['extra_files'], data['release']['extra_files'])
+                    self.assertEqual(data['release']['extra_files'], [{'glob': 'release-input/sub2api_*_linux_*.tar.gz'}])
 
     def test_collect_and_verify_hash_and_source_binding(self):
         args = self.fixture_artifacts()

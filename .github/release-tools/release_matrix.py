@@ -28,11 +28,13 @@ def targets(simple=False):
     build = config()['builds'][0]
     result = []
     for goos, goarch in itertools.product(build['goos'], build['goarch']):
+        # Older release tags can still list non-Linux targets.
+        if goos != 'linux' or (simple and goarch != 'amd64'):
+            continue
         item = {'goos': goos, 'goarch': goarch}
         if any(all(item.get(k) == v for k, v in rule.items()) for rule in build.get('ignore', [])):
             continue
-        if not simple or item == {'goos': 'linux', 'goarch': 'amd64'}:
-            result.append(item)
+        result.append(item)
     if not result:
         raise ValueError('empty release target matrix')
     return result
@@ -41,8 +43,7 @@ def targets(simple=False):
 def archive_name(version, target):
     if not VERSION_RE.fullmatch(version) or target not in targets():
         raise ValueError('invalid release version or target')
-    suffix = 'zip' if target['goos'] == 'windows' else 'tar.gz'
-    return f"sub2api_{version}_{target['goos']}_{target['goarch']}.{suffix}"
+    return f"sub2api_{version}_{target['goos']}_{target['goarch']}.tar.gz"
 
 
 def sha256(path):
@@ -96,7 +97,7 @@ def generate_config(args):
         data['before'] = {'hooks': []}
         data['builds'] = [{'id': 'sub2api', 'skip': True}]
         data['archives'] = []
-        extra = [{'glob': 'release-input/sub2api_*.tar.gz'}, {'glob': 'release-input/sub2api_*.zip'}]
+        extra = [{'glob': 'release-input/sub2api_*_linux_*.tar.gz'}]
         if args.simple:
             data['checksum'] = {'disable': True}
         else:
@@ -138,8 +139,6 @@ def verify(args):
 def contexts(args):
     verify(args)
     for target in targets(args.simple):
-        if target['goos'] != 'linux':
-            continue
         dest = Path(args.output) / target['goarch']
         dest.mkdir(parents=True, exist_ok=True)
         with tarfile.open(Path(args.input) / archive_name(args.version, target), 'r:gz') as archive:

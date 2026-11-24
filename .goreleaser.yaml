@@ -17,8 +17,6 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
-      - windows
-      - darwin
     goarch:
       - amd64
     ldflags:
@@ -32,9 +30,6 @@ archives:
     format: tar.gz
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
       - LICENSE*
       - LICENSES/**
@@ -166,7 +161,7 @@ release:
     ```
 
     **Manual download:**
-    Download the appropriate archive for your platform from the assets below.
+    Download the Linux amd64 archive from the assets below.
 
     **K3s gateway upgrade (on each existing single-node host):**
     ```bash
