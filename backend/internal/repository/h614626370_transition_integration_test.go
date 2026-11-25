@@ -106,6 +106,10 @@ func TestH614626370TransitionUpgrade(t *testing.T) {
 
 			require.NoError(t, ApplyMigrations(ctx, db))
 			require.Equal(t, before, transitionBusinessSnapshot(t, db), "business data changed")
+			var claimedDomesticRoutes int
+			require.NoError(t, db.QueryRowContext(ctx,
+				`SELECT count(*) FROM accounts WHERE domestic_route_probe_at IS NOT NULL`).Scan(&claimedDomesticRoutes))
+			require.Zero(t, claimedDomesticRoutes, "historical accounts must not acquire a domestic route probe claim")
 			var moderationRevision int64
 			require.NoError(t, db.QueryRowContext(ctx,
 				`SELECT moderation_status_revision FROM users WHERE id=1`).Scan(&moderationRevision))
@@ -228,7 +232,7 @@ func transitionBusinessSnapshot(t *testing.T, db *sql.DB) map[string]string {
 		"subscriptions": `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'conversion_used_usd'-'conversion_usage_complete' ORDER BY id), '[]')::text FROM user_subscriptions t`,
 		"orders":        `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'bonus_amount'-'subscription_renewal_mode' ORDER BY id), '[]')::text FROM payment_orders t`,
 		"usage":         `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'queue_wait_ms'-'queue_timing'-'platform'-'customer_cost_details'-'cache_creation_30m_tokens'-'cache_creation_12h_tokens'-'procurement_cost_snapshot' ORDER BY id), '[]')::text FROM usage_logs t`,
-		"credentials":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'extra'-'updated_at'-'group_rate_multiplier'-'ai_ops_revision' ORDER BY id), '[]')::text FROM accounts t`,
+		"credentials":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'extra'-'updated_at'-'group_rate_multiplier'-'ai_ops_revision'-'domestic_route_probe_at' ORDER BY id), '[]')::text FROM accounts t`,
 		"memberships":   `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'allowed_models' ORDER BY account_id,group_id), '[]')::text FROM account_groups t`,
 		"proxies":       `SELECT COALESCE(jsonb_agg(to_jsonb(t)-'mihomo_node_id' ORDER BY id), '[]')::text FROM proxies t`,
 	}
