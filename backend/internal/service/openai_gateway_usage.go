@@ -395,6 +395,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		s.excelOAuthReauth.recordConnectionUsage(ctx, account.ID, apiKey.ID, result.AuthConnectionID, requestID)
 	}
 	usageLog := &UsageLog{
+		SLAExcluded:              result.SLAExcluded,
 		CustomerCostDetails:      customerCostDetails,
 		Platform:                 usagePlatformForRequest(ctx, account, apiKey, input.QuotaPlatform),
 		UserID:                   user.ID,
@@ -570,8 +571,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	if !s.DurableUsageBillingEnabled() {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
-	} else {
-		recordDurableUsageTiming(ctx, s.usageLogRepo, usageLog)
 	}
 
 	return nil
