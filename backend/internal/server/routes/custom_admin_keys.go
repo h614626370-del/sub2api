@@ -15,4 +15,8 @@ func registerScopedAdminKeyRoutes(settings *gin.RouterGroup, h *handler.Handlers
 	keys.POST("/:id/rotate", gin.HandlerFunc(stepUp), h.Admin.Setting.RotateScopedAdminKey)
 	keys.DELETE("/:id", gin.HandlerFunc(stepUp), h.Admin.Setting.RevokeScopedAdminKey)
 	keys.DELETE("/:id/record", gin.HandlerFunc(stepUp), h.Admin.Setting.DeleteScopedAdminKeyRecord)
+	tutorials := keys.Group("/tutorials")
+	tutorials.GET("", h.Admin.Setting.ListTutorialAdminKeys)
+	tutorials.POST("", gin.HandlerFunc(stepUp), h.Admin.Setting.CreateTutorialAdminKey)
+	tutorials.DELETE("/:id", gin.HandlerFunc(stepUp), h.Admin.Setting.RevokeTutorialAdminKey)
 }

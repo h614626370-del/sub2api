@@ -11,14 +11,15 @@
         class="mx-auto flex items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8"
         :class="shellWidth"
       >
-        <RouterLink to="/home" class="flex min-w-0 items-center gap-3">
+        <!-- The server selects the published homepage on a document request. -->
+        <a href="/" class="flex min-w-0 items-center gap-3">
           <img
             :src="app.siteLogo || '/logo.svg'"
             alt=""
             class="h-9 w-9 rounded-lg object-contain"
           />
           <span class="truncate font-semibold">{{ app.siteName }}</span>
-        </RouterLink>
+        </a>
         <nav
           class="flex shrink-0 items-center gap-3 text-sm"
           :aria-label="t('tutorials.guestNavigation')"

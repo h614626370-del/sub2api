@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const TutorialManagementPermission = "tutorials.manage"
+
 type Permission struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
@@ -20,6 +22,14 @@ type permissionDefinition struct {
 // 接口按方法和 Gin 完整路径精确登记；新增接口不会继承同目录权限。
 // 全站权限与账户规则独立，选中分组绝不会隐式授予全站操作。
 var definitions = []permissionDefinition{
+	{Permission{TutorialManagementPermission, "管理教程、分类、配图及发布", "内容", "global"}, []string{
+		"GET /tutorials", "GET /tutorials/:id", "GET /tutorials/categories",
+		"GET /tutorials/:id/assets/:asset", "GET /tutorials/:id/export",
+		"POST /tutorials", "PUT /tutorials/:id", "DELETE /tutorials/:id",
+		"POST /tutorials/categories", "PUT /tutorials/categories/:category", "DELETE /tutorials/categories/:category",
+		"POST /tutorials/:id/publish", "POST /tutorials/:id/unpublish", "POST /tutorials/:id/assets",
+		"POST /tutorials/import", "POST /tutorials/:id/import",
+	}},
 	{Permission{"lottery.read", "读取抽奖奖池与记录", "财务", "global"}, []string{"GET /lottery/settings", "GET /lottery/pools", "GET /lottery/records", "GET /lottery/ledger"}},
 	{Permission{"lottery.write", "管理抽奖奖池与奖品", "财务", "global"}, []string{"PUT /lottery/settings", "POST /lottery/pools", "PUT /lottery/pools/:id", "DELETE /lottery/pools/:id", "POST /lottery/pools/:id/prizes", "PUT /lottery/pools/:id/prizes/:prize_id", "DELETE /lottery/pools/:id/prizes/:prize_id"}},
 	{Permission{"accounts.read", "查看账户（脱敏）", "账户", "account"}, []string{"GET /accounts", "GET /accounts/:id", "GET /accounts/:id/models"}},

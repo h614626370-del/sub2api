@@ -11,6 +11,10 @@
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <button type="button" class="btn btn-secondary" @click="showApiKeys = true">
+            <Icon name="key" size="sm" class="mr-2" />
+            {{ t('tutorials.apiKeys.title') }}
+          </button>
           <button
             type="button"
             class="btn btn-secondary"
@@ -349,6 +353,7 @@
         </footer>
       </div>
     </div>
+    <TutorialApiKeysDialog v-if="showApiKeys" @close="showApiKeys = false" />
     <ConfirmDialog
       :show="!!confirmation"
       :title="
@@ -403,8 +408,11 @@ import { useAppStore } from '@/stores'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import TutorialApiKeysDialog from '@/components/tutorials/TutorialApiKeysDialog.vue'
 import { tutorialPackageError } from '@/utils/tutorial-package'
 import '@/styles/tutorials.css'
+
+const showApiKeys = ref(false)
 const { t, locale } = useI18n(),
   app = useAppStore(),
   router = useRouter()

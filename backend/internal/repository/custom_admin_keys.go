@@ -97,8 +97,12 @@ func (r *scopedAdminKeyRepository) UpdateScopedAdminKey(ctx context.Context, k *
 func (r *scopedAdminKeyRepository) TouchScopedAdminKey(ctx context.Context, id, expectedHash string, expectedUpdatedAt time.Time, ip string, now time.Time) error {
 	return scopedAdminKeyResult(r.db.ExecContext(ctx, `UPDATE scoped_admin_api_keys SET last_used_at=$5,last_used_ip=$4 WHERE id=$1 AND key_hash=$2 AND updated_at=$3 AND revoked_at IS NULL AND enabled=true AND (expires_at IS NULL OR expires_at>$5)`, id, expectedHash, expectedUpdatedAt, ip, now))
 }
-func (r *scopedAdminKeyRepository) RevokeScopedAdminKey(ctx context.Context, id string, now time.Time) error {
-	return scopedAdminKeyResult(r.db.ExecContext(ctx, `UPDATE scoped_admin_api_keys SET revoked_at=$2,enabled=false,updated_at=$2 WHERE id=$1 AND revoked_at IS NULL`, id, now))
+func (r *scopedAdminKeyRepository) RevokeScopedAdminKey(ctx context.Context, id string, now time.Time, expectedUpdatedAt *time.Time) error {
+	err := scopedAdminKeyResult(r.db.ExecContext(ctx, `UPDATE scoped_admin_api_keys SET revoked_at=$2,enabled=false,updated_at=$2 WHERE id=$1 AND revoked_at IS NULL AND ($3::timestamptz IS NULL OR updated_at=$3)`, id, now, expectedUpdatedAt))
+	if expectedUpdatedAt != nil && err == service.ErrScopedAdminKeyNotFound {
+		return service.ErrScopedAdminKeyConflict
+	}
+	return err
 }
 
 // 删除仅隐藏列表项；原子检查撤销状态，不删除密钥记录或历史审计。

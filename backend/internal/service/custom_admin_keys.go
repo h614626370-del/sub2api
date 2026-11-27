@@ -49,7 +49,7 @@ type ScopedAdminKeyRepository interface {
 	UpdateScopedAdminKey(context.Context, *ScopedAdminKey) error
 	RotateScopedAdminKeyHash(context.Context, string, string, string, time.Time) error
 	TouchScopedAdminKey(context.Context, string, string, time.Time, string, time.Time) error
-	RevokeScopedAdminKey(context.Context, string, time.Time) error
+	RevokeScopedAdminKey(context.Context, string, time.Time, *time.Time) error
 	DeleteScopedAdminKeyRecord(context.Context, string, time.Time) error
 }
 
@@ -168,6 +168,9 @@ func (s *SettingService) UpdateScopedAdminKey(ctx context.Context, id string, in
 	if item.RevokedAt != nil {
 		return nil, ErrScopedAdminKeyNotFound
 	}
+	if isTutorialAdminPolicy(item.Policy) && !isTutorialAdminPolicy(in.Policy) {
+		return nil, infraerrors.BadRequest("TUTORIAL_KEY_SCOPE_FIXED", "教程专用密钥的权限不可变更")
+	}
 	if in.Policy.FullAccess && !item.Policy.FullAccess && !in.ConfirmFullAccess {
 		return nil, infraerrors.BadRequest("ADMIN_KEY_FULL_ACCESS_CONFIRMATION_REQUIRED", "开启全权访问需要显式确认")
 	}
@@ -224,7 +227,41 @@ func (s *SettingService) RevokeScopedAdminKey(ctx context.Context, id string) er
 	if e != nil {
 		return e
 	}
-	return r.RevokeScopedAdminKey(ctx, id, time.Now().UTC())
+	return r.RevokeScopedAdminKey(ctx, id, time.Now().UTC(), nil)
+}
+
+func isTutorialAdminPolicy(policy adminaccess.Policy) bool {
+	return !policy.FullAccess && len(policy.Rules) == 0 &&
+		len(policy.GlobalPermissions) == 1 && policy.GlobalPermissions[0] == adminaccess.TutorialManagementPermission
+}
+
+func (s *SettingService) ListTutorialAdminKeys(ctx context.Context) ([]*ScopedAdminKey, error) {
+	items, err := s.ListScopedAdminKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]*ScopedAdminKey, 0)
+	for _, item := range items {
+		if isTutorialAdminPolicy(item.Policy) {
+			keys = append(keys, item)
+		}
+	}
+	return keys, nil
+}
+
+func (s *SettingService) RevokeTutorialAdminKey(ctx context.Context, id string) error {
+	r, err := s.scopedAdminKeys()
+	if err != nil {
+		return err
+	}
+	item, err := r.GetScopedAdminKey(ctx, id)
+	if err != nil {
+		return err
+	}
+	if item.RevokedAt != nil || !isTutorialAdminPolicy(item.Policy) {
+		return ErrScopedAdminKeyNotFound
+	}
+	return r.RevokeScopedAdminKey(ctx, id, time.Now().UTC(), &item.UpdatedAt)
 }
 
 func (s *SettingService) DeleteScopedAdminKeyRecord(ctx context.Context, id string) error {

@@ -1,4 +1,10 @@
 export default {
+  apiKeys: {
+    title: '教程 API 密钥',
+    generate: '生成密钥',
+    empty: '暂无教程 API 密钥',
+    refresh: '刷新列表',
+  },
   visibility: '阅读权限',
   loginOnly: '仅登录可见',
   public: '公开可见',

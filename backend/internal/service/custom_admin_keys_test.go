@@ -73,7 +73,7 @@ func (r *scopedKeyMemoryRepo) UpdateScopedAdminKey(_ context.Context, k *ScopedA
 func (r *scopedKeyMemoryRepo) TouchScopedAdminKey(context.Context, string, string, time.Time, string, time.Time) error {
 	return nil
 }
-func (r *scopedKeyMemoryRepo) RevokeScopedAdminKey(_ context.Context, _ string, at time.Time) error {
+func (r *scopedKeyMemoryRepo) RevokeScopedAdminKey(_ context.Context, _ string, at time.Time, _ *time.Time) error {
 	r.item.RevokedAt = &at
 	return nil
 }

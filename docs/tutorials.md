@@ -53,6 +53,34 @@ sort_order: 10
 
 教程包最大 52 MiB，Markdown 正文最大 1 MiB。配图支持 PNG、JPEG、GIF，单张最大 5 MiB、2400 万像素，每个包最多 200 张、合计 50 MiB。包内未被正文引用的图片通过校验后不会存入教程目录。
 
+## 教程 API
+
+在「我的运维 → 教程管理 → 教程 API 密钥」生成密钥，可设置到期时间或随时撤销。完整密钥只在生成时显示。通过本地环境变量 `TUTORIAL_API_KEY` 提供给调用工具，使用 `x-api-key` 请求头。`TUTORIAL_SITE_URL` 为站点地址，生产环境使用 HTTPS。
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --header "x-api-key: ${TUTORIAL_API_KEY}" \
+  "${TUTORIAL_SITE_URL}/api/v1/admin/tutorials?page=1&page_size=20"
+```
+
+以下路径相对于 `/api/v1/admin/tutorials`。成功的 JSON 响应将结果放在 `data` 字段。
+
+| 操作 | 方法和路径 | 请求参数 |
+| --- | --- | --- |
+| 列出教程 | `GET` 根路径 | `page`、`page_size`、`search`、`category_id`、`status`（`draft` 或 `published`） |
+| 读取教程草稿 | `GET /{id}` | 使用数字 ID。返回草稿和当前 `version` |
+| 新建草稿 | `POST` 根路径 | 教程字段 |
+| 保存草稿 | `PUT /{id}` | 完整教程字段和当前 `version` |
+| 发布、下架或删除 | `POST /{id}/publish`、`POST /{id}/unpublish`、`DELETE /{id}` | JSON `{"version": 1}`，替换为当前版本 |
+| 读取分类 | `GET /categories` | 无 |
+| 新建或编辑分类 | `POST /categories`、`PUT /categories/{category}` | JSON `{"name": "入门", "sort_order": 10}` |
+| 删除分类 | `DELETE /categories/{category}` | 该分类下文章移到「未分类」 |
+| 上传或读取配图 | `POST /{id}/assets`、`GET /{id}/assets/{asset}` | 上传时用 `multipart/form-data` 的 `file` 字段 |
+
+教程字段包括 `title`、`summary`、`content`（Markdown）、`category_id`（可为 `null`）、`visibility`（`login` 或 `public`）、`pinned`、`sort_order` 和可选 `slug`。配图上传后，把返回的 `data.reference` 写成 Markdown 图片地址，如 `![配置截图](tutorial-asset:…)`。
+
+更新已有教程前先读取草稿，在保留原字段的基础上提交改动。保存后用返回的新 `version` 执行发布。遇到 HTTP `409` 时重新获取草稿并核对差异，再决定如何合并。草稿、发布快照和阅读权限沿用教程管理页面的规则。
+
 ## 存储
 
 迁移 `383_tutorial_center.sql` 创建独立的分类、文章和图片记录表。

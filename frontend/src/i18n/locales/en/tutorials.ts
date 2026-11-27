@@ -1,4 +1,10 @@
 export default {
+  apiKeys: {
+    title: 'Tutorial API keys',
+    generate: 'Generate key',
+    empty: 'No tutorial API keys yet.',
+    refresh: 'Refresh list',
+  },
   visibility: 'Reading access',
   loginOnly: 'Signed-in users only',
   public: 'Public',

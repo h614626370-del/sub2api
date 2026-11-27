@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -102,4 +104,62 @@ func (h *SettingHandler) DeleteScopedAdminKeyRecord(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"message": "密钥已从列表移除，历史操作记录仍会继续保留"})
+}
+
+func (h *SettingHandler) ListTutorialAdminKeys(c *gin.Context) {
+	if !requireAdminKeyJWT(c) {
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	items, err := h.settingService.ListTutorialAdminKeys(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": items})
+}
+
+func (h *SettingHandler) CreateTutorialAdminKey(c *gin.Context) {
+	if !requireAdminKeyJWT(c) {
+		return
+	}
+	var input struct {
+		Name      string     `json:"name"`
+		ExpiresAt *time.Time `json:"expires_at"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, "Invalid tutorial key input")
+		return
+	}
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Error(c, 403, "需要管理员身份")
+		return
+	}
+	key, item, err := h.settingService.CreateScopedAdminKey(c.Request.Context(), service.ScopedAdminKeyInput{
+		Name:      input.Name,
+		Enabled:   true,
+		ExpiresAt: input.ExpiresAt,
+		Policy:    adminaccess.Policy{GlobalPermissions: []string{adminaccess.TutorialManagementPermission}},
+	}, subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	middleware.SetAuditExtra(c, map[string]any{"admin_key_id": item.ID, "full_access": false})
+	response.Success(c, gin.H{"key": key, "item": item})
+}
+
+func (h *SettingHandler) RevokeTutorialAdminKey(c *gin.Context) {
+	if !requireAdminKeyJWT(c) {
+		return
+	}
+	id := c.Param("id")
+	if err := h.settingService.RevokeTutorialAdminKey(c.Request.Context(), id); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	middleware.SetAuditExtra(c, map[string]any{"admin_key_id": id})
+	response.Success(c, gin.H{"message": "教程 API 密钥已撤销"})
 }

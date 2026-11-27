@@ -36,3 +36,18 @@ export async function update(id: string, input: AdminKeyInput) { return (await a
 export async function rotate(id: string) { return (await apiClient.post<{ key: string; item: AdminKey }>(`${base}/${encodeURIComponent(id)}/rotate`)).data }
 export async function revoke(id: string) { return (await apiClient.delete<{ message: string }>(`${base}/${encodeURIComponent(id)}`)).data }
 export async function deleteRecord(id: string) { return (await apiClient.delete<{ message: string }>(`${base}/${encodeURIComponent(id)}/record`)).data }
+
+const tutorialBase = `${base}/tutorials`
+export type TutorialAdminKey = Pick<AdminKey, 'id' | 'name' | 'key_prefix' | 'enabled' | 'expires_at' | 'last_used_at' | 'revoked_at'>
+
+export async function listTutorialKeys() {
+  return (await apiClient.get<{ items: TutorialAdminKey[] }>(tutorialBase)).data.items
+}
+
+export async function createTutorialKey(name: string, expiresAt: string | null) {
+  return (await apiClient.post<{ key: string; item: TutorialAdminKey }>(tutorialBase, { name, expires_at: expiresAt })).data
+}
+
+export async function revokeTutorialKey(id: string) {
+  await apiClient.delete(`${tutorialBase}/${encodeURIComponent(id)}`)
+}

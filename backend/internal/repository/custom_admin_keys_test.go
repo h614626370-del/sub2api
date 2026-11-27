@@ -21,8 +21,12 @@ func TestScopedAdminKeyRepositoryRotationAndRevocation(t *testing.T) {
 	ctx := context.Background()
 	mock.ExpectExec(`UPDATE scoped_admin_api_keys SET key_hash=\$2,updated_at=\$3 WHERE id=\$1 AND key_hash=\$4 AND revoked_at IS NULL`).WithArgs("id", "hash", now, "old-hash").WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.RotateScopedAdminKeyHash(ctx, "id", "old-hash", "hash", now))
-	mock.ExpectExec(`UPDATE scoped_admin_api_keys SET revoked_at=\$2,enabled=false,updated_at=\$2 WHERE id=\$1 AND revoked_at IS NULL`).WithArgs("id", now).WillReturnResult(sqlmock.NewResult(0, 0))
-	require.ErrorIs(t, repo.RevokeScopedAdminKey(ctx, "id", now), service.ErrScopedAdminKeyNotFound)
+	revokeSQL := `UPDATE scoped_admin_api_keys SET revoked_at=\$2,enabled=false,updated_at=\$2 WHERE id=\$1 AND revoked_at IS NULL AND \(\$3::timestamptz IS NULL OR updated_at=\$3\)`
+	mock.ExpectExec(revokeSQL).WithArgs("id", now, nil).WillReturnResult(sqlmock.NewResult(0, 0))
+	require.ErrorIs(t, repo.RevokeScopedAdminKey(ctx, "id", now, nil), service.ErrScopedAdminKeyNotFound)
+	previous := now.Add(-time.Minute)
+	mock.ExpectExec(revokeSQL).WithArgs("id", now, previous).WillReturnResult(sqlmock.NewResult(0, 0))
+	require.ErrorIs(t, repo.RevokeScopedAdminKey(ctx, "id", now, &previous), service.ErrScopedAdminKeyConflict)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

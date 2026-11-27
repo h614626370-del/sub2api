@@ -16,6 +16,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func ScopedAdminKeyTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return scopedAdminKeyTestDB(t)
+}
+
 // 只使用显式指定的隔离测试数据库，每次创建并清理独立 schema。
 func scopedAdminKeyTestDB(t *testing.T) *sql.DB {
 	t.Helper()
